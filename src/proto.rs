@@ -81,6 +81,8 @@ pub enum Cmd {
     AddLink(String),
     DeleteServer(u64),
     DeleteGroup(String),
+    /// Bring back a subscription server the user had removed.
+    UnhideServer(u64),
     SetFingerprint {
         id: u64,
         fp: Option<String>,

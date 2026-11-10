@@ -49,6 +49,10 @@ pub enum ConfirmKind {
     /// Disconnect and stop the background process.
     QuitAll,
     DeleteServer(u64),
+    /// Hide a subscription server (it stays hidden when the provider lists it again).
+    HideServer(u64),
+    /// Bring a hidden server back.
+    UnhideServer(u64),
     DeleteGroup(String),
     /// A question from the background process.
     Ask(Ask),
@@ -155,6 +159,8 @@ pub struct AppState {
     pub link: LinkState,
     /// Servers are listed by ping instead of in their own order.
     pub sorted_by_ping: bool,
+    /// Subscriptions whose hidden servers are shown (greyed) so they can be restored.
+    pub show_hidden: std::collections::HashSet<String>,
     pending_alerts: VecDeque<Alert>,
     /// After the next view the rules cursor goes to the last item (a rule was just added).
     cursor_to_end: bool,
@@ -194,6 +200,7 @@ impl AppState {
             settings_cursor: 0,
             link: LinkState::Connecting,
             sorted_by_ping: false,
+            show_hidden: std::collections::HashSet::new(),
             pending_alerts: VecDeque::new(),
             cursor_to_end: false,
             got_view: false,
@@ -346,7 +353,10 @@ impl AppState {
     /// Indexes of a group's servers in display order.
     fn order_of(&self, group: usize) -> Vec<usize> {
         let sub = &self.subs[group];
-        let mut order: Vec<usize> = (0..sub.servers.len()).collect();
+        let shown = self.show_hidden.contains(&sub.name);
+        let mut order: Vec<usize> = (0..sub.servers.len())
+            .filter(|&j| shown || !sub.servers[j].hidden)
+            .collect();
         if self.sorted_by_ping {
             order.sort_by_key(|&j| sub.servers[j].ping.sort_key());
         }
@@ -580,7 +590,15 @@ impl AppState {
         let on_rules = self.screen == Screen::Rules;
         let main_only = matches!(
             action,
-            Enter | Filter | PingAll | SortPing | UpdateSubs | Fingerprint | Role | Fragment
+            Enter
+                | Filter
+                | PingAll
+                | SortPing
+                | UpdateSubs
+                | Fingerprint
+                | ShowHidden
+                | Role
+                | Fragment
         ) || (matches!(action, Delete | Add) && !on_rules);
         if main_only && self.screen != Screen::Main {
             if action == Enter && self.screen == Screen::Settings {
@@ -655,6 +673,7 @@ impl AppState {
             Help => self.toggle_screen(Screen::Help),
             Filter => self.filtering = true,
             Fingerprint => self.open_fingerprint_menu(),
+            ShowHidden => self.toggle_hidden(),
             Role => self.open_role_menu(),
             Fragment => self.toggle_fragment(),
             Back => self.back(),
@@ -774,22 +793,81 @@ impl AppState {
 
     fn ask_delete(&mut self) {
         match self.selected_row() {
-            Some(Row::Server(..)) => {
-                if let Some(s) = self.selected_server() {
-                    self.popup = Some(Popup::Confirm {
-                        text: format!("Удалить сервер «{}»?", s.name),
-                        kind: ConfirmKind::DeleteServer(s.id),
-                    });
-                }
+            Some(Row::Server(gi, _)) => {
+                let Some(s) = self.selected_server() else {
+                    return;
+                };
+                let remote = self.subs[gi].is_remote;
+                let live =
+                    matches!(self.conn, Conn::Connected(c) | Conn::Connecting(c) if c == s.id);
+                let stop = if live {
+                    "\n\nСервер сейчас подключён: подключение будет остановлено."
+                } else {
+                    ""
+                };
+                let (text, kind) = if s.hidden {
+                    (
+                        format!("Вернуть сервер «{}» в подписку?", s.name),
+                        ConfirmKind::UnhideServer(s.id),
+                    )
+                } else if remote {
+                    (
+                        format!(
+                            "Скрыть сервер «{}»? Он не вернётся при обновлении подписки (вернуть: h на подписке, затем x на сервере).{stop}",
+                            s.name
+                        ),
+                        ConfirmKind::HideServer(s.id),
+                    )
+                } else {
+                    (
+                        format!("Удалить сервер «{}»?{stop}", s.name),
+                        ConfirmKind::DeleteServer(s.id),
+                    )
+                };
+                self.popup = Some(Popup::Confirm { text, kind });
             }
             Some(Row::Group(i)) => {
+                let g = &self.subs[i];
+                let live = matches!(self.conn, Conn::Connected(c) | Conn::Connecting(c) if g.servers.iter().any(|s| s.id == c));
                 self.popup = Some(Popup::Confirm {
-                    text: format!("Удалить «{}» со всеми серверами?", self.subs[i].name),
-                    kind: ConfirmKind::DeleteGroup(self.subs[i].name.clone()),
+                    text: format!(
+                        "Удалить «{}» со всеми серверами и скрытыми?{}",
+                        g.name,
+                        if live {
+                            "\n\nПодключение к её серверу будет остановлено."
+                        } else {
+                            ""
+                        }
+                    ),
+                    kind: ConfirmKind::DeleteGroup(g.name.clone()),
                 });
             }
             None => {}
         }
+    }
+
+    /// `h` on a subscription: show or hide the servers the user removed from it.
+    fn toggle_hidden(&mut self) {
+        let name = match self.selected_row() {
+            Some(Row::Group(i)) | Some(Row::Server(i, _)) => self.subs[i].name.clone(),
+            None => return,
+        };
+        let count = self
+            .subs
+            .iter()
+            .find(|g| g.name == name)
+            .map_or(0, |g| g.servers.iter().filter(|s| s.hidden).count());
+        if count == 0 {
+            self.status = Some("В этой подписке нет скрытых серверов".into());
+            return;
+        }
+        if !self.show_hidden.remove(&name) {
+            self.show_hidden.insert(name);
+            self.status = Some(format!(
+                "Скрытых серверов: {count}. x на скрытом возвращает его, h скрывает список"
+            ));
+        }
+        self.clamp_selection();
     }
 
     fn confirm(&mut self, kind: ConfirmKind) {
@@ -800,7 +878,10 @@ impl AppState {
                 self.should_quit = true;
             }
             ConfirmKind::Ask(ask) => self.send(Cmd::Answer { ask, yes: true }),
-            ConfirmKind::DeleteServer(id) => self.send(Cmd::DeleteServer(id)),
+            ConfirmKind::DeleteServer(id) | ConfirmKind::HideServer(id) => {
+                self.send(Cmd::DeleteServer(id))
+            }
+            ConfirmKind::UnhideServer(id) => self.send(Cmd::UnhideServer(id)),
             ConfirmKind::DeleteGroup(name) => self.send(Cmd::DeleteGroup(name)),
         }
         self.clamp_selection();

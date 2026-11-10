@@ -56,7 +56,7 @@ impl Engine {
             .subs
             .iter()
             .flat_map(|s| s.servers.iter())
-            .filter(|s| s.is_supported() && !s.link.is_empty())
+            .filter(|s| s.is_supported() && !s.link.is_empty() && !s.hidden)
             .cloned()
             .collect();
         if self.mock && manual {

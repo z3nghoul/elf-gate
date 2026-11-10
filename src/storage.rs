@@ -264,6 +264,14 @@ impl Default for PingConfig {
     }
 }
 
+/// A subscription server hidden by the user (`[[hidden]]`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HiddenServer {
+    pub group: String,
+    /// See `engine::hide_key`.
+    pub key: String,
+}
+
 /// `[device]`: how this installation introduces itself to subscription panels.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -308,6 +316,9 @@ pub struct Config {
     pub subscriptions: Vec<SubscriptionConfig>,
     pub servers: Vec<ServerEntry>,
     pub overrides: Vec<ServerOverride>,
+    /// Subscription servers the user removed: they stay out of the list when the provider sends
+    /// them again, and can be brought back.
+    pub hidden: Vec<HiddenServer>,
     pub rules: Vec<Rule>,
 }
 
