@@ -50,6 +50,11 @@ fn job() -> Result<&'static Job, PlatformError> {
 
 pub struct Guard;
 
+/// Nothing to report on Windows.
+pub fn restrictions() -> String {
+    String::new()
+}
+
 impl ChildGuard for Guard {
     fn prepare(&self, cmd: &mut tokio::process::Command) {
         cmd.creation_flags(CREATE_NO_WINDOW.0);
