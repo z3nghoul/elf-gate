@@ -120,6 +120,10 @@ impl TunHost for Host {
         None
     }
 
+    fn physical_interface(&self, _exclude: &str) -> Option<String> {
+        None
+    }
+
     fn rp_filter(&self) -> Option<RpFilter> {
         None
     }

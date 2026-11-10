@@ -137,8 +137,10 @@ pub struct Engine {
     failed_at: HashMap<String, Instant>,
     autostart_on: bool,
     caps_warned: bool,
-    /// The core lacks the capabilities for process detection: its "no process found" lines are hidden.
-    hide_process_errors: bool,
+    /// Connections whose owning process the core could not find (their complaints are not shown).
+    pub process_unresolved: u64,
+    /// Not yet written to the log file: (since, count).
+    process_unresolved_logged: (Instant, u64),
     /// Polls the core's traffic counters while it runs.
     stats_task: Option<tokio::task::JoinHandle<()>>,
     last_counters: Option<(crate::xray::stats::Counters, Instant)>,
@@ -164,6 +166,12 @@ impl Engine {
 
     /// `mock`: demo servers, fake pings and traffic (debug builds only, see `build_info`).
     pub(crate) fn build(tx: BgTx, config: Config, storage: Option<Storage>, mock: bool) -> Self {
+        // The device id exists from the first moment (the settings show it at once).
+        let mut config = config;
+        let hwid_created = config.device.hwid.is_empty();
+        if hwid_created {
+            config.device.hwid = crate::net::device::generate_hwid();
+        }
         let mut next_id = 0;
         let mut subs = if mock {
             mock::subscriptions(&mut next_id)
@@ -218,6 +226,7 @@ impl Engine {
             health: HealthState::Unknown,
             config: config.redacted(),
             traffic: Traffic::default(),
+            process_unresolved: 0,
             tray: false,
             autostart: false,
             mock,
@@ -255,7 +264,8 @@ impl Engine {
             failed_at: HashMap::new(),
             autostart_on: false,
             caps_warned: false,
-            hide_process_errors: false,
+            process_unresolved: 0,
+            process_unresolved_logged: (Instant::now(), 0),
             stats_task: None,
             last_counters: None,
             next_id,
@@ -266,8 +276,7 @@ impl Engine {
             #[cfg(test)]
             sent: Vec::new(),
         };
-        if engine.config.device.hwid.is_empty() {
-            engine.config.device.hwid = crate::net::device::generate_hwid();
+        if hwid_created {
             engine.save_config();
         }
         engine.log(
@@ -374,8 +383,15 @@ impl Engine {
     fn push_log(&mut self, line: LogLine) {
         // The core repeats the same complaint for every connection: show it once, count the
         // rest, and report the count when the burst ends (or every ten seconds).
-        if self.hide_process_errors && is_process_noise(&line.text) {
-            return;
+        // The core complains about every short connection whose process it cannot find: that is
+        // normal. They are counted (see the details) and not shown, unless the detailed core log
+        // is on (then they come back as they are).
+        if is_process_noise(&line.text) {
+            self.process_unresolved += 1;
+            self.process_unresolved_logged.1 += 1;
+            if !self.config.core.verbose_log {
+                return;
+            }
         }
         if line.text.starts_with("[xray") {
             let key = dedupe_key(&line.text);
@@ -402,6 +418,15 @@ impl Engine {
             }
         }
         self.emit_log(line);
+    }
+
+    /// At most once a minute the file log gets the count (never the lines themselves).
+    fn flush_process_noise(&mut self) {
+        let (since, n) = self.process_unresolved_logged;
+        if n > 0 && since.elapsed() >= Duration::from_secs(60) {
+            tracing::info!(target: "app", "не определён процесс у {n} соединений за последнюю минуту");
+            self.process_unresolved_logged = (Instant::now(), 0);
+        }
     }
 
     /// Reports the counts of finished bursts of repeated core lines.
@@ -489,6 +514,7 @@ impl Engine {
             health: self.health.clone(),
             config: self.config.redacted(),
             traffic: self.traffic.clone(),
+            process_unresolved: self.process_unresolved,
             tray: self.tray,
             autostart: self.autostart_on,
             mock: self.mock,
@@ -591,6 +617,7 @@ impl Engine {
     pub fn on_tick(&mut self) {
         self.poll_core();
         self.flush_repeats();
+        self.flush_process_noise();
         self.auto_update_tick();
         self.auto_ping_tick();
         if self.mock && matches!(self.conn, Conn::Connected(_)) {
@@ -1407,7 +1434,7 @@ mod noise_tests {
         let line = |n: u32| LogLine {
             time: "00:00:00".into(),
             level: Level::Error,
-            text: format!("[xray:err] [Error] app/router: no process found for inode {n}"),
+            text: format!("[xray:err] [Warning] proxy/vless/outbound: connection ends {n} > EOF"),
         };
         for n in 0..40 {
             e.on_bg(BgEvent::Log(line(n)));
@@ -1415,7 +1442,7 @@ mod noise_tests {
         let shown = e
             .sent
             .iter()
-            .filter(|u| matches!(u, Update::Log(l) if l.text.contains("no process found")))
+            .filter(|u| matches!(u, Update::Log(l) if l.text.contains("connection ends")))
             .count();
         assert_eq!(shown, 1, "39 repeats are suppressed");
         // After the window the count is reported.

@@ -6,6 +6,38 @@ use crate::net::ping;
 use crate::storage::PingMode;
 use crate::xray::process::resolve_binary;
 
+/// How servers are pinged right now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Method {
+    /// A plain TCP connect (no tunnel up).
+    Tcp,
+    /// A TCP connect bound to the physical interface (tunnel up).
+    TcpBound(String),
+    /// A request through a temporary core.
+    Url,
+}
+
+/// The one place that decides how to measure. With the tunnel up a plain TCP ping is never
+/// chosen: it would only measure the tunnel's own stack.
+pub fn choose_method(
+    configured: PingMode,
+    tun_up: bool,
+    physical: Option<String>,
+    can_bind: bool,
+) -> (Method, Option<&'static str>) {
+    match (configured, tun_up) {
+        (PingMode::Url, _) => (Method::Url, None),
+        (PingMode::Tcp, false) => (Method::Tcp, None),
+        (PingMode::Tcp, true) => match physical.filter(|_| can_bind) {
+            Some(iface) => (Method::TcpBound(iface), None),
+            None => (
+                Method::Url,
+                Some("В режиме TUN TCP-пинг мимо туннеля недоступен: пинг идёт через ядро (медленнее)"),
+            ),
+        },
+    }
+}
+
 impl Engine {
     pub(super) fn ping_all(&mut self) {
         self.last_auto_ping = Some(Instant::now());
@@ -77,14 +109,24 @@ impl Engine {
             }
             return;
         }
-        // A throw-away core cannot measure anything while the TUN is up: its connection to
-        // the server would enter the tunnel. TCP probes of elf-gate itself stay direct.
+        // While the TUN is up a plain TCP connect enters the tunnel and is answered locally by
+        // its stack (2-20 ms to anything): it must go around the tunnel or not be shown at all.
         let tun_up = self.tun_active && matches!(self.conn, Conn::Connected(_));
-        let mut mode = self.config.ping.mode;
-        if mode == PingMode::Url && tun_up {
-            mode = PingMode::Tcp;
-            self.status("В режиме TUN пинг по URL недоступен, измерен TCP-пинг");
+        let physical = tun_up
+            .then(|| self.tun_host.physical_interface(&self.config.tun.name))
+            .flatten();
+        let can_bind = physical
+            .as_deref()
+            .is_some_and(crate::platform::can_bind_interface);
+        let (method, note) = choose_method(self.config.ping.mode, tun_up, physical, can_bind);
+        if let Some(note) = note {
+            self.status(note);
         }
+        let (mode, bound) = match method {
+            Method::Tcp => (PingMode::Tcp, None),
+            Method::TcpBound(iface) => (PingMode::Tcp, Some(iface)),
+            Method::Url => (PingMode::Url, None),
+        };
         let binary = if mode == PingMode::Url {
             match resolve_binary(&self.config.core.xray_path) {
                 Ok(b) => Some(b),
@@ -106,6 +148,7 @@ impl Engine {
             let cfg = self.config.ping.clone();
             let run_dir = self.run_dir.clone();
             let binary = binary.clone();
+            let bound = bound.clone();
             tokio::spawn(async move {
                 let kind = if binary.is_some() {
                     PingKind::Tunnel
@@ -115,7 +158,8 @@ impl Engine {
                 let (result, suspect) = match binary {
                     Some(bin) => ping::url_ping(&bin, &core, &server, &cfg, &run_dir).await,
                     None => (
-                        ping::tcp_ping(&server.address, server.port, limit).await,
+                        ping::tcp_ping_via(&server.address, server.port, limit, bound.as_deref())
+                            .await,
                         false,
                     ),
                 };
@@ -427,5 +471,73 @@ mod tests {
         let again = a.last_auto_ping;
         a.auto_ping_tick();
         assert_eq!(a.last_auto_ping, again, "not due yet");
+    }
+
+    #[test]
+    fn with_the_tunnel_up_a_plain_tcp_ping_is_never_chosen() {
+        use crate::storage::PingMode::{Tcp, Url};
+        // Every combination: whatever the inputs, tun_up never yields a plain connect.
+        for mode in [Tcp, Url] {
+            for physical in [None, Some("eth0".to_string())] {
+                for can_bind in [false, true] {
+                    let (m, _) = choose_method(mode, true, physical.clone(), can_bind);
+                    assert_ne!(m, Method::Tcp, "{mode:?} {physical:?} {can_bind}");
+                }
+            }
+        }
+        // Around the tunnel when that is possible, through the core when it is not.
+        assert_eq!(
+            choose_method(Tcp, true, Some("eth0".into()), true).0,
+            Method::TcpBound("eth0".into())
+        );
+        let (m, note) = choose_method(Tcp, true, Some("eth0".into()), false);
+        assert_eq!(m, Method::Url);
+        assert!(note.unwrap().contains("TUN"));
+        assert_eq!(choose_method(Tcp, true, None, true).0, Method::Url);
+        // No tunnel: as configured.
+        assert_eq!(choose_method(Tcp, false, None, false).0, Method::Tcp);
+        assert_eq!(choose_method(Url, false, None, false).0, Method::Url);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_ping_bound_to_an_interface_goes_through_that_interface_or_says_unknown() {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            loop {
+                let _ = l.accept().await;
+            }
+        });
+        let limit = Duration::from_secs(2);
+        // Bound to the loopback interface the local listener is reachable (when the kernel lets
+        // an unprivileged process bind: otherwise the honest answer is "unknown", not a number).
+        match ping::tcp_ping_via("127.0.0.1", port, limit, Some("lo")).await {
+            Ping::Ms(_) | Ping::Unknown => {}
+            other => panic!("{other:?}"),
+        }
+        // Bound to an interface that does not exist: never a measurement.
+        let bad = ping::tcp_ping_via("127.0.0.1", port, limit, Some("nope0")).await;
+        assert!(!matches!(bad, Ping::Ms(_)), "{bad:?}");
+    }
+
+    #[tokio::test]
+    async fn the_unresolved_process_count_reaches_the_view_and_resets_on_connect() {
+        let (tx, _rx) = unbounded_channel();
+        let mut a = Engine::build(tx, Config::default(), None, false);
+        a.process_unresolved = 12;
+        assert_eq!(a.view().process_unresolved, 12);
+    }
+
+    #[tokio::test]
+    async fn the_device_id_exists_from_the_first_view() {
+        let (tx, _rx) = unbounded_channel();
+        let a = Engine::build(tx, Config::default(), None, false);
+        assert_eq!(a.view().config.device.hwid.len(), 16);
+        assert_eq!(
+            a.hub().subscribe().view.borrow().config.device.hwid.len(),
+            16,
+            "even the first snapshot"
+        );
     }
 }

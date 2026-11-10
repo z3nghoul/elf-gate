@@ -161,6 +161,9 @@ pub struct View {
     /// Without server links and subscription URLs, see [`Config::redacted`].
     pub config: Config,
     pub traffic: Traffic,
+    /// Connections whose process the core could not find (counted instead of shown in the log).
+    #[serde(default)]
+    pub process_unresolved: u64,
     /// The tray icon exists (the interface can say so in the settings).
     pub tray: bool,
     /// Autostart is switched on in the OS.
@@ -261,6 +264,7 @@ mod tests {
             health: HealthState::Unknown,
             config: config.redacted(),
             traffic: Traffic::default(),
+            process_unresolved: 0,
             tray: false,
             autostart: false,
             mock: false,

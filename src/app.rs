@@ -135,6 +135,8 @@ pub struct AppState {
     pub health: HealthState,
     pub config: Config,
     pub traffic: Traffic,
+    /// Connections whose process the core could not find (counted, not logged).
+    pub process_unresolved: u64,
     pub tray: bool,
     pub autostart: bool,
     /// Demo data and fake numbers are enabled (debug builds with `ELF_GATE_DEMO=1`).
@@ -181,6 +183,7 @@ impl AppState {
             health: HealthState::Unknown,
             config: Config::default(),
             traffic: Traffic::default(),
+            process_unresolved: 0,
             tray: false,
             autostart: false,
             mock: false,
@@ -230,6 +233,7 @@ impl AppState {
             health: HealthState::Unknown,
             config: Config::default(),
             traffic: Traffic::default(),
+            process_unresolved: 0,
             tray: false,
             autostart: false,
             mock: true,
@@ -289,6 +293,7 @@ impl AppState {
             health,
             config,
             traffic,
+            process_unresolved,
             tray,
             autostart,
             mock,
@@ -312,6 +317,7 @@ impl AppState {
         self.health = health;
         self.config = config;
         self.traffic = traffic;
+        self.process_unresolved = process_unresolved;
         self.tray = tray;
         self.autostart = autostart;
         self.mock = mock;
