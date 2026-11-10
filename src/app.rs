@@ -673,6 +673,7 @@ impl AppState {
             Help => self.toggle_screen(Screen::Help),
             Filter => self.filtering = true,
             Fingerprint => self.open_fingerprint_menu(),
+            Privacy => self.toggle_privacy(),
             ShowHidden => self.toggle_hidden(),
             Role => self.open_role_menu(),
             Fragment => self.toggle_fragment(),
@@ -682,6 +683,60 @@ impl AppState {
             #[cfg(debug_assertions)]
             DebugPanic => panic!("debug panic requested with F12"),
         }
+    }
+
+    // ---------- privacy mode ----------
+
+    pub fn privacy(&self) -> bool {
+        self.config.ui.privacy_mode
+    }
+
+    /// Text for the screen: hidden addresses, ids, keys and URLs while privacy mode is on.
+    pub fn mask(&self, text: &str) -> String {
+        if self.privacy() {
+            crate::redact::text(text, crate::redact::Mode::Full)
+        } else {
+            text.to_string()
+        }
+    }
+
+    /// A server as the screen may show it.
+    pub fn shown(&self, s: &Server) -> Server {
+        if self.privacy() {
+            crate::redact::server(s)
+        } else {
+            s.clone()
+        }
+    }
+
+    /// A rule's value for the screen: a rule that names a server's own address is hidden too.
+    pub fn rule_value(&self, r: &Rule) -> String {
+        if self.privacy()
+            && matches!(r.kind, RuleKind::Ip | RuleKind::Domain)
+            && self
+                .subs
+                .iter()
+                .flat_map(|g| g.servers.iter())
+                .any(|s| s.address == r.value || r.value.starts_with(&format!("{}/", s.address)))
+        {
+            return crate::redact::host(&r.value);
+        }
+        r.value.clone()
+    }
+
+    fn toggle_privacy(&mut self) {
+        let next = !self.privacy();
+        // At once, without waiting for the answer: a screenshot must not catch the old state.
+        self.config.ui.privacy_mode = next;
+        self.status = Some(
+            if next {
+                "Режим приватности включён: адреса, ключи и ссылки скрыты на экране (файлы и конфиг не меняются)"
+            } else {
+                "Режим приватности выключен"
+            }
+            .into(),
+        );
+        self.send(Cmd::Set(crate::proto::Setting::PrivacyMode(next)));
     }
 
     fn toggle_screen(&mut self, s: Screen) {

@@ -12,10 +12,15 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     let rows = app.settings_rows();
     let items: Vec<ListItem> = rows
         .iter()
-        .map(|(_, label, value)| {
+        .map(|(id, label, value)| {
+            let value = if app.privacy() && *id == crate::app::SettingId::Hwid {
+                crate::redact::hwid(value)
+            } else {
+                app.mask(value)
+            };
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{label:<34}"), th.text()),
-                Span::styled(value.clone(), th.title()),
+                Span::styled(value, th.title()),
             ]))
         })
         .collect();

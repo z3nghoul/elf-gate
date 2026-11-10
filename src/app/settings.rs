@@ -25,6 +25,7 @@ pub enum SettingId {
     Autostart,
     Hwid,
     Theme,
+    Privacy,
     SubUa(String),
     SubHours(String),
 }
@@ -134,6 +135,11 @@ impl AppState {
                 "HWID этого устройства".into(),
                 c.device.hwid.clone(),
             ),
+            (
+                SettingId::Privacy,
+                "Режим приватности (Ctrl+P)".into(),
+                onoff(c.ui.privacy_mode),
+            ),
             (SettingId::Theme, "Тема".into(), c.ui.theme.clone()),
         ];
         for s in &c.subscriptions {
@@ -178,10 +184,11 @@ impl AppState {
                 PingMode::Tcp => PingMode::Url,
                 PingMode::Url => PingMode::Tcp,
             }),
+            SettingId::Privacy => Setting::PrivacyMode(!c.ui.privacy_mode),
             SettingId::Hwid => {
                 self.popup = Some(Popup::Notice(format!(
                     "HWID: {}\n\nЭто идентификатор устройства для панели подписок (заголовок x-hwid). Каждая подписка, которую вы загрузили с ним, занимает один слот устройств у провайдера; он одинаков при каждом запуске и для всех подписок. Менять его не нужно.",
-                    c.device.hwid
+                    if c.ui.privacy_mode { crate::redact::hwid(&c.device.hwid) } else { c.device.hwid.clone() }
                 )));
                 return;
             }

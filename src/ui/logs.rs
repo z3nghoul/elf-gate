@@ -33,7 +33,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
             };
             Line::from(vec![
                 Span::styled(format!("{} ", l.time), th.muted()),
-                Span::styled(l.text.clone(), style),
+                Span::styled(app.mask(&l.text), style),
             ])
         })
         .collect();

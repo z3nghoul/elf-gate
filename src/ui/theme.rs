@@ -46,6 +46,14 @@ impl Theme {
         }
     }
 
+    /// The "PRIVACY" badge: loud on purpose, so a screenshot cannot miss that it is on.
+    pub fn privacy_badge(&self) -> Style {
+        Style::default()
+            .fg(Color::Black)
+            .bg(self.warn)
+            .add_modifier(Modifier::BOLD)
+    }
+
     pub fn text(&self) -> Style {
         Style::default().fg(self.fg)
     }

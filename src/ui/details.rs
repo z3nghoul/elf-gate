@@ -140,7 +140,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     let focused = app.screen == Screen::Main && app.focus == Focus::Details;
     let lines = match app.selected_row() {
         Some(Row::Server(i, j)) => {
-            let mut l = server_lines(&app.subs[i].servers[j], th);
+            let mut l = server_lines(&app.shown(&app.subs[i].servers[j]), th);
             if app.conn == crate::app::Conn::Connected(app.subs[i].servers[j].id) {
                 match &app.health {
                     crate::app::HealthState::Checking => {
@@ -157,7 +157,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                     }
                     crate::app::HealthState::Failed(e) => {
                         l.push(Line::from(Span::styled(
-                            format!("Проверка не прошла: {e}"),
+                            app.mask(&format!("Проверка не прошла: {e}")),
                             th.bad(),
                         )));
                     }

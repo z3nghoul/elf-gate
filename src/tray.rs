@@ -66,6 +66,12 @@ pub fn model_from_view(v: &View) -> TrayModel {
         ),
         Conn::Error(e) => (IconState::Error, format!("elf-gate: ошибка, {e}"), None),
     };
+    // Privacy mode covers the tray too (its title can carry an error text with an address).
+    let title = if v.config.ui.privacy_mode {
+        crate::redact::text(&title, crate::redact::Mode::Full)
+    } else {
+        title
+    };
     TrayModel {
         state,
         title,

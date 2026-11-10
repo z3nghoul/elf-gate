@@ -84,7 +84,11 @@ pub async fn fetch(
         })
         .build()
         .map_err(|e| format!("не удалось создать HTTP-клиент: {e}"))?;
-    let resp = client.get(url).send().await.map_err(describe)?;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| describe(e.without_url()))?;
     if !resp.status().is_success() {
         return Err(format!("сервер подписки ответил {}", resp.status()));
     }
@@ -99,7 +103,7 @@ pub async fn fetch(
     if resp.content_length().is_some_and(|n| n as usize > MAX_BODY) {
         return Err("ответ слишком большой для подписки".into());
     }
-    let bytes = resp.bytes().await.map_err(describe)?;
+    let bytes = resp.bytes().await.map_err(|e| describe(e.without_url()))?;
     if bytes.len() > MAX_BODY {
         return Err("ответ слишком большой для подписки".into());
     }
@@ -208,6 +212,24 @@ mod tests {
         assert_eq!(f.body, "hello");
         assert_eq!(f.info.unwrap().total, 9);
         assert_eq!(f.title.as_deref(), Some("T"));
+    }
+
+    #[tokio::test]
+    async fn errors_never_quote_the_subscription_url_with_its_token() {
+        let dead = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = dead.local_addr().unwrap().port();
+        drop(dead);
+        let err = fetch(
+            &format!("http://127.0.0.1:{port}/sub/SECRETTOKEN123"),
+            "",
+            &dev(),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            !err.contains("SECRETTOKEN") && !err.contains("127.0.0.1"),
+            "{err}"
+        );
     }
 
     #[tokio::test]

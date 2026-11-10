@@ -189,7 +189,7 @@ impl Engine {
                     server.id = next_id;
                     manual.push(server);
                 }
-                Err(e) => load_errors.push(format!("{}: {e}", entry.link)),
+                Err(e) => load_errors.push(format!("{}: {e}", crate::redact::url(&entry.link))),
             }
         }
         if !manual.is_empty() {
@@ -362,7 +362,8 @@ impl Engine {
         let text = text.into();
         // Application lines (never the core's traffic log) also go to the log file,
         // so a tester can attach it to a bug report.
-        tracing::info!(target: "app", "{text}");
+        // Never a link, a URL, a user id or a key in the file, whatever the mode.
+        tracing::info!(target: "app", "{}", crate::redact::secrets(&text));
         self.push_log(LogLine {
             time: now_hms(),
             level,
@@ -1227,6 +1228,7 @@ impl Engine {
             }
             TunnelDns(v) => self.config.tun.tunnel_dns = v,
             AutoConnect(v) => self.config.ui.auto_connect = v,
+            PrivacyMode(v) => self.config.ui.privacy_mode = v,
             Theme(v) => {
                 if v != "dark" && v != "light" {
                     return;
@@ -1356,6 +1358,32 @@ pub fn mode_name(m: Mode) -> &'static str {
     match m {
         Mode::Proxy => "PROXY",
         Mode::Tun => "TUN",
+    }
+}
+
+#[cfg(test)]
+mod hygiene_tests {
+    use super::*;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    #[tokio::test]
+    async fn a_saved_link_that_fails_to_load_is_never_written_to_the_log() {
+        let mut config = Config::default();
+        config.servers.push(ServerEntry {
+            link: "vless://b831381d-6324-4d53-ad4f-8cda48b30811@:443?pbk=4GObrWHDR0TyD84iQ06z24v4YBxQ69vxeG1MCqOyFlI#x".into(),
+        });
+        let (tx, _rx) = unbounded_channel();
+        let e = Engine::build(tx, config, None, false);
+        assert!(e.logged("skipped saved server"));
+        for u in &e.sent {
+            if let Update::Log(l) = u {
+                assert!(
+                    !l.text.contains("b831381d") && !l.text.contains("4GObrWHD"),
+                    "{}",
+                    l.text
+                );
+            }
+        }
     }
 }
 

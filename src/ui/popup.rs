@@ -27,6 +27,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         } => {
             let mut lines: Vec<Line> = options
                 .iter()
+                .map(|o| app.mask(o))
                 .enumerate()
                 .map(|(i, o)| {
                     if i == *selected {
@@ -41,12 +42,25 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 "j/k - выбор, Enter - применить, Esc - отмена",
                 th.muted(),
             )));
-            (title.clone(), lines, th.border(true))
+            (app.mask(title), lines, th.border(true))
         }
-        Popup::Input { title, buf, .. } => (
-            title.clone(),
+        Popup::Input {
+            title,
+            buf,
+            purpose,
+        } => (
+            app.mask(title),
             vec![
-                Line::from(Span::styled(format!("{buf}_"), th.text())),
+                Line::from(Span::styled(
+                    // A link or a subscription URL is typed like a password in privacy mode:
+                    // the length shows, the content does not (pasting still works).
+                    if app.privacy() && *purpose == crate::app::InputPurpose::Link {
+                        format!("{}_", "•".repeat(buf.chars().count()))
+                    } else {
+                        format!("{buf}_")
+                    },
+                    th.text(),
+                )),
                 Line::default(),
                 Line::from(Span::styled("Enter - добавить, Esc - отмена", th.muted())),
             ],
@@ -55,7 +69,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         Popup::Confirm { text, .. } => (
             "Подтверждение".to_string(),
             vec![
-                Line::from(Span::styled(text.clone(), th.text())),
+                Line::from(Span::styled(app.mask(text), th.text())),
                 Line::default(),
                 Line::from(Span::styled("y / Enter - да, n / Esc - нет", th.muted())),
             ],
@@ -64,7 +78,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         Popup::Notice(msg) => {
             let mut lines: Vec<Line> = msg
                 .lines()
-                .map(|l| Line::from(Span::styled(l.to_string(), th.warn())))
+                .map(|l| Line::from(Span::styled(app.mask(l), th.warn())))
                 .collect();
             lines.push(Line::default());
             lines.push(Line::from(Span::styled(
@@ -76,7 +90,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         Popup::Error(msg) => {
             let mut lines: Vec<Line> = msg
                 .lines()
-                .map(|l| Line::from(Span::styled(l.to_string(), th.bad())))
+                .map(|l| Line::from(Span::styled(app.mask(l), th.bad())))
                 .collect();
             lines.push(Line::default());
             lines.push(Line::from(Span::styled(

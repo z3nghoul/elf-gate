@@ -24,6 +24,8 @@ pub enum Action {
     Logs,
     Filter,
     Fingerprint,
+    /// Privacy mode: hide addresses, ids, keys and URLs on the screen.
+    Privacy,
     /// Show or hide the servers the user removed from the selected subscription.
     ShowHidden,
     /// Choose the server's role in the primary + backup scheme.
@@ -315,6 +317,17 @@ pub const BINDINGS: &[Binding] = &[
         short: "фильтр",
         prio: 6,
         scopes: scope::MAIN,
+    },
+    Binding {
+        label: "Ctrl+P",
+        desc: "режим приватности (скрыть адреса, ключи и ссылки на экране)",
+        action: Action::Privacy,
+        keys: &[(KeyCode::Char('p'), C)],
+        hidden: false,
+        bar: "Ctrl+P",
+        short: "приватность",
+        prio: 4,
+        scopes: scope::ALL,
     },
     Binding {
         label: "f",
