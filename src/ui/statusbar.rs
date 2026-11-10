@@ -114,8 +114,6 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         spans.push(sep.clone());
         spans.push(Span::styled(msg.clone(), th.warn()));
     }
-    spans.push(sep);
-    spans.push(Span::styled("? помощь", th.muted()));
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 

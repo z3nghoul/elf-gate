@@ -7,7 +7,7 @@ const REALITY: &str =
     "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R1";
 
 pub(crate) fn view_with(links: &[&str]) -> View {
-    let servers = links
+    let servers: Vec<crate::model::server::Server> = links
         .iter()
         .enumerate()
         .map(|(i, l)| {
@@ -16,15 +16,20 @@ pub(crate) fn view_with(links: &[&str]) -> View {
             s
         })
         .collect();
-    View {
-        groups: vec![Subscription {
+    let groups = if servers.is_empty() {
+        Vec::new()
+    } else {
+        vec![Subscription {
             name: MANUAL_GROUP.into(),
             servers,
             collapsed: false,
             info: None,
             updated: None,
             is_remote: false,
-        }],
+        }]
+    };
+    View {
+        groups,
         conn: Conn::Disconnected,
         mode: Mode::Proxy,
         conn_mode: Mode::Proxy,
