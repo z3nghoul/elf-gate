@@ -76,8 +76,8 @@ fn segments(app: &AppState, th: &Theme) -> Vec<Segment> {
                 "status.connecting",
                 name = app
                     .server_by_id(*id)
-                    .map(|s| s.name.as_str())
-                    .unwrap_or("?")
+                    .map(|s| app.server_title(s))
+                    .unwrap_or_else(|| "?".into())
             ),
         ),
         Conn::Connected(id) => (
@@ -86,8 +86,8 @@ fn segments(app: &AppState, th: &Theme) -> Vec<Segment> {
                 "status.connected",
                 name = app
                     .server_by_id(*id)
-                    .map(|s| s.name.as_str())
-                    .unwrap_or("?")
+                    .map(|s| app.server_title(s))
+                    .unwrap_or_else(|| "?".into())
             ),
         ),
         Conn::Error(e) => (th.bad(), app.mask(&crate::t!("status.error", error = e))),

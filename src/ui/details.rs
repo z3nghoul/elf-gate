@@ -42,7 +42,11 @@ fn opt<'a>(lines: &mut Vec<Line<'a>>, label: &str, value: &str, th: &Theme) {
 }
 
 fn server_lines<'a>(s: &Server, connected: bool, th: &Theme) -> Vec<Line<'a>> {
-    let mut lines = vec![field(&crate::t!("detail.name"), s.name.clone(), th)];
+    let mut lines = vec![field(
+        &crate::t!("detail.name"),
+        crate::ui::text::display_name_or(&s.name, || s.host_port()),
+        th,
+    )];
     if let Some(reason) = &s.unsupported {
         lines.push(Line::from(Span::styled(reason.clone(), th.warn())));
         opt(&mut lines, &crate::t!("detail.link"), &s.link, th);
@@ -206,7 +210,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         Some(Row::Group(i)) => {
             let sub = &app.subs[i];
             let mut l = vec![
-                field(&crate::t!("detail.sub"), sub.name.clone(), th),
+                field(&crate::t!("detail.sub"), app.group_title(&sub.name), th),
                 field(
                     &crate::t!("detail.servers"),
                     sub.servers.len().to_string(),

@@ -640,6 +640,8 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "tray-icon",
+ "unicode-segmentation",
+ "unicode-width",
  "url",
  "windows",
 ]

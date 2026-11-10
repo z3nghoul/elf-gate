@@ -411,3 +411,58 @@ fn the_status_line_wraps_into_rows_instead_of_being_cut() {
     let frame = draw(60, 30, &mut a);
     assert!(frame.contains("message"), "{frame}");
 }
+
+#[test]
+fn names_with_emoji_keep_the_list_and_the_frame_aligned() {
+    use crate::model::server::Ping;
+    let names = [
+        "\u{1F1E9}\u{1F1EA}\u{26A1}\u{FE0F} #5 LTE \u{2014} \u{423}\u{43d}\u{438}\u{432}\u{435}\u{440}\u{441}\u{430}\u{43b}\u{44c}\u{43d}\u{44b}\u{439}",
+        "\u{1F1FB}\u{1F1F3}\u{1F51E}\u{1F353} Auto | very long name \u{26A1}\u{26A1}\u{26A1}",
+        "\u{2B07}\u{FE0F} Plain \u{2B07}\u{FE0F}",
+        "\u{1F525}\u{1F525}",
+    ];
+    let links: Vec<String> = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            format!(
+                "vless://u@h{i}.example.com:443?security=tls&sni=x.org#{}",
+                n
+            )
+        })
+        .collect();
+    let refs: Vec<&str> = links.iter().map(String::as_str).collect();
+    let mut a = remote(app(&refs));
+    for (i, s) in a.subs[0].servers.iter_mut().enumerate() {
+        s.ping = Ping::Ms(30 + 17 * i as u32);
+    }
+    a.subs[0].servers[0].name = names[0].to_string();
+    a.subs[0].servers[3].name = names[3].to_string();
+    let frame = draw(100, 30, &mut a);
+    // No emoji or joiner reaches the screen; the flag became its country code.
+    for c in frame.chars() {
+        assert!(
+            !('\u{1F000}'..='\u{1FAFF}').contains(&c)
+                && !matches!(c, '\u{26A1}' | '\u{FE0F}' | '\u{2B07}'),
+            "{c:?} in\n{frame}"
+        );
+    }
+    assert!(frame.contains("DE #5 LTE"), "{frame}");
+    // The all-emoji name falls back to the address.
+    assert!(frame.contains("h3.example.co\u{2026}"), "{frame}");
+    // Every row has the same width and the latency column starts at one place.
+    let lines: Vec<&str> = frame.lines().collect();
+    let width = lines[0].chars().count();
+    assert!(lines.iter().all(|l| l.chars().count() == width), "{frame}");
+    let cols: Vec<usize> = lines
+        .iter()
+        .map(|l| l.chars().take(44).collect::<String>())
+        .filter(|l| l.contains(" ms"))
+        .map(|l| l.split(" ms").next().unwrap_or("").chars().count())
+        .collect();
+    assert!(
+        cols.len() >= 4 && cols.windows(2).all(|w| w[0] == w[1]),
+        "{cols:?}\n{frame}"
+    );
+    insta::assert_snapshot!("emoji_names_list", frame);
+}

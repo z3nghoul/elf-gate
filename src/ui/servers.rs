@@ -56,7 +56,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
         .map(|row| match *row {
             Row::Group(i) => {
                 let sub = &app.subs[i];
-                let arrow = if sub.collapsed { "▶" } else { "▼" };
+                let arrow = if sub.collapsed { "►" } else { "▼" };
                 ListItem::new(Line::from(Span::styled(
                     {
                         let hidden = sub.servers.iter().filter(|s| s.hidden).count();
@@ -65,12 +65,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                             crate::t!(
                                 "servers.group_hidden",
                                 arrow = arrow,
-                                name = sub.name,
+                                name = app.group_title(&sub.name),
                                 shown = shown,
                                 hidden = hidden
                             )
                         } else {
-                            format!("{arrow} {} ({shown})", sub.name)
+                            format!("{arrow} {} ({shown})", app.group_title(&sub.name))
                         }
                     },
                     th.title(),
@@ -92,14 +92,17 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                 if s.hidden {
                     return ListItem::new(Line::from(vec![
                         Span::styled("  ", th.muted()),
-                        Span::styled(crate::t!("servers.hidden_row", name = s.name), th.muted()),
+                        Span::styled(
+                            crate::t!("servers.hidden_row", name = app.server_title(s)),
+                            th.muted(),
+                        ),
                     ]));
                 }
                 if s.info_only {
                     // A title or a notice from the provider: shown, never selectable as a server.
                     return ListItem::new(Line::from(vec![
                         Span::styled("  ", th.muted()),
-                        Span::styled(s.name.clone(), th.muted()),
+                        Span::styled(app.server_title(s), th.muted()),
                     ]));
                 }
                 let (name_style, ping_text, ping_style) = if s.is_supported() {
@@ -113,7 +116,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                 } else {
                     String::new()
                 };
-                let name: String = s.name.chars().take(14).collect();
+                let title = app.server_title(s);
                 if matches!(app.conn, Conn::Connected(id) if id == s.id) && s.is_supported() {
                     // The connected server always shows the same two numbers, in the same
                     // format: the way to it (tcp) and through the tunnel (vpn). They never swap.
@@ -126,14 +129,14 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                     };
                     return ListItem::new(Line::from(vec![
                         Span::styled(marker, th.good()),
-                        Span::styled(format!("{name:<14}"), name_style),
+                        Span::styled(crate::ui::text::fit(&title, 14), name_style),
                         Span::styled(format!("{tag:<8}"), th.warn()),
                         Span::styled(format!(" {}", active_ping_text(s, room)), style),
                     ]));
                 }
                 ListItem::new(Line::from(vec![
                     Span::styled(marker, th.good()),
-                    Span::styled(format!("{name:<14}"), name_style),
+                    Span::styled(crate::ui::text::fit(&title, 14), name_style),
                     Span::styled(format!("{tag:<8}"), th.warn()),
                     Span::styled(format!("{ping_text:>8}"), ping_style),
                     Span::styled(

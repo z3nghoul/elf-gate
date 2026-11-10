@@ -154,12 +154,12 @@ impl AppState {
         for s in &c.subscriptions {
             rows.push((
                 SettingId::SubUa(s.name.clone()),
-                format!("«{}»: User-Agent", s.name),
+                format!("«{}»: User-Agent", self.group_title(&s.name)),
                 s.user_agent.clone(),
             ));
             rows.push((
                 SettingId::SubHours(s.name.clone()),
-                crate::t!("setting.sub_hours", name = s.name),
+                crate::t!("setting.sub_hours", name = self.group_title(&s.name)),
                 s.auto_update_hours.to_string(),
             ));
         }

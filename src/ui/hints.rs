@@ -285,7 +285,8 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
             | Action::FocusPrev
             | Action::Quit
             | Action::QuitAll
-            | Action::Help => None,
+            | Action::Help
+            | Action::Redraw => None,
             #[cfg(debug_assertions)]
             Action::DebugPanic => None,
         };

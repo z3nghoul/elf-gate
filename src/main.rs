@@ -70,6 +70,9 @@ async fn run(terminal: &mut Term, tun_from_cli: bool) -> Result<()> {
     ));
 
     while !app.should_quit {
+        if app.take_redraw() {
+            terminal.clear()?;
+        }
         terminal.draw(|f| ui::render(f, &mut app))?;
         match events.next().await {
             Some(ev) => app.handle_event(ev),

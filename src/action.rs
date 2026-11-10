@@ -42,6 +42,8 @@ pub enum Action {
     FocusPrev,
     #[cfg(debug_assertions)]
     DebugPanic,
+    /// Ctrl+L: clear and redraw the whole screen (after the terminal garbled it).
+    Redraw,
 }
 
 /// Where a binding applies (the key bar shows only what works on the current screen).
@@ -371,6 +373,16 @@ pub const BINDINGS: &[Binding] = &[
         bar: "Esc",
         prio: 1,
         scopes: scope::RULES | scope::SETTINGS | scope::LOGS | scope::HELP,
+    },
+    Binding {
+        label: "Ctrl+L",
+        action: Action::Redraw,
+        keys: &[(KeyCode::Char('l'), C)],
+        hidden: false,
+        bar: "Ctrl+L",
+        prio: 9,
+        // Only in the help screen: the bar has no room for a key needed once in a blue moon.
+        scopes: 0,
     },
     #[cfg(debug_assertions)]
     Binding {
