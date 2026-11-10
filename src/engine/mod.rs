@@ -1153,6 +1153,13 @@ pub(crate) fn apply_overrides(config: &Config, group: &str, server: &mut Server)
     server.role = found.and_then(|o| o.role);
 }
 
+pub fn mode_name(m: Mode) -> &'static str {
+    match m {
+        Mode::Proxy => "PROXY",
+        Mode::Tun => "TUN",
+    }
+}
+
 #[cfg(test)]
 mod settings_tests {
     use super::*;
@@ -1178,12 +1185,5 @@ mod settings_tests {
         assert_eq!(saved.ui.theme, "light");
         assert_eq!(saved.ping.auto_interval_secs, 0);
         let _ = std::fs::remove_dir_all(dir);
-    }
-}
-
-pub fn mode_name(m: Mode) -> &'static str {
-    match m {
-        Mode::Proxy => "PROXY",
-        Mode::Tun => "TUN",
     }
 }
