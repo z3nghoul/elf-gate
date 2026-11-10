@@ -142,6 +142,9 @@ fn proxy_outbound(s: &Server, address_override: Option<&str>) -> Value {
     })
 }
 
+/// Process names of elf-gate itself (the TUI and the background part).
+const SELF_PROCESSES: [&str; 2] = ["elf-gate", "elf-gated"];
+
 /// What differs between the plain proxy config and a TUN config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TunPlan {
@@ -315,6 +318,11 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
         "domain": [format!("full:{}", crate::net::health::HEALTH_HOST)],
         "outboundTag": "proxy",
     }));
+    // elf-gate's own traffic (subscription downloads) must not enter the tunnel in any routing
+    // mode: a subscription host may be blocked, and the tunnel may be down while we update.
+    if plan.tun.is_some() {
+        rules.push(json!({ "type": "field", "process": SELF_PROCESSES, "outboundTag": "direct" }));
+    }
     if plan.rules.block_udp443 {
         rules.push(
             json!({ "type": "field", "network": "udp", "port": "443", "outboundTag": "block" }),
@@ -615,6 +623,38 @@ mod tests {
         assert_eq!(tun["settings"]["desc"], "elf-gate");
     }
 
+    /// A `process` rule that is not the built-in "elf-gate itself goes direct" one.
+    fn user_process_rule(r: &Value) -> bool {
+        r.get("process")
+            .and_then(Value::as_array)
+            .is_some_and(|p| !p.contains(&json!("elf-gate")))
+    }
+
+    #[test]
+    fn elf_gates_own_traffic_stays_outside_the_tunnel_in_every_mode() {
+        for mode in [RoutingMode::Exclude, RoutingMode::Include] {
+            let cfg = build_with(
+                &server(),
+                &CoreConfig::default(),
+                &plan_for(mode, &["local-direct"], &[], true),
+            )
+            .unwrap();
+            let own = cfg["routing"]["rules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["process"] == json!(["elf-gate", "elf-gated"]))
+                .expect("self rule");
+            assert_eq!(own["outboundTag"], "direct");
+        }
+        let plain = build(&server(), &CoreConfig::default()).unwrap();
+        assert!(plain["routing"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r.get("process").is_none()));
+    }
+
     #[test]
     fn process_rules_apply_in_tun_mode_only() {
         let rules = [Rule::new(RuleKind::Process, "Discord")];
@@ -629,7 +669,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|r| r.get("process").is_some())
+                .any(user_process_rule)
         };
         assert!(has_process_rule(true, RoutingMode::Include));
         assert!(has_process_rule(true, RoutingMode::Exclude));
@@ -652,7 +692,7 @@ mod tests {
         )
         .unwrap();
         let r = cfg["routing"]["rules"].as_array().unwrap();
-        let process = r.iter().find(|r| r.get("process").is_some()).unwrap();
+        let process = r.iter().find(|r| user_process_rule(r)).unwrap();
         assert_eq!(process["outboundTag"], "proxy");
         let last = r.last().unwrap();
         assert_eq!(last["outboundTag"], "direct");
@@ -673,7 +713,7 @@ mod tests {
         .unwrap();
         let r = cfg["routing"]["rules"].as_array().unwrap();
         assert_eq!(
-            r.iter().find(|r| r.get("process").is_some()).unwrap()["outboundTag"],
+            r.iter().find(|r| user_process_rule(r)).unwrap()["outboundTag"],
             "direct"
         );
         assert!(r

@@ -3,7 +3,7 @@ use crate::build_info;
 use crate::event::{now_hms, BgEvent, BgTx, Event, Level, LogLine};
 use crate::mock::{self, Lcg};
 use crate::model::rule::{builtin_presets, Rule, RuleKind};
-use crate::model::server::{Ping, Security, Server, Transport, FINGERPRINTS};
+use crate::model::server::{Ping, Security, Server, FINGERPRINTS};
 use crate::model::subscription::Subscription;
 use crate::parser;
 use crate::platform::{ProxyAddr, TunHost};
@@ -14,13 +14,14 @@ use crate::xray::process::Core;
 use crate::xray::validate::Verdict;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod rules;
 mod session;
+mod subs;
 
 pub use rules::RuleItem;
 
@@ -168,6 +169,11 @@ pub struct AppState {
     run_dir: PathBuf,
     /// Cached, rate-limited `xray run -test`.
     checker: Arc<Checker>,
+    /// Subscriptions being downloaded right now (by name).
+    updating: HashSet<String>,
+    last_auto_check: Option<Instant>,
+    /// When a subscription's update last failed (not retried for ten minutes).
+    failed_at: HashMap<String, Instant>,
     next_id: u64,
     tx: BgTx,
     rng: Lcg,
@@ -187,13 +193,23 @@ impl AppState {
     /// `mock`: demo servers, fake pings and traffic (debug builds only, see `build_info`).
     pub(crate) fn build(tx: BgTx, config: Config, storage: Option<Storage>, mock: bool) -> Self {
         let mut next_id = 0;
-        // Subscriptions are still mock data until stage 6, and only in debug builds.
+        // Debug builds start with demo groups; real subscriptions come from the cache.
         let mut subs = if mock {
             mock::subscriptions(&mut next_id)
         } else {
             Vec::new()
         };
         let mut load_errors = Vec::new();
+        let cache = storage
+            .as_ref()
+            .map(|st| st.load_subscriptions())
+            .unwrap_or_default();
+        subs.extend(Self::subscription_groups(
+            &config,
+            &cache,
+            &mut next_id,
+            &mut load_errors,
+        ));
         let mut manual = Vec::new();
         for entry in &config.servers {
             match parser::parse_link(&entry.link) {
@@ -211,12 +227,14 @@ impl AppState {
                 servers: manual,
                 collapsed: false,
                 info: None,
+                updated: None,
+                is_remote: false,
             });
         }
         for sub in &mut subs {
             let group = sub.name.clone();
             for server in &mut sub.servers {
-                server.fp_override = fp_override_for(&config, &group, server);
+                apply_overrides(&config, &group, server);
             }
         }
         let mut app = Self {
@@ -253,6 +271,9 @@ impl AppState {
             busy: false,
             run_dir: std::env::temp_dir().join("elf-gate-run"),
             checker: Checker::new(None),
+            updating: HashSet::new(),
+            last_auto_check: None,
+            failed_at: HashMap::new(),
             next_id,
             tx,
             rng: Lcg::from_clock(),
@@ -473,6 +494,7 @@ impl AppState {
 
     fn on_tick(&mut self) {
         self.poll_core();
+        self.auto_update_tick();
         if self.mock && matches!(self.conn, Conn::Connected(_)) {
             self.up_bytes += self.rng.next() % 2_000;
             self.down_bytes += self.rng.next() % 20_000;
@@ -546,10 +568,12 @@ impl AppState {
                     self.popup = Some(Popup::Error(reason));
                 }
             }
-            BgEvent::SubsUpdated => {
-                self.status = Some("Подписки обновлены (мок)".into());
-                self.log(Level::Info, "subscriptions updated (mock)");
-            }
+            BgEvent::SubFetched { name, result } => self.on_sub_fetched(name, result),
+            BgEvent::SubAdded {
+                url,
+                user_agent,
+                result,
+            } => self.on_sub_added(url, user_agent, result),
         }
     }
 
@@ -700,14 +724,7 @@ impl AppState {
             ToggleMode => self.toggle_mode(),
             PingAll => self.ping_all(),
             SortPing => self.sort_by_ping(),
-            UpdateSubs => {
-                if self.mock {
-                    self.status = Some("Обновление подписок...".into());
-                    mock::spawn_update_subs(self.tx.clone());
-                } else {
-                    self.status = Some("Подписки пока не поддерживаются в этой версии".into());
-                }
-            }
+            UpdateSubs => self.update_subscriptions(),
             Add => {
                 if self.screen == Screen::Rules {
                     self.rules_add_menu();
@@ -973,10 +990,16 @@ impl AppState {
                     let ids: Vec<u64> = self.subs[i].servers.iter().map(|s| s.id).collect();
                     self.drop_connection_if(|c| ids.contains(&c));
                     let was_manual = self.subs[i].name == MANUAL_GROUP;
+                    let name = self.subs[i].name.clone();
+                    let was_remote = self.subs[i].is_remote;
                     self.subs.remove(i);
                     if was_manual {
                         self.config.servers.clear();
                         self.save_config();
+                    } else if was_remote {
+                        self.config.subscriptions.retain(|s| s.name != name);
+                        self.save_config();
+                        self.save_subscription_cache();
                     }
                 }
             }
@@ -1049,13 +1072,10 @@ impl AppState {
             }
         }
         let Some((key, name)) = found else { return };
-        self.config.overrides.retain(|o| o.server != key);
-        if fp.is_some() {
-            self.config.overrides.push(ServerOverride {
-                server: key,
-                fp: fp.clone(),
-            });
-        }
+        self.update_override(&key, |o| {
+            o.fp = fp.clone();
+            o.fp_auto = false;
+        });
         self.log(
             Level::Info,
             format!(
@@ -1176,31 +1196,7 @@ impl AppState {
     pub(crate) fn submit_input(&mut self, text: String) {
         let text = text.trim().to_string();
         if text.starts_with("http://") || text.starts_with("https://") {
-            if !self.mock {
-                self.popup = Some(Popup::Error(
-                    "Подписки пока не поддерживаются в этой версии.\nДобавьте ссылку на отдельный сервер.".into(),
-                ));
-                return;
-            }
-            // Real subscription import arrives in stage 6; debug builds add a mock group.
-            let mut servers = Vec::new();
-            for n in 1..=3 {
-                self.next_id += 1;
-                servers.push(mock::make_server(
-                    self.next_id,
-                    &format!("NEW-{n}"),
-                    "new.example.com",
-                    Security::Reality,
-                    Transport::Tcp,
-                ));
-            }
-            self.subs.push(Subscription {
-                name: format!("sub-{}", self.subs.len() + 1),
-                servers,
-                collapsed: false,
-                info: None,
-            });
-            self.status = Some("Подписка добавлена (мок, без сохранения)".into());
+            self.add_subscription_url(text);
             return;
         }
         match parser::parse_link(&text) {
@@ -1219,7 +1215,7 @@ impl AppState {
         }
         self.next_id += 1;
         server.id = self.next_id;
-        server.fp_override = fp_override_for(&self.config, MANUAL_GROUP, &server);
+        apply_overrides(&self.config, MANUAL_GROUP, &mut server);
         self.config.servers.push(ServerEntry {
             link: server.link.clone(),
         });
@@ -1234,11 +1230,30 @@ impl AppState {
                 servers: vec![server],
                 collapsed: false,
                 info: None,
+                updated: None,
+                is_remote: false,
             }),
         }
         self.log(Level::Info, format!("added server {name}"));
         self.status = Some(format!("Добавлен: {name}"));
         self.save_config();
+    }
+
+    /// Edits (creating if needed) the `[[overrides]]` entry for `key`; an entry that no longer
+    /// overrides anything is removed.
+    fn update_override(&mut self, key: &str, edit: impl FnOnce(&mut ServerOverride)) {
+        let pos = self.config.overrides.iter().position(|o| o.server == key);
+        let mut entry = match pos {
+            Some(i) => self.config.overrides.remove(i),
+            None => ServerOverride::new(key.to_string()),
+        };
+        edit(&mut entry);
+        if !entry.is_empty() {
+            match pos {
+                Some(i) => self.config.overrides.insert(i, entry),
+                None => self.config.overrides.push(entry),
+            }
+        }
     }
 
     fn save_config(&mut self) {
@@ -1255,13 +1270,14 @@ pub fn override_key(group: &str, server: &Server) -> String {
     format!("{group}/{}|{}:{}", server.name, server.address, server.port)
 }
 
-fn fp_override_for(config: &Config, group: &str, server: &Server) -> Option<String> {
+/// Copies the per-server settings from `[[overrides]]` onto a freshly created server.
+pub(crate) fn apply_overrides(config: &Config, group: &str, server: &mut Server) {
     let key = override_key(group, server);
-    config
-        .overrides
-        .iter()
-        .find(|o| o.server == key)
-        .and_then(|o| o.fp.clone())
+    let found = config.overrides.iter().find(|o| o.server == key);
+    server.fp_override = found.and_then(|o| o.fp.clone());
+    server.fp_auto = found.is_some_and(|o| o.fp_auto);
+    server.fragment = found.is_some_and(|o| o.fragment);
+    server.role = found.and_then(|o| o.role);
 }
 
 pub fn mode_name(m: Mode) -> &'static str {
@@ -1541,11 +1557,12 @@ mod tests {
         assert_eq!(a.subs[0].servers[0].ping, Ping::Unknown);
 
         a.handle_action(Action::UpdateSubs);
-        assert!(a.status.as_deref().unwrap().contains("Подписки"));
+        assert!(a.status.as_deref().unwrap().contains("Нет подписок"));
+        assert!(a.updating.is_empty());
 
         let groups = a.subs.len();
-        a.submit_input("https://example.com/sub".into());
-        assert!(matches!(a.popup, Some(Popup::Error(_))));
+        // A URL starts a real download (not a mock group); nothing appears until it succeeds.
+        a.submit_input("https://127.0.0.1:1/sub".into());
         assert_eq!(a.subs.len(), groups, "no mock subscription may appear");
     }
 }

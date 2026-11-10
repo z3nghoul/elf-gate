@@ -73,7 +73,26 @@ pub enum BgEvent {
         id: u64,
         reason: String,
     },
-    SubsUpdated,
+    /// A subscription answered (or failed) during an update.
+    SubFetched {
+        name: String,
+        result: Result<Box<SubUpdate>, String>,
+    },
+    /// The first download of a subscription the user just added.
+    SubAdded {
+        url: String,
+        user_agent: String,
+        result: Result<Box<SubUpdate>, String>,
+    },
+}
+
+/// A downloaded and parsed subscription.
+#[derive(Debug)]
+pub struct SubUpdate {
+    pub servers: Vec<crate::model::server::Server>,
+    pub skipped: usize,
+    pub info: Option<crate::model::subscription::SubscriptionInfo>,
+    pub title: Option<String>,
 }
 
 #[derive(Debug)]

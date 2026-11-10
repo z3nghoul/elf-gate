@@ -118,6 +118,14 @@ expression: cfg
         ],
         "outboundTag": "proxy",
         "type": "field"
+      },
+      {
+        "outboundTag": "direct",
+        "process": [
+          "elf-gate",
+          "elf-gated"
+        ],
+        "type": "field"
       }
     ]
   }

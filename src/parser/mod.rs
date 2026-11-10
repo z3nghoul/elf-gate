@@ -1,3 +1,4 @@
+pub mod subscription;
 pub mod vless;
 
 use crate::model::server::Server;

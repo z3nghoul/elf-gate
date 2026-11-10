@@ -1,4 +1,6 @@
 use crate::model::rule::{RoutingMode, Rule, TrafficMode};
+use crate::model::server::ServerRole;
+use crate::model::subscription::SubscriptionInfo;
 use crate::platform::ProxySnapshot;
 use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
@@ -162,6 +164,8 @@ pub struct UiConfig {
     pub last_server: Option<String>,
     /// The "enable the discord-only preset?" question was asked once.
     pub tun_intro_done: bool,
+    /// Connect to `last_server` in the last traffic mode when the program starts. Off by default.
+    pub auto_connect: bool,
 }
 
 /// A server added by hand; stored as its original link.
@@ -177,6 +181,90 @@ pub struct ServerOverride {
     pub server: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fp: Option<String>,
+    /// `fp` was found by the automatic search, not chosen by hand.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fp_auto: bool,
+    /// Xray version the automatic search ran with; it is repeated when the version changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fp_auto_xray: Option<String>,
+    /// Split the TLS ClientHello into pieces (Xray `fragment`). Off by default.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fragment: bool,
+    /// Role in the "primary + backup" scheme.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<ServerRole>,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+impl ServerOverride {
+    pub fn new(server: String) -> Self {
+        Self {
+            server,
+            fp: None,
+            fp_auto: false,
+            fp_auto_xray: None,
+            fragment: false,
+            role: None,
+        }
+    }
+
+    /// Nothing is overridden any more: the entry can be dropped from `config.toml`.
+    pub fn is_empty(&self) -> bool {
+        self.fp.is_none() && !self.fragment && self.role.is_none() && self.fp_auto_xray.is_none()
+    }
+}
+
+/// `[ping]`: how the "ping all" command measures a server.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct PingConfig {
+    /// `tcp`: time to open a TCP connection. `url`: a request through a temporary Xray.
+    pub mode: PingMode,
+    pub url: String,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PingMode {
+    #[default]
+    Tcp,
+    Url,
+}
+
+impl Default for PingConfig {
+    fn default() -> Self {
+        Self {
+            mode: PingMode::Tcp,
+            url: "https://www.gstatic.com/generate_204".into(),
+            timeout_ms: 3000,
+        }
+    }
+}
+
+/// `[[subscriptions]]`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SubscriptionConfig {
+    pub name: String,
+    pub url: String,
+    pub user_agent: String,
+    /// 0 turns automatic updates off.
+    pub auto_update_hours: u32,
+}
+
+impl Default for SubscriptionConfig {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            url: String::new(),
+            user_agent: crate::net::fetch::DEFAULT_USER_AGENT.into(),
+            auto_update_hours: 12,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -188,6 +276,8 @@ pub struct Config {
     pub tun: TunConfig,
     pub presets: PresetsConfig,
     pub ui: UiConfig,
+    pub ping: PingConfig,
+    pub subscriptions: Vec<SubscriptionConfig>,
     pub servers: Vec<ServerEntry>,
     pub overrides: Vec<ServerOverride>,
     pub rules: Vec<Rule>,
@@ -297,6 +387,39 @@ impl Storage {
         let path = self.config_path();
         let text =
             toml::to_string_pretty(config).map_err(|e| StorageError::Serialize(e.to_string()))?;
+        write_atomic(&path, &text).map_err(|source| StorageError::Write { path, source })
+    }
+}
+
+/// Servers of one subscription as of its last successful update.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CachedSubscription {
+    pub links: Vec<String>,
+    pub info: Option<SubscriptionInfo>,
+    /// Unix time.
+    pub updated: Option<i64>,
+}
+
+/// `subscriptions.json` next to `config.toml`: what the subscriptions returned last time, so
+/// the server list is there at startup and a failed update changes nothing.
+pub type SubscriptionCache = std::collections::BTreeMap<String, CachedSubscription>;
+
+impl Storage {
+    fn cache_path(&self) -> PathBuf {
+        self.dir.join("subscriptions.json")
+    }
+
+    pub fn load_subscriptions(&self) -> SubscriptionCache {
+        fs::read_to_string(self.cache_path())
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save_subscriptions(&self, cache: &SubscriptionCache) -> Result<(), StorageError> {
+        let path = self.cache_path();
+        let text =
+            serde_json::to_string(cache).map_err(|e| StorageError::Serialize(e.to_string()))?;
         write_atomic(&path, &text).map_err(|source| StorageError::Write { path, source })
     }
 }

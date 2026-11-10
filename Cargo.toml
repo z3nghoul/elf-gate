@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.104"
+base64 = "0.23.1"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 directories = "6.0.0"
 futures-util = "0.3.34"
@@ -24,9 +25,13 @@ url = "2.5.8"
 insta = { version = "1.49.0", features = ["json"] }
 
 [target."cfg(unix)".dependencies]
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "socks"] }
 nix = { version = "0.31.3", features = ["process", "signal", "user", "fs"] }
 
 [target."cfg(windows)".dependencies]
+# SChannel instead of rustls: no C toolchain is needed to cross-check the Windows build from Linux,
+# and the system certificate store is used (see docs/decisions.md).
+reqwest = { version = "0.13.5", default-features = false, features = ["native-tls", "socks"] }
 windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_System_Registry", "Win32_Networking_WinInet", "Win32_System_Console", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Diagnostics_ToolHelp", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
 
 [profile.release]

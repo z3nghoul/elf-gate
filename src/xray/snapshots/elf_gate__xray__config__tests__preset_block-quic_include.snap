@@ -120,6 +120,14 @@ expression: cfg
         "type": "field"
       },
       {
+        "outboundTag": "direct",
+        "process": [
+          "elf-gate",
+          "elf-gated"
+        ],
+        "type": "field"
+      },
+      {
         "network": "udp",
         "outboundTag": "block",
         "port": "443",

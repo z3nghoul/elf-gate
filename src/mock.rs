@@ -48,6 +48,9 @@ pub fn make_server(id: u64, name: &str, host: &str, sec: Security, tr: Transport
         params: TransportParams::default(),
         link: String::new(),
         fp_override: None,
+        fp_auto: false,
+        fragment: false,
+        role: None,
         unsupported: None,
         ping: Ping::Unknown,
     }
@@ -63,10 +66,13 @@ pub fn subscriptions(next_id: &mut u64) -> Vec<Subscription> {
             name: "main".into(),
             collapsed: false,
             info: Some(SubscriptionInfo {
-                used: 12_400_000_000,
+                upload: 400_000_000,
+                download: 12_000_000_000,
                 total: 100_000_000_000,
-                expire: "2027-01-15".into(),
+                expire: Some(1_800_000_000),
             }),
+            updated: None,
+            is_remote: false,
             servers: vec![
                 make_server(
                     id(),
@@ -102,6 +108,8 @@ pub fn subscriptions(next_id: &mut u64) -> Vec<Subscription> {
             name: "backup".into(),
             collapsed: false,
             info: None,
+            updated: None,
+            is_remote: false,
             servers: vec![
                 make_server(
                     id(),
@@ -196,12 +204,5 @@ pub fn spawn_connect(tx: BgTx, id: u64, ok: bool) {
             }
         };
         let _ = tx.send(ev);
-    });
-}
-
-pub fn spawn_update_subs(tx: BgTx) {
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(1200)).await;
-        let _ = tx.send(BgEvent::SubsUpdated);
     });
 }

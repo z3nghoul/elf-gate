@@ -122,6 +122,14 @@ expression: cfg
       {
         "outboundTag": "direct",
         "process": [
+          "elf-gate",
+          "elf-gated"
+        ],
+        "type": "field"
+      },
+      {
+        "outboundTag": "direct",
+        "process": [
           "qbittorrent",
           "transmission-gtk",
           "transmission-qt",

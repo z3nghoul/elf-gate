@@ -125,6 +125,9 @@ pub fn parse(link: &str) -> Result<Server, ParseError> {
         params,
         link: link.to_string(),
         fp_override: None,
+        fp_auto: false,
+        fragment: false,
+        role: None,
         unsupported,
         ping: Ping::Unknown,
     })

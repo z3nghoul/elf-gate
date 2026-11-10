@@ -1,5 +1,6 @@
 use crate::app::{AppState, Focus, Row, Screen};
 use crate::model::server::{Security, Server};
+use crate::model::subscription::{format_date, format_datetime};
 use crate::ui::statusbar::format_bytes;
 use crate::ui::theme::Theme;
 use ratatui::layout::Rect;
@@ -121,10 +122,29 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             if let Some(info) = &sub.info {
                 l.push(field(
                     "Трафик:",
-                    format!("{} / {}", format_bytes(info.used), format_bytes(info.total)),
+                    if info.total > 0 {
+                        format!(
+                            "{} / {}",
+                            format_bytes(info.used()),
+                            format_bytes(info.total)
+                        )
+                    } else {
+                        format!("{} (лимит не указан)", format_bytes(info.used()))
+                    },
                     th,
                 ));
-                l.push(field("Истекает:", info.expire.clone(), th));
+                if let Some(expire) = info.expire {
+                    l.push(field("Истекает:", format_date(expire), th));
+                }
+            }
+            if sub.is_remote {
+                l.push(field(
+                    "Обновлено:",
+                    sub.updated.map_or("ещё не обновлялась".to_string(), |t| {
+                        format!("{} UTC", format_datetime(t))
+                    }),
+                    th,
+                ));
             }
             l
         }

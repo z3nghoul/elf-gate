@@ -1,3 +1,23 @@
+use serde::{Deserialize, Serialize};
+
+/// Role in the "primary + backup" scheme (stage 6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ServerRole {
+    Primary,
+    Backup,
+}
+
+impl ServerRole {
+    #[allow(dead_code)] // used by the details pane once roles are shown (next commit)
+    pub fn label(self) -> &'static str {
+        match self {
+            ServerRole::Primary => "основной",
+            ServerRole::Backup => "запасной",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Security {
     None,
@@ -76,6 +96,11 @@ pub struct Server {
     /// Per-server fingerprint chosen in the UI (kept in `config.toml`). The `fp` from the
     /// link stays untouched in `tls.fingerprint`.
     pub fp_override: Option<String>,
+    /// The override was found by the automatic search.
+    pub fp_auto: bool,
+    /// Split the TLS ClientHello (Xray `fragment`), chosen in the UI. Off by default.
+    pub fragment: bool,
+    pub role: Option<ServerRole>,
     /// `Some(reason)` when the server was imported but cannot be used yet.
     pub unsupported: Option<String>,
     pub ping: Ping,
@@ -98,6 +123,9 @@ impl Server {
             params: TransportParams::default(),
             link: link.to_string(),
             fp_override: None,
+            fp_auto: false,
+            fragment: false,
+            role: None,
             unsupported: Some(reason),
             ping: Ping::Unknown,
         }
