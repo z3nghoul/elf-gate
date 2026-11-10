@@ -42,13 +42,30 @@ pub fn parse_link(input: &str) -> Result<Server, ParseError> {
     if link.is_empty() {
         return Err(ParseError::Empty);
     }
+    // One entry of a JSON subscription, kept whole (see model::fullconfig).
+    if let Some(json) = link.strip_prefix(crate::model::fullconfig::LINK_PREFIX) {
+        let value: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| ParseError::InvalidUrl(e.to_string()))?;
+        return crate::model::fullconfig::parse_entry(&value).map_err(ParseError::InvalidUrl);
+    }
     let (scheme, _) = link.split_once("://").ok_or(ParseError::NotALink)?;
     let scheme = scheme.to_ascii_lowercase();
     match scheme.as_str() {
-        "vless" => vless::parse(link),
+        "vless" => vless::parse(link).map(mark_stub),
         s if UNSUPPORTED_SCHEMES.contains(&s) => Ok(unsupported_server(link, s)),
         _ => Err(ParseError::UnknownScheme(scheme)),
     }
+}
+
+/// Placeholder rows (zero UUID, address 0.0.0.0, port 0 or 1) are notices, not servers.
+fn mark_stub(mut s: Server) -> Server {
+    if crate::model::fullconfig::is_stub(&s.address, s.port, &s.uuid) {
+        s.unsupported = Some(
+            "заглушка провайдера (нулевой адрес): включите HWID или смените User-Agent".into(),
+        );
+        s.info_only = true;
+    }
+    s
 }
 
 fn unsupported_server(link: &str, scheme: &str) -> Server {

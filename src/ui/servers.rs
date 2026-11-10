@@ -54,6 +54,13 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                     Ping::Timeout | Ping::Error => th.bad(),
                     _ => th.muted(),
                 };
+                if s.info_only {
+                    // A title or a notice from the provider: shown, never selectable as a server.
+                    return ListItem::new(Line::from(vec![
+                        Span::styled("  ", th.muted()),
+                        Span::styled(s.name.clone(), th.muted()),
+                    ]));
+                }
                 let (name_style, ping_text, ping_style) = if s.is_supported() {
                     (th.text(), s.ping.label(), ping_style)
                 } else {

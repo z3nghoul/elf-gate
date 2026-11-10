@@ -35,11 +35,57 @@ pub fn config_key(cfg: &serde_json::Value) -> String {
     format!("{:016x}", fnv1a(cfg.to_string().as_bytes()))
 }
 
+/// Format of the file; an older one is dropped (its refusals had no time stamp).
+const FORMAT: u32 = 2;
+/// A refusal is remembered for a day at most, whatever the cause.
+pub const REFUSAL_TTL_SECS: i64 = 24 * 3600;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Entry {
+    /// `None`: accepted. `Some(reason)`: Xray refused the config.
+    reason: Option<String>,
+    /// Unix time the verdict was recorded.
+    at: i64,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct CacheFile {
+    #[serde(default)]
+    format: u32,
     xray_version: String,
-    /// `None`: accepted. `Some(reason)`: Xray refused the config.
-    entries: BTreeMap<String, Option<String>>,
+    entries: BTreeMap<String, Entry>,
+}
+
+fn now() -> i64 {
+    crate::model::subscription::unix_now()
+}
+
+fn stat_of(p: &Path) -> String {
+    match std::fs::metadata(p) {
+        Ok(m) => {
+            let secs = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_secs());
+            format!("{}:{secs}", m.len())
+        }
+        Err(_) => "-".into(),
+    }
+}
+
+/// What a verdict depends on besides the config: the core (path, size, mtime) and its data
+/// files (size, mtime). If any of it changes, old verdicts no longer count.
+pub fn environment_fingerprint(binary: &Path) -> String {
+    let dir = super::process::asset_dir(binary);
+    let text = format!(
+        "{}|{}|{}|{}",
+        binary.display(),
+        stat_of(binary),
+        stat_of(&dir.join("geoip.dat")),
+        stat_of(&dir.join("geosite.dat"))
+    );
+    format!("{:016x}", fnv1a(text.as_bytes()))
 }
 
 #[derive(Debug, Default)]
@@ -51,16 +97,22 @@ pub struct CheckCache {
 
 impl CheckCache {
     pub fn load(path: Option<PathBuf>) -> Self {
-        let data = path
+        let data: CacheFile = path
             .as_ref()
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default();
+            .filter(|d: &CacheFile| d.format == FORMAT)
+            .unwrap_or(CacheFile {
+                format: FORMAT,
+                ..CacheFile::default()
+            });
         let mut data: CacheFile = data;
         // Entries written by older versions may hold refusals caused by the environment.
         let before = data.entries.len();
-        data.entries
-            .retain(|_, v| !v.as_deref().is_some_and(validate::is_environmental));
+        data.entries.retain(|_, v| {
+            !v.reason.as_deref().is_some_and(validate::is_environmental)
+                && (v.reason.is_none() || now() - v.at <= REFUSAL_TTL_SECS)
+        });
         let dirty = data.entries.len() != before;
         Self { path, data, dirty }
     }
@@ -75,8 +127,11 @@ impl CheckCache {
     }
 
     pub fn lookup(&self, key: &str) -> Option<Verdict> {
-        self.data.entries.get(key).map(|v| match v {
+        let e = self.data.entries.get(key)?;
+        Some(match &e.reason {
             None => Verdict::Accepted,
+            // A refusal older than a day is forgotten, whatever caused it.
+            Some(_) if now() - e.at > REFUSAL_TTL_SECS => return None,
             Some(reason) => Verdict::Rejected(reason.clone()),
         })
     }
@@ -90,7 +145,13 @@ impl CheckCache {
             Verdict::Rejected(reason) => Some(reason.clone()),
             Verdict::Unavailable(_) => return,
         };
-        self.data.entries.insert(key, value);
+        self.data.entries.insert(
+            key,
+            Entry {
+                reason: value,
+                at: now(),
+            },
+        );
         self.dirty = true;
     }
 
@@ -190,7 +251,7 @@ impl Checker {
             // No version means no trustworthy key: run without the cache.
             return validate::check_config(binary, cfg, run_dir).await;
         };
-        let key = config_key(cfg);
+        let key = format!("{}-{}", config_key(cfg), environment_fingerprint(binary));
         {
             let mut cache = self.cache.lock().unwrap();
             cache.use_version(&version);
@@ -240,7 +301,7 @@ mod tests {
         let path = dir.join("check-cache.json");
         std::fs::write(
             &path,
-            r#"{"xray_version":"v","entries":{"a":null,"b":"stat /usr/local/lib/elf-gate/geoip.dat: no such file","c":"vless without TLS"}}"#,
+            r#"{"format":2,"xray_version":"v","entries":{"a":{"reason":null,"at":1},"b":{"reason":"stat /usr/local/lib/elf-gate/geoip.dat: no such file","at":4102444800},"c":{"reason":"vless without TLS","at":4102444800}}}"#,
         )
         .unwrap();
         let mut c = CheckCache::load(Some(path));
@@ -270,6 +331,93 @@ mod tests {
         assert_eq!(again.lookup("k3"), None, "'could not run' is never cached");
         again.use_version("Xray 2");
         assert_eq!(again.len(), 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn refusals_expire_after_a_day_but_acceptances_do_not() {
+        let mut c = CheckCache::load(None);
+        c.use_version("v");
+        c.store("ok".into(), &Verdict::Accepted);
+        c.store("no".into(), &Verdict::Rejected("vless without TLS".into()));
+        for e in c.data.entries.values_mut() {
+            e.at -= REFUSAL_TTL_SECS + 5;
+        }
+        assert_eq!(c.lookup("ok"), Some(Verdict::Accepted));
+        assert_eq!(c.lookup("no"), None);
+    }
+
+    #[test]
+    fn an_old_format_file_is_dropped() {
+        let dir = std::env::temp_dir().join(format!("elf-gate-cc3-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("c.json");
+        std::fs::write(&path, r#"{"xray_version":"v","entries":{"a":null}}"#).unwrap();
+        let mut c = CheckCache::load(Some(path));
+        c.use_version("v");
+        assert_eq!(c.lookup("a"), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A stand-in `xray` that counts how often it is asked to test a config.
+    #[cfg(unix)]
+    fn counting_xray(dir: &Path, verdict_ok: bool) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let counter = dir.join("runs");
+        let body = format!(
+            "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'Xray 1.0.0 (fake)'; exit 0; fi\necho x >> {}\n{}\n",
+            counter.display(),
+            if verdict_ok {
+                "echo 'Configuration OK.'; exit 0"
+            } else {
+                "echo 'Failed to start: a > vless without TLS is prohibited'; exit 23"
+            }
+        );
+        let p = dir.join("xray");
+        std::fs::write(&p, body).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+
+    #[cfg(unix)]
+    fn runs(dir: &Path) -> usize {
+        std::fs::read_to_string(dir.join("runs")).map_or(0, |t| t.lines().count())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_changed_core_or_data_file_invalidates_a_cached_refusal() {
+        let dir = std::env::temp_dir().join(format!("elf-gate-cc4-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("geoip.dat"), b"geo").unwrap();
+        let bin = counting_xray(&dir, false);
+        let checker = Checker::new(None);
+        let cfg = serde_json::json!({"a": 1});
+        let run_dir = dir.join("run");
+
+        let v1 = checker.check_config(&bin, &cfg, &run_dir).await;
+        assert!(matches!(v1, Verdict::Rejected(_)), "{v1:?}");
+        assert_eq!(runs(&dir), 1);
+        checker.check_config(&bin, &cfg, &run_dir).await;
+        assert_eq!(runs(&dir), 1, "the refusal came from the cache");
+
+        // The binary changes (a new mtime): the cached refusal is void, xray really runs.
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(120);
+        std::fs::File::options()
+            .write(true)
+            .open(&bin)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        checker.check_config(&bin, &cfg, &run_dir).await;
+        assert_eq!(runs(&dir), 2, "a changed xray is asked again");
+
+        // So does a changed data file (size).
+        std::fs::write(dir.join("geoip.dat"), b"geo-updated").unwrap();
+        checker.check_config(&bin, &cfg, &run_dir).await;
+        assert_eq!(runs(&dir), 3, "changed geoip.dat is asked again");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

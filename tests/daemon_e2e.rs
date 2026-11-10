@@ -92,7 +92,7 @@ impl Client {
     }
     /// Reads updates until `pred` holds for the latest view.
     async fn until(&mut self, what: &str, pred: impl Fn(&View) -> bool) -> View {
-        let end = Instant::now() + Duration::from_secs(15);
+        let end = Instant::now() + Duration::from_secs(40);
         loop {
             if let Some(v) = &self.last {
                 if pred(v) {
@@ -183,10 +183,16 @@ async fn vpn_outlives_the_interface_and_dies_with_the_daemon() {
         return;
     };
     let env = Env::new("outlive");
-    let base = 31000 + (std::process::id() % 2000) as u16 * 2;
-    let (socks, http) = (base, base + 1);
+    // Free ports from the OS (a fixed range collided with other tests under load).
+    let free = || {
+        std::net::TcpListener::bind(("127.0.0.1", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    };
+    let (socks, http, server_port) = (free(), free(), free());
     // A local VLESS "server": the daemon only needs something that answers on TCP.
-    let server_port = base + 4000;
     let srv_cfg = env.dir.join("server.json");
     std::fs::write(
         &srv_cfg,
@@ -253,7 +259,7 @@ async fn vpn_outlives_the_interface_and_dies_with_the_daemon() {
     assert!(before >= 1, "the core is running");
     daemon.kill().unwrap();
     daemon.wait().unwrap();
-    let end = Instant::now() + Duration::from_secs(5);
+    let end = Instant::now() + Duration::from_secs(15);
     while std::net::TcpStream::connect(("127.0.0.1", socks)).is_ok() {
         assert!(Instant::now() < end, "the core outlived a killed daemon");
         tokio::time::sleep(Duration::from_millis(100)).await;

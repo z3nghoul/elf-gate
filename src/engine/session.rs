@@ -81,6 +81,14 @@ async fn start_core(
         if !ips.contains(&ip.to_string()) {
             ips.push(ip.to_string());
         }
+        if server.full.is_some() {
+            plan.pin = tun::resolve_map(&server.all_hosts()).await;
+            for ip in plan.pin.values() {
+                if !ips.contains(ip) {
+                    ips.push(ip.clone());
+                }
+            }
+        }
         plan.direct_ips = ips;
         plan.direct_domains = known_hosts
             .iter()
@@ -181,6 +189,15 @@ impl Engine {
                 self.show_problem(problem);
                 return;
             }
+            // With reduced capabilities process detection fails for many programs by design: the
+            // core's complaints about it are hidden (one notice is shown instead, below).
+            self.hide_process_errors = preflight
+                .setup
+                .as_ref()
+                .and_then(|s| self.tun_host.core_capabilities(&s.core))
+                .is_some_and(|c| {
+                    !(c.contains("cap_sys_ptrace") && c.contains("cap_dac_read_search"))
+                });
             if !self.caps_warned {
                 let rules = crate::model::rule::effective_rules(
                     self.config.mode.routing,
@@ -280,7 +297,9 @@ impl Engine {
             }
         };
         for s in self.subs.iter().flat_map(|g| g.servers.iter()) {
-            add(s.address.clone());
+            for h in s.all_hosts() {
+                add(h);
+            }
         }
         for sc in &self.config.subscriptions {
             if let Some(h) = url::Url::parse(&sc.url)
@@ -665,7 +684,7 @@ mod tests {
                 if cfg!(windows) {
                     "xray.exe"
                 } else {
-                    "sudo setcap cap_net_admin+ep"
+                    "sudo setcap cap_net_admin,cap_sys_ptrace,cap_dac_read_search+ep"
                 },
             ),
             (
@@ -911,6 +930,44 @@ mod tests {
             .collect();
         assert_eq!(notes.len(), 1);
         assert_eq!(a.conn, Conn::Connecting(id), "the start went on");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn process_detection_noise_is_hidden_only_when_the_capabilities_are_reduced() {
+        let dir = temp_dir("noise");
+        let noise = || {
+            BgEvent::Log(LogLine {
+            time: "t".into(),
+            level: Level::Error,
+            text: "[xray:err] [Error] app/router: Unables to find local process name: common/net: no process found for inode 9616".into(),
+        })
+        };
+        let host = MockTunHost {
+            caps: Some("/x/xray cap_net_admin=ep".into()),
+            ..MockTunHost::healthy()
+        };
+        let (mut a, id) = tun_app(host, true, &dir);
+        a.config.ui.tun_intro_done = true;
+        a.connect(id);
+        a.on_bg(noise());
+        assert!(
+            !a.logged("no process found"),
+            "hidden with reduced capabilities"
+        );
+
+        let full = MockTunHost {
+            caps: Some("/x/xray cap_net_admin,cap_dac_read_search,cap_sys_ptrace=ep".into()),
+            ..MockTunHost::healthy()
+        };
+        let (mut b, id) = tun_app(full, true, &dir);
+        b.config.ui.tun_intro_done = true;
+        b.connect(id);
+        b.on_bg(noise());
+        assert!(
+            b.logged("no process found"),
+            "with full capabilities an error would be a real one"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }

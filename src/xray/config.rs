@@ -225,6 +225,8 @@ pub struct Plan {
     /// (servers, subscription URLs). They go direct whatever the process detection says.
     pub direct_ips: Vec<String>,
     pub direct_domains: Vec<String>,
+    /// TUN, complete provider configs: host name -> address resolved before the tunnel exists.
+    pub pin: std::collections::HashMap<String, String>,
 }
 
 impl Plan {
@@ -242,6 +244,7 @@ impl Plan {
             failover: None,
             direct_ips: Vec::new(),
             direct_domains: Vec::new(),
+            pin: std::collections::HashMap::new(),
         }
     }
 
@@ -359,17 +362,28 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
         inbounds.push(tun_inbound(t, &sniffing));
     }
 
+    // A complete provider config: its outbounds (the whole chain) are carried over as they are.
+    let full = server.full.as_ref().map(|f| f.renamed(&plan.pin));
     let primary_tag = if plan.failover.is_some() {
         PRIMARY_TAG
     } else {
         "proxy"
     };
-    let mut outbounds = vec![
-        proxy_outbound(server, plan.vps_ip.as_deref(), primary_tag),
-        json!({ "tag": "direct", "protocol": "freedom" }),
-        json!({ "tag": "block", "protocol": "blackhole" }),
-    ];
-    if let Some(f) = &plan.failover {
+    let mut outbounds = match &full {
+        Some(parts) => {
+            let mut o = parts.outbounds.clone();
+            o.push(json!({ "tag": "direct", "protocol": "freedom" }));
+            o.push(json!({ "tag": "block", "protocol": "blackhole" }));
+            o
+        }
+        None => vec![
+            proxy_outbound(server, plan.vps_ip.as_deref(), primary_tag),
+            json!({ "tag": "direct", "protocol": "freedom" }),
+            json!({ "tag": "block", "protocol": "blackhole" }),
+        ],
+    };
+    let full_balanced = full.as_ref().is_some_and(|p| p.balanced);
+    if let Some(f) = plan.failover.as_ref().filter(|_| full.is_none()) {
         if let Some(reason) = &f.backup.unsupported {
             return Err(ConfigError::Unsupported(
                 f.backup.name.clone(),
@@ -383,7 +397,7 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
     }
 
     let backup_fragments = plan.failover.as_ref().is_some_and(|f| fragments(&f.backup));
-    if fragments(server) || backup_fragments {
+    if full.is_none() && (fragments(server) || backup_fragments) {
         outbounds.push(fragment_outbound());
     }
 
@@ -452,7 +466,10 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
     }
 
     let mut balancers = Vec::new();
-    if plan.failover.is_some() {
+    if let Some(parts) = full.as_ref().filter(|p| p.balanced) {
+        balancers.extend(parts.balancers.clone());
+    }
+    if plan.failover.is_some() && full.is_none() || full_balanced {
         // Everything that used the "proxy" outbound now goes through the balancer of the same
         // name: the primary while the observatory says it is alive, else the backup.
         for rule in &mut rules {
@@ -468,12 +485,14 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
             // only: unmatched traffic must see the balancer too.
             rules.push(json!({ "type": "field", "network": "tcp,udp", "balancerTag": "proxy" }));
         }
-        balancers.push(json!({
-            "tag": "proxy",
-            "selector": [PRIMARY_TAG],
-            "fallbackTag": BACKUP_TAG,
-            "strategy": { "type": "leastPing" },
-        }));
+        if !full_balanced {
+            balancers.push(json!({
+                "tag": "proxy",
+                "selector": [PRIMARY_TAG],
+                "fallbackTag": BACKUP_TAG,
+                "strategy": { "type": "leastPing" },
+            }));
+        }
     }
 
     // Traffic statistics for the interface (`xray api statsquery`); 0 turns them off
@@ -510,7 +529,13 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
             "system": { "statsOutboundUplink": true, "statsOutboundDownlink": true }
         });
     }
-    if let Some(f) = &plan.failover {
+    if full_balanced {
+        config["routing"]["balancers"] = json!(balancers);
+        if let Some((key, v)) = full.as_ref().and_then(|p| p.observatory.clone()) {
+            config[key] = v;
+        }
+    }
+    if let Some(f) = plan.failover.as_ref().filter(|_| full.is_none()) {
         config["routing"]["balancers"] = json!(balancers);
         config["observatory"] = json!({
             "subjectSelector": ["proxy-"],
@@ -776,6 +801,7 @@ mod tests {
             failover: None,
             direct_ips: Vec::new(),
             direct_domains: Vec::new(),
+            pin: std::collections::HashMap::new(),
         }
     }
 

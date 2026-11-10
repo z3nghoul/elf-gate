@@ -264,6 +264,14 @@ impl Default for PingConfig {
     }
 }
 
+/// `[device]`: how this installation introduces itself to subscription panels.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct DeviceConfig {
+    /// Generated once (see `net::device`) and kept, so it never changes between runs.
+    pub hwid: String,
+}
+
 /// `[[subscriptions]]`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -296,6 +304,7 @@ pub struct Config {
     pub presets: PresetsConfig,
     pub ui: UiConfig,
     pub ping: PingConfig,
+    pub device: DeviceConfig,
     pub subscriptions: Vec<SubscriptionConfig>,
     pub servers: Vec<ServerEntry>,
     pub overrides: Vec<ServerOverride>,

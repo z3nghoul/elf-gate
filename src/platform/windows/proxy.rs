@@ -50,19 +50,19 @@ impl Key {
         subkey: &str,
         access: windows::Win32::System::Registry::REG_SAM_FLAGS,
     ) -> Result<Self, PlatformError> {
+        Self::open_in(HKEY_CURRENT_USER, subkey, access)
+    }
+
+    pub(super) fn open_in(
+        hive: HKEY,
+        subkey: &str,
+        access: windows::Win32::System::Registry::REG_SAM_FLAGS,
+    ) -> Result<Self, PlatformError> {
         let sub = wide(subkey);
         let mut hkey = HKEY::default();
         // SAFETY: `sub` is a NUL-terminated UTF-16 string that outlives the call and
         // `hkey` is a valid out pointer.
-        let status = unsafe {
-            RegOpenKeyExW(
-                HKEY_CURRENT_USER,
-                PCWSTR(sub.as_ptr()),
-                None,
-                access,
-                &mut hkey,
-            )
-        };
+        let status = unsafe { RegOpenKeyExW(hive, PCWSTR(sub.as_ptr()), None, access, &mut hkey) };
         status.ok().map_err(|e| failed("RegOpenKeyExW", e))?;
         Ok(Key(hkey))
     }

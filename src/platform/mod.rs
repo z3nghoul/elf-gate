@@ -225,6 +225,16 @@ pub fn privileges() -> Box<dyn Privileges> {
     Box::new(imp::privileges::Elevation)
 }
 
+/// A stable per-machine identifier (Linux `/etc/machine-id`, Windows `MachineGuid`), if there is one.
+pub fn machine_id() -> Option<String> {
+    imp::device::machine_id()
+}
+
+/// The version of the operating system for the `x-ver-os` header.
+pub fn os_version() -> String {
+    imp::device::os_version()
+}
+
 /// What limits this process (Linux: no_new_privs, seccomp, capabilities, mount namespace, LSM
 /// label, ids), for the error report when a child cannot see files the parent sees.
 pub fn process_restrictions() -> String {

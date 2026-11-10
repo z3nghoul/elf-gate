@@ -6,7 +6,8 @@ use base64::Engine;
 use std::time::Duration;
 
 pub const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
-pub const DEFAULT_USER_AGENT: &str = "v2rayN/7.0";
+/// What panels accept without complaint (Remnawave documents v2rayNG as supported).
+pub const DEFAULT_USER_AGENT: &str = "v2rayNG/1.10.4";
 /// Subscriptions are lists of links: anything bigger than this is not one.
 const MAX_BODY: usize = 8 * 1024 * 1024;
 
@@ -56,10 +57,26 @@ pub fn parse_title(header: &str) -> Option<String> {
 /// Direct request: the system proxy (which may be elf-gate's own) is never used, so the
 /// subscription is fetched the same way in every mode. In TUN mode the routing rules send
 /// elf-gate's own process outside the tunnel.
-pub async fn fetch(url: &str, user_agent: &str) -> Result<Fetched, String> {
+pub async fn fetch(
+    url: &str,
+    user_agent: &str,
+    device: &crate::net::device::DeviceInfo,
+) -> Result<Fetched, String> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    for (name, value) in [
+        ("x-hwid", &device.hwid),
+        ("x-device-os", &device.os),
+        ("x-ver-os", &device.os_version),
+        ("x-device-model", &device.model),
+    ] {
+        if let Ok(v) = reqwest::header::HeaderValue::from_str(value) {
+            headers.insert(name, v);
+        }
+    }
     let client = reqwest::Client::builder()
         .no_proxy()
         .timeout(FETCH_TIMEOUT)
+        .default_headers(headers)
         .user_agent(if user_agent.is_empty() {
             DEFAULT_USER_AGENT
         } else {
@@ -109,6 +126,46 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
+    fn dev() -> crate::net::device::DeviceInfo {
+        crate::net::device::DeviceInfo {
+            hwid: "0123456789abcdef".into(),
+            os: "Linux".into(),
+            os_version: "6.1".into(),
+            model: "elf-gate".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn device_headers_and_the_user_agent_are_sent() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = tokio::spawn(async move {
+            let (mut s, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let n = s.read(&mut buf).await.unwrap();
+            let _ = s
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await;
+            String::from_utf8_lossy(&buf[..n]).to_lowercase()
+        });
+        let _ = fetch(
+            &format!("http://127.0.0.1:{port}/sub"),
+            "v2rayNG/1.10.4",
+            &dev(),
+        )
+        .await;
+        let req = seen.await.unwrap();
+        for needle in [
+            "x-hwid: 0123456789abcdef",
+            "x-device-os: linux",
+            "x-ver-os: 6.1",
+            "x-device-model: elf-gate",
+            "user-agent: v2rayng/1.10.4",
+        ] {
+            assert!(req.contains(needle), "{needle} missing in {req}");
+        }
+    }
+
     #[test]
     fn userinfo_header() {
         let i = parse_userinfo("upload=10; download=20; total=1000; expire=1893456000").unwrap();
@@ -147,7 +204,7 @@ mod tests {
             "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nsubscription-userinfo: download=5; total=9\r\nprofile-title: T\r\nConnection: close\r\n\r\nhello",
         )
         .await;
-        let f = fetch(&url, "test-agent").await.unwrap();
+        let f = fetch(&url, "test-agent", &dev()).await.unwrap();
         assert_eq!(f.body, "hello");
         assert_eq!(f.info.unwrap().total, 9);
         assert_eq!(f.title.as_deref(), Some("T"));
@@ -158,11 +215,11 @@ mod tests {
         let url =
             serve_once("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
                 .await;
-        assert!(fetch(&url, "").await.unwrap_err().contains("403"));
+        assert!(fetch(&url, "", &dev()).await.unwrap_err().contains("403"));
         let dead = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = dead.local_addr().unwrap().port();
         drop(dead);
-        let err = fetch(&format!("http://127.0.0.1:{port}/"), "")
+        let err = fetch(&format!("http://127.0.0.1:{port}/"), "", &dev())
             .await
             .unwrap_err();
         assert!(err.contains("нет соединения"), "{err}");
