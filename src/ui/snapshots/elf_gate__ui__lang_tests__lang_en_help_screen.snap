@@ -25,10 +25,10 @@ expression: frame
 │f                 change the TLS fingerprint of the selected server                                                   │
 │h                 subscription: show hidden servers (restore: x on a hidden one)                                      │
 │b                 server role: primary / backup (automatic failover)                                                  │
-│z                 TLS ClientHello fragmentation of the selected server                                                │
-│Space             rules screen: enable or disable the rule                                                            │
-│m                 rules screen: routing mode exclude / include                                                        │
-│?                 help                                                                                                │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-● Disconnected | PROXY                                                                                                  
-Ctrl+P priv.  Esc back  ? help  q/Q exit
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│● Disconnected | PROXY                                                                                                │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│Ctrl+P priv.  Esc back  ? help  q/Q exit                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

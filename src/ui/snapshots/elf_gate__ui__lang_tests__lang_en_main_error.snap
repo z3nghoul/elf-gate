@@ -8,12 +8,10 @@ expression: frame
 │                                                    ││Transport:     tcp                                              │
 │                                                    ││Address:       h.example.com:443                                │
 │                                                    ││SNI:           x.org                                            │
-│                                                    ││Fingerprint:   chrome (f - change)                              │
-│                                                    ││Fragment:      off (z - turn on)                                │
-│                                                    ││Role:          none (b - assign primary / backup)               │
+│                                                    ││Fingerprint:   chrome                                           │
+│                                                    ││Fragment:      off                                              │
+│                                                    ││Role:          none                                             │
 │                                                    ││Ping:          -                                                │
-│                                                    ││                                                                │
-│                                                    ││                                                                │
 │                                                    ││                                                                │
 │                                                    ││                                                                │
 └────────────────────────────────────────────────────┘└────────────────────────────────────────────────────────────────┘
@@ -26,9 +24,11 @@ expression: frame
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-● Error: core exited | PROXY                                                                                            
-j/k select  Tab panel  Enter conn.  d disc.  t PROXY→TUN  p ping  o by ping  a add  x delete  r rules  s settings       
-l log  / filter  Ctrl+P priv.  f fp  b role  z frag.  ? help  q/Q exit
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│● Error: core exited | PROXY                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│j/k select  Tab panel  Enter conn.  d disc.  t PROXY→TUN  p ping  o by ping  a add  x delete  r rules  s settings     │
+│l log  / filter  Ctrl+P priv.  f fp  b role  z frag.  ? help  q/Q exit                                                │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

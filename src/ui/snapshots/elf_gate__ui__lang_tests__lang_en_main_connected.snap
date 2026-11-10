@@ -8,14 +8,12 @@ expression: frame
 │                                                    ││Transport:     tcp                                              │
 │                                                    ││Address:       h.example.com:443                                │
 │                                                    ││SNI:           x.org                                            │
-│                                                    ││Fingerprint:   chrome (f - change)                              │
-│                                                    ││Fragment:      off (z - turn on)                                │
-│                                                    ││Role:          none (b - assign primary / backup)               │
+│                                                    ││Fingerprint:   chrome                                           │
+│                                                    ││Fragment:      off                                              │
+│                                                    ││Role:          none                                             │
 │                                                    ││Network (tcp): -                                                │
 │                                                    ││Via tunnel:    -                                                │
 │                                                    ││Different metrics: tcp is the way to the server only; the tunnel│
-│                                                    ││number is a real request there and back.                        │
-│                                                    ││                                                                │
 └────────────────────────────────────────────────────┘└────────────────────────────────────────────────────────────────┘
 ┌ Log ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │00:00:00 [xray] started                                                                                               │
@@ -26,9 +24,11 @@ expression: frame
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-● Connected: R1 | PROXY | ↑0 B/s ↓0 B/s | VPN 0 B↑ 0 B↓ | direct 0 B↑ 0 B↓                                              
-j/k select  Tab panel  Enter disc.  t PROXY→TUN  p ping  o by ping  a add  x delete  r rules  s settings  l log         
-/ filter  Ctrl+P priv.  f fp  b role  z frag.  ? help  q/Q exit
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│● Connected: R1 | PROXY | ↑0 B/s ↓0 B/s | VPN 0 B↑ 0 B↓ | direct 0 B↑ 0 B↓                                            │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│j/k select  Tab panel  Enter disc.  t PROXY→TUN  p ping  o by ping  a add  x delete  r rules  s settings  l log       │
+│/ filter  Ctrl+P priv.  f fp  b role  z frag.  ? help  q/Q exit                                                       │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
