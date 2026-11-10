@@ -3,11 +3,15 @@ use crate::event::{BgEvent, BgTx, Event, Level, LogLine};
 use crate::mock::{self, Lcg};
 use crate::model::server::{Ping, Security, Server, Transport};
 use crate::model::subscription::Subscription;
+use crate::parser;
+use crate::storage::{Config, ServerEntry, Storage};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 use std::collections::VecDeque;
 
 pub const LOG_CAPACITY: usize = 2000;
+/// Name of the group holding servers added by hand (persisted in `config.toml`).
+pub const MANUAL_GROUP: &str = "manual";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -79,15 +83,44 @@ pub struct AppState {
     pub down_bytes: u64,
     pub status: Option<String>,
     pub should_quit: bool,
+    pub config: Config,
+    storage: Option<Storage>,
     next_id: u64,
     tx: BgTx,
     rng: Lcg,
 }
 
 impl AppState {
+    /// In-memory state with default config and no persistence (tests).
+    #[cfg(test)]
     pub fn new(tx: BgTx) -> Self {
+        Self::with_config(tx, Config::default(), None)
+    }
+
+    pub fn with_config(tx: BgTx, config: Config, storage: Option<Storage>) -> Self {
         let mut next_id = 0;
-        let subs = mock::subscriptions(&mut next_id);
+        // Subscriptions are still mock data until stage 6.
+        let mut subs = mock::subscriptions(&mut next_id);
+        let mut load_errors = Vec::new();
+        let mut manual = Vec::new();
+        for entry in &config.servers {
+            match parser::parse_link(&entry.link) {
+                Ok(mut server) => {
+                    next_id += 1;
+                    server.id = next_id;
+                    manual.push(server);
+                }
+                Err(e) => load_errors.push(format!("{}: {e}", entry.link)),
+            }
+        }
+        if !manual.is_empty() {
+            subs.push(Subscription {
+                name: MANUAL_GROUP.into(),
+                servers: manual,
+                collapsed: false,
+                info: None,
+            });
+        }
         let mut app = Self {
             subs,
             selected: 0,
@@ -106,11 +139,19 @@ impl AppState {
             down_bytes: 0,
             status: None,
             should_quit: false,
+            config,
+            storage,
             next_id,
             tx,
             rng: Lcg::from_clock(),
         };
-        app.log(Level::Info, "elf-gate started (mock data)");
+        app.log(
+            Level::Info,
+            "elf-gate started (subscriptions are mock data)",
+        );
+        for e in load_errors {
+            app.log(Level::Warning, format!("skipped saved server, {e}"));
+        }
         app
     }
 
@@ -465,8 +506,17 @@ impl AppState {
         match self.selected_row() {
             Some(Row::Group(i)) => self.subs[i].collapsed = !self.subs[i].collapsed,
             Some(Row::Server(..)) => {
-                if let Some(id) = self.selected_server().map(|s| s.id) {
-                    self.connect(id);
+                if let Some(s) = self.selected_server() {
+                    match &s.unsupported {
+                        Some(reason) => {
+                            let msg = format!("«{}»: {reason}", s.name);
+                            self.popup = Some(Popup::Error(msg));
+                        }
+                        None => {
+                            let id = s.id;
+                            self.connect(id);
+                        }
+                    }
                 }
             }
             None => {}
@@ -512,7 +562,7 @@ impl AppState {
 
     fn ping_all(&mut self) {
         for sub in &mut self.subs {
-            for s in &mut sub.servers {
+            for s in sub.servers.iter_mut().filter(|s| s.is_supported()) {
                 s.ping = Ping::Pending;
                 mock::spawn_ping(self.tx.clone(), s.id);
             }
@@ -551,16 +601,36 @@ impl AppState {
             ConfirmKind::Quit => self.should_quit = true,
             ConfirmKind::DeleteServer(id) => {
                 self.drop_connection_if(|c| c == id);
+                let mut removed_links = Vec::new();
                 for sub in &mut self.subs {
+                    if sub.name == MANUAL_GROUP {
+                        removed_links.extend(
+                            sub.servers
+                                .iter()
+                                .filter(|s| s.id == id)
+                                .map(|s| s.link.clone()),
+                        );
+                    }
                     sub.servers.retain(|s| s.id != id);
                 }
                 self.subs.retain(|s| !s.servers.is_empty());
+                if !removed_links.is_empty() {
+                    self.config
+                        .servers
+                        .retain(|e| !removed_links.contains(&e.link));
+                    self.save_config();
+                }
             }
             ConfirmKind::DeleteGroup(i) => {
                 if i < self.subs.len() {
                     let ids: Vec<u64> = self.subs[i].servers.iter().map(|s| s.id).collect();
                     self.drop_connection_if(|c| ids.contains(&c));
+                    let was_manual = self.subs[i].name == MANUAL_GROUP;
                     self.subs.remove(i);
+                    if was_manual {
+                        self.config.servers.clear();
+                        self.save_config();
+                    }
                 }
             }
         }
@@ -577,11 +647,8 @@ impl AppState {
 
     fn submit_input(&mut self, text: String) {
         let text = text.trim().to_string();
-        if text.is_empty() {
-            self.popup = Some(Popup::Error("Ссылка не может быть пустой".into()));
-            return;
-        }
         if text.starts_with("http://") || text.starts_with("https://") {
+            // Real subscription import arrives in stage 6; for now add a mock group.
             let mut servers = Vec::new();
             for n in 1..=3 {
                 self.next_id += 1;
@@ -599,26 +666,49 @@ impl AppState {
                 collapsed: false,
                 info: None,
             });
-        } else {
-            self.next_id += 1;
-            let server = mock::make_server(
-                self.next_id,
-                &text.chars().take(20).collect::<String>(),
-                "manual.example.com",
-                Security::Reality,
-                Transport::Tcp,
-            );
-            match self.subs.iter_mut().find(|s| s.name == "manual") {
-                Some(sub) => sub.servers.push(server),
-                None => self.subs.push(Subscription {
-                    name: "manual".into(),
-                    servers: vec![server],
-                    collapsed: false,
-                    info: None,
-                }),
+            self.status = Some("Подписка добавлена (мок, без сохранения)".into());
+            return;
+        }
+        match parser::parse_link(&text) {
+            Ok(server) => self.add_manual_server(server),
+            Err(e) => {
+                self.log(Level::Warning, format!("bad link: {e}"));
+                self.popup = Some(Popup::Error(e.to_string()));
             }
         }
-        self.status = Some("Добавлено (мок, без сохранения)".into());
+    }
+
+    fn add_manual_server(&mut self, mut server: Server) {
+        if self.config.servers.iter().any(|e| e.link == server.link) {
+            self.popup = Some(Popup::Error("Этот сервер уже добавлен".into()));
+            return;
+        }
+        self.next_id += 1;
+        server.id = self.next_id;
+        self.config.servers.push(ServerEntry {
+            link: server.link.clone(),
+        });
+        let name = server.name.clone();
+        match self.subs.iter_mut().find(|s| s.name == MANUAL_GROUP) {
+            Some(sub) => sub.servers.push(server),
+            None => self.subs.push(Subscription {
+                name: MANUAL_GROUP.into(),
+                servers: vec![server],
+                collapsed: false,
+                info: None,
+            }),
+        }
+        self.log(Level::Info, format!("added server {name}"));
+        self.status = Some(format!("Добавлен: {name}"));
+        self.save_config();
+    }
+
+    fn save_config(&mut self) {
+        let Some(storage) = &self.storage else { return };
+        if let Err(e) = storage.save(&self.config) {
+            self.log(Level::Error, format!("[Error] {e}"));
+            self.popup = Some(Popup::Error(e.to_string()));
+        }
     }
 }
 
@@ -679,5 +769,64 @@ mod tests {
         let mut a = app();
         a.handle_action(Action::Quit);
         assert!(a.should_quit);
+    }
+
+    #[tokio::test]
+    async fn adding_a_link_adds_to_manual_group_and_config() {
+        let mut a = app();
+        let before = a.rows().len();
+        a.submit_input("vless://u@h.example.com:443?type=tcp#Mine".into());
+        assert!(a.popup.is_none());
+        assert_eq!(a.config.servers.len(), 1);
+        assert_eq!(a.rows().len(), before + 2); // new group header + server
+        assert_eq!(a.subs.last().unwrap().name, MANUAL_GROUP);
+    }
+
+    #[tokio::test]
+    async fn bad_link_shows_error_and_changes_nothing() {
+        let mut a = app();
+        let before = a.rows().len();
+        a.submit_input("garbage".into());
+        assert!(matches!(a.popup, Some(Popup::Error(_))));
+        assert_eq!(a.rows().len(), before);
+        assert!(a.config.servers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn duplicate_link_is_rejected() {
+        let mut a = app();
+        a.submit_input("vless://u@h:443#A".into());
+        a.submit_input("vless://u@h:443#A".into());
+        assert!(matches!(a.popup, Some(Popup::Error(_))));
+        assert_eq!(a.config.servers.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn manual_servers_survive_restart() {
+        let dir = std::env::temp_dir().join(format!("elf-gate-app-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let storage = Storage::new(&dir);
+        let (tx, _rx) = unbounded_channel();
+        let mut a = AppState::with_config(tx, Config::default(), Some(storage.clone()));
+        a.submit_input("vless://u@h.example.com:443#Saved".into());
+        a.submit_input("trojan://p@h:443#Grey".into());
+
+        let (tx, _rx) = unbounded_channel();
+        let b = AppState::with_config(tx, storage.load().unwrap(), Some(storage));
+        let manual = b.subs.iter().find(|s| s.name == MANUAL_GROUP).unwrap();
+        assert_eq!(manual.servers.len(), 2);
+        assert_eq!(manual.servers[0].name, "Saved");
+        assert!(!manual.servers[1].is_supported());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_manual_server_updates_config() {
+        let mut a = app();
+        a.submit_input("vless://u@h:443#A".into());
+        let id = a.subs.last().unwrap().servers[0].id;
+        a.confirm(ConfirmKind::DeleteServer(id));
+        assert!(a.config.servers.is_empty());
+        assert!(a.subs.iter().all(|s| s.name != MANUAL_GROUP));
     }
 }

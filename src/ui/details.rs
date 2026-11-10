@@ -9,21 +9,47 @@ use ratatui::Frame;
 
 fn field<'a>(label: &str, value: String, th: &Theme) -> Line<'a> {
     Line::from(vec![
-        Span::styled(format!("{label:<11}"), th.muted()),
+        Span::styled(format!("{label:<13}"), th.muted()),
         Span::styled(value, th.text()),
     ])
 }
 
-fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
-    let mut lines = vec![
-        field("Имя:", s.name.clone(), th),
-        field("Протокол:", format!("VLESS+{}", s.security.label()), th),
-        field("Транспорт:", s.transport.label().into(), th),
-        field("Адрес:", format!("{}:{}", s.address, s.port), th),
-    ];
-    if !s.sni.is_empty() {
-        lines.push(field("SNI:", s.sni.clone(), th));
+/// Appends `label: value` only when the value is not empty.
+fn opt<'a>(lines: &mut Vec<Line<'a>>, label: &str, value: &str, th: &Theme) {
+    if !value.is_empty() {
+        lines.push(field(label, value.to_string(), th));
     }
+}
+
+fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
+    let mut lines = vec![field("Имя:", s.name.clone(), th)];
+    if let Some(reason) = &s.unsupported {
+        lines.push(Line::from(Span::styled(reason.clone(), th.warn())));
+        opt(&mut lines, "Ссылка:", &s.link, th);
+        return lines;
+    }
+    lines.push(field(
+        "Протокол:",
+        format!("VLESS+{}", s.security.label()),
+        th,
+    ));
+    lines.push(field("Транспорт:", s.transport.label().into(), th));
+    lines.push(field("Адрес:", s.host_port(), th));
+    opt(&mut lines, "UUID:", &s.uuid, th);
+    opt(&mut lines, "Flow:", &s.flow, th);
+    opt(&mut lines, "SNI:", &s.tls.sni, th);
+    opt(&mut lines, "Fingerprint:", &s.tls.fingerprint, th);
+    opt(&mut lines, "ALPN:", &s.tls.alpn.join(","), th);
+    opt(&mut lines, "PublicKey:", &s.tls.public_key, th);
+    opt(&mut lines, "ShortId:", &s.tls.short_id, th);
+    opt(&mut lines, "SpiderX:", &s.tls.spider_x, th);
+    if s.tls.allow_insecure {
+        lines.push(field("Insecure:", "да".into(), th));
+    }
+    opt(&mut lines, "Path:", &s.params.path, th);
+    opt(&mut lines, "Host:", &s.params.host, th);
+    opt(&mut lines, "Mode:", &s.params.mode, th);
+    opt(&mut lines, "Service:", &s.params.service_name, th);
     lines.push(field("Пинг:", s.ping.label(), th));
     lines
 }

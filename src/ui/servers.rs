@@ -38,10 +38,15 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                     Ping::Timeout | Ping::Error => th.bad(),
                     _ => th.muted(),
                 };
+                let (name_style, ping_text, ping_style) = if s.is_supported() {
+                    (th.text(), s.ping.label(), ping_style)
+                } else {
+                    (th.muted(), "n/a".to_string(), th.muted())
+                };
                 ListItem::new(Line::from(vec![
                     Span::styled(marker, th.good()),
-                    Span::styled(format!("{:<16}", s.name), th.text()),
-                    Span::styled(format!("{:>8}", s.ping.label()), ping_style),
+                    Span::styled(format!("{:<16}", s.name), name_style),
+                    Span::styled(format!("{ping_text:>8}"), ping_style),
                 ]))
             }
         })

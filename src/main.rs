@@ -3,11 +3,15 @@ mod app;
 mod event;
 mod mock;
 mod model;
+mod parser;
 // Stage 1 ships only empty platform implementations; they get used from stage 3 on.
 #[allow(dead_code)]
 mod platform;
 mod storage;
 mod ui;
+// The config generator is first used by the core process manager in stage 3.
+#[allow(dead_code)]
+mod xray;
 
 use anyhow::Result;
 use app::AppState;
@@ -19,6 +23,7 @@ use event::EventLoop;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::{self, Stdout};
+use storage::{Config, Storage};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
@@ -61,10 +66,10 @@ fn setup_terminal() -> Result<Term> {
     Ok(Terminal::new(CrosstermBackend::new(io::stdout()))?)
 }
 
-async fn run(terminal: &mut Term) -> Result<()> {
+async fn run(terminal: &mut Term, config: Config, storage: Storage) -> Result<()> {
     let (mut events, tx) = EventLoop::new();
     mock::spawn_log_generator(tx.clone());
-    let mut app = AppState::new(tx);
+    let mut app = AppState::with_config(tx, config, Some(storage));
 
     while !app.should_quit {
         terminal.draw(|f| ui::render(f, &mut app))?;
@@ -80,8 +85,17 @@ async fn run(terminal: &mut Term) -> Result<()> {
 async fn main() -> Result<()> {
     let _log_guard = init_logging();
     install_panic_hook();
+    // Load before touching the terminal: a broken config must be reported, not overwritten.
+    let storage = Storage::default_location();
+    let config = match storage.load() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("elf-gate: {e}");
+            std::process::exit(1);
+        }
+    };
     let mut terminal = setup_terminal()?;
-    let result = run(&mut terminal).await;
+    let result = run(&mut terminal, config, storage).await;
     restore_terminal();
     if let Err(e) = &result {
         tracing::error!("fatal: {e:#}");
