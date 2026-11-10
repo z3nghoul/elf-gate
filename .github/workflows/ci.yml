@@ -65,4 +65,6 @@ jobs:
           path: |
             target/release/elf-gate
             target/release/elf-gate.exe
+            target/release/elf-gated
+            target/release/elf-gated.exe
           if-no-files-found: error
