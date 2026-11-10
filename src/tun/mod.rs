@@ -375,15 +375,23 @@ mod tests {
         let pf = preflight(&MockTunHost::healthy(), &cfg);
         assert!(matches!(pf.problems[0], Problem::CoreMissing(_)));
         let text = explain(&pf.problems[0], &cfg);
-        assert!(
-            text.contains("sudo install") && text.contains("setcap cap_net_admin+ep"),
-            "{text}"
-        );
-        assert!(
-            text.contains("sudo elf-gate"),
-            "the fallback path is mentioned: {text}"
-        );
-        assert!(text.contains("/usr/local/lib/elf-gate/xray"), "{text}");
+        if cfg!(windows) {
+            // Windows has no root-owned copy: the core just has to sit next to elf-gate.exe.
+            assert!(
+                text.contains("xray.exe") && text.contains("рядом с elf-gate.exe"),
+                "{text}"
+            );
+        } else {
+            assert!(
+                text.contains("sudo install") && text.contains("setcap cap_net_admin+ep"),
+                "{text}"
+            );
+            assert!(
+                text.contains("sudo elf-gate"),
+                "the fallback path is mentioned: {text}"
+            );
+            assert!(text.contains("/usr/local/lib/elf-gate/xray"), "{text}");
+        }
     }
 
     #[test]

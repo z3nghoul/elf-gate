@@ -542,7 +542,11 @@ mod tests {
             (
                 MockTunHost::healthy(),
                 false,
-                "sudo setcap cap_net_admin+ep",
+                if cfg!(windows) {
+                    "xray.exe"
+                } else {
+                    "sudo setcap cap_net_admin+ep"
+                },
             ),
             (
                 MockTunHost {

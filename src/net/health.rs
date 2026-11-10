@@ -165,7 +165,8 @@ mod tests {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = l.local_addr().unwrap().port();
         drop(l);
-        let err = check(port, Duration::from_secs(2)).await.unwrap_err();
+        // Windows retries a refused connection for a couple of seconds, so allow for that.
+        let err = check(port, Duration::from_secs(10)).await.unwrap_err();
         assert!(err.contains("локальный прокси недоступен"), "{err}");
     }
 }
