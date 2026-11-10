@@ -613,24 +613,28 @@ impl AppState {
                     });
                 }
             },
-            Popup::Confirm { text, kind } => match key.code {
-                KeyCode::Char('y')
-                | KeyCode::Char('Y')
-                | KeyCode::Char('\u{434}')
-                | KeyCode::Enter => {
+            Popup::Confirm { text, kind } => {
+                // y / n are the physical keys, whatever the layout in use types on them (on the
+                // Russian and Ukrainian ones the Y key types U+043D, the N key U+0442); U+0434
+                // (the Russian "da") also confirms.
+                let physical = match key.code {
+                    KeyCode::Char(c) => Some(crate::action::qwerty(c).to_ascii_lowercase()),
+                    _ => None,
+                };
+                let yes = key.code == KeyCode::Enter
+                    || matches!(physical, Some('y'))
+                    || matches!(key.code, KeyCode::Char('\u{434}' | '\u{414}'));
+                let no = key.code == KeyCode::Esc || matches!(physical, Some('n'));
+                if yes {
                     self.confirm(kind);
                     self.show_next_alert();
-                }
-                KeyCode::Char('n')
-                | KeyCode::Char('N')
-                | KeyCode::Char('\u{43d}')
-                | KeyCode::Char('\u{442}')
-                | KeyCode::Esc => {
+                } else if no {
                     self.decline(kind);
                     self.show_next_alert();
+                } else {
+                    self.popup = Some(Popup::Confirm { text, kind });
                 }
-                _ => self.popup = Some(Popup::Confirm { text, kind }),
-            },
+            }
             Popup::Error(_) | Popup::Notice(_) => self.show_next_alert(),
         }
     }
