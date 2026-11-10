@@ -148,13 +148,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             .unwrap_or_default(),
         _ => String::new(),
     };
+    // Only the description of the selected item: the keys are in the bar at the bottom.
     f.render_widget(
-        Paragraph::new(vec![
-            Line::from(Span::styled(hint, th.muted())),
-            Line::from(Span::styled(crate::t!("rules.footer"), th.text())),
-        ])
-        .wrap(Wrap { trim: false })
-        .block(Block::bordered()),
+        Paragraph::new(Span::styled(hint, th.muted()))
+            .wrap(Wrap { trim: false })
+            .block(Block::bordered()),
         foot,
     );
 }

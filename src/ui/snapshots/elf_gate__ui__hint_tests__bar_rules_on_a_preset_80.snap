@@ -2,5 +2,5 @@
 source: src/ui/hint_tests.rs
 expression: bar
 ---
-j/k выбор  a правило  Ctrl+P прив.  Space вкл/выкл  m режим  Esc назад          
-? помощь  q/Q выход
+│j/k выбор  a правило  Ctrl+P прив.  Space вкл/выкл  m режим  Esc назад        │
+│? помощь  q/Q выход                                                           │

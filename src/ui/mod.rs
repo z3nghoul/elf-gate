@@ -50,11 +50,15 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
     }
 
     // The key bar takes as many rows as the keys need (up to three); the panels give them up.
-    let key_rows = hints::rows(app, area.width as usize).len().max(1) as u16;
+    // The status line and the key bar are framed like the panels (a border takes two rows and
+    // two columns).
+    let key_rows = hints::rows(app, (area.width as usize).saturating_sub(2))
+        .len()
+        .max(1) as u16;
     let [body, status, keys] = Layout::vertical([
         Constraint::Min(3),
-        Constraint::Length(1),
-        Constraint::Length(key_rows),
+        Constraint::Length(3),
+        Constraint::Length(key_rows + 2),
     ])
     .areas(area);
 
@@ -75,10 +79,18 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
         Screen::Settings => settings::render(f, body, app, &th),
         Screen::Help => help::render(f, body, &th),
     }
-    statusbar::render(f, status, app, &th);
+    let framed = |f: &mut Frame, rect| {
+        let block = ratatui::widgets::Block::bordered().border_style(th.border(false));
+        let inner = block.inner(rect);
+        f.render_widget(block, rect);
+        inner
+    };
+    let inner = framed(f, status);
+    statusbar::render(f, inner, app, &th);
     popup::render(f, area, app, &th);
-    // Last, in its own row: no panel and no dialog is drawn over it.
-    hints::render(f, keys, app, &th);
+    // Last, in its own rows: no panel and no dialog is drawn over it.
+    let inner = framed(f, keys);
+    hints::render(f, inner, app, &th);
 }
 
 #[cfg(test)]
@@ -189,7 +201,7 @@ mod tests {
         app.selected = 1;
         let out = draw(110, 30, &mut app);
         assert!(
-            out.contains("Fingerprint:") && out.contains("chrome (f - сменить)"),
+            out.contains("Fingerprint:") && out.contains("chrome"),
             "{out}"
         );
         v.groups[0].servers[0].fp_override = Some("firefox".into());

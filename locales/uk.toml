@@ -105,8 +105,8 @@ check_running = "триває..."
 expires = "Спливає:"
 first_hop = "Перший вузол:"
 fragment = "Фрагмент:"
-fragment_off = "вимкнена (z - увімкнути)"
-fragment_on = "увімкнена (z - вимкнути)"
+fragment_off = "вимкнена"
+fragment_on = "увімкнена"
 link = "Посилання:"
 name = "Ім'я:"
 never_updated = "ще не оновлювалась"
@@ -124,8 +124,8 @@ ping_vpn = "{ms} (медіана з {k})"
 protocol = "Протокол:"
 quic_note = "UDP/443 закрито самим Xray (flow=vision), пресет block-quic не потрібен"
 role = "Роль:"
-role_none = "немає (b - призначити основний / запасний)"
-role_set = "{role} (b - змінити)"
+role_none = "немає"
+role_set = "{role}"
 servers = "Серверів:"
 sub = "Підписка:"
 title = "Деталі"
@@ -226,10 +226,10 @@ tray_icon = "не вдалося створити значок"
 write = "не вдалося записати {path}: {source}"
 
 [fp]
-auto = "{fp} (підібрано автоматично; у посиланні: {link}; f - змінити)"
-chosen = "{fp} (вибрано; у посиланні: {link}; f - змінити)"
-default = "chrome (за замовчуванням; f - змінити)"
-from_link = "{link} (f - змінити)"
+auto = "{fp} (підібрано автоматично; у посиланні: {link})"
+chosen = "{fp} (вибрано; у посиланні: {link})"
+default = "chrome (за замовчуванням)"
+from_link = "{link}"
 unset = "не задано"
 
 [fphint]
@@ -414,7 +414,6 @@ process = "очікується назва процесу без шляху (Dis
 set = "назва набору: латиниця, цифри та дефіс (наприклад category-ru, ru)"
 
 [rules]
-footer = "Space вкл/вимк   a додати   x видалити   m режим exclude/include   Esc назад"
 inactive_in = "(неактивний у режимі {mode})"
 kind_domain = "домен"
 kind_process = "процес"
@@ -464,7 +463,7 @@ verbose_log = "Докладний лог ядра (access)"
 xray_path = "Шлях до Xray"
 
 [settings]
-footer = "Enter - змінити / перемкнути   Esc - назад. Порти та шляхи застосовуються під час наступного підключення."
+footer = "Порти та шляхи застосовуються під час наступного підключення."
 tray_absent = "значок у треї: немає (не підтримується середовищем або не запущено)"
 tray_present = "значок у треї: є"
 

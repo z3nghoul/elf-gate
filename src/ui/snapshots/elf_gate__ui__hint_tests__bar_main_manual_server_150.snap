@@ -2,5 +2,5 @@
 source: src/ui/hint_tests.rs
 expression: bar
 ---
-j/k выбор  Tab панель  Enter подкл.  t PROXY→TUN  p пинг  o по пингу  a добавить  x удалить  r правила  s настр.  l журнал  / фильтр  Ctrl+P прив.    
-f fp  b роль  z фрагм.  ? помощь  q/Q выход
+│j/k выбор  Tab панель  Enter подкл.  t PROXY→TUN  p пинг  o по пингу  a добавить  x удалить  r правила  s настр.  l журнал  / фильтр  Ctrl+P прив.  │
+│f fp  b роль  z фрагм.  ? помощь  q/Q выход                                                                                                         │

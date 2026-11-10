@@ -168,12 +168,12 @@ fn every_screen_and_state_has_a_key_bar_and_matches_its_snapshot() {
     for (name, mut a, (w, h)) in states() {
         let frame = draw(w, h, &mut a);
         // The bar may take up to three rows: look at all of them.
-        let n = super::hints::rows(&a, w as usize).len();
+        let framed = name != "too_small_window";
+        let n = super::hints::rows(&a, w as usize - if framed { 2 } else { 0 }).len();
         let frame_lines: Vec<&str> = frame.lines().collect();
-        let last = frame_lines[frame_lines.len() - n..]
-            .join(" ")
-            .trim()
-            .to_string();
+        // The bar is framed: its rows sit above the bottom border (not in the too-small notice).
+        let end = frame_lines.len() - usize::from(framed);
+        let last = frame_lines[end - n..end].join(" ").trim().to_string();
         assert!(!last.is_empty(), "{name}: the key bar is empty:\n{frame}");
         let modal = matches!(name, n if n.starts_with("dialog_") || n == "filter_input");
         if !modal {
@@ -326,9 +326,9 @@ fn the_bar_snapshots_at_80_120_and_150_columns() {
         ] {
             let (_, mut a, _) = states().into_iter().find(|s| s.0 == name).unwrap();
             let frame = draw(width, 30, &mut a);
-            let n = super::hints::rows(&a, width as usize).len();
+            let n = super::hints::rows(&a, width as usize - 2).len();
             let lines: Vec<&str> = frame.lines().collect();
-            let bar = lines[lines.len() - n..].join("\n");
+            let bar = lines[lines.len() - 1 - n..lines.len() - 1].join("\n");
             insta::assert_snapshot!(format!("bar_{name}_{width}"), bar);
         }
     }
