@@ -5,18 +5,26 @@
 use super::config;
 use super::process::{Core, CoreError};
 use super::validate::{self, Verdict};
+use crate::action::Action;
+use crate::app::{AppState, Conn};
+use crate::event::{BgEvent, Event};
 use crate::parser::parse_link;
 use crate::parser::vless::plain_vless_blocked_for_ip;
+use crate::platform::mock::{MockProxy, SharedMock};
 use crate::storage::CoreConfig;
+use crate::storage::{Config, ProxyConfig, StateStore};
+use crate::sysproxy::{ProxyController, ProxyHandle};
 use serde_json::{json, Value};
 use std::net::TcpListener as StdListener;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::{sleep, timeout, Instant};
 
 const UUID: &str = "b831381d-6324-4d53-ad4f-8cda48b30811";
@@ -70,12 +78,28 @@ impl Drop for TempDir {
     }
 }
 
+/// Next port to try. Tests run in parallel, and ports from `bind(0)` come from the ephemeral
+/// range that outgoing connections of other tests use as source ports, so they collide
+/// now and then. Test ports are therefore taken from a range below it, each issued once.
+static NEXT_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+
 fn free_port() -> u16 {
-    StdListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    use std::sync::atomic::Ordering;
+    const BASE: u16 = 20_000;
+    const SPAN: u16 = 10_000; // 20000..30000, below Linux's 32768.. ephemeral range
+    loop {
+        let n = NEXT_PORT.fetch_add(1, Ordering::SeqCst);
+        // Spread processes apart so two test runs at once do not walk the same sequence.
+        let offset = (std::process::id() as u16).wrapping_mul(97).wrapping_add(n) % SPAN;
+        let port = BASE + offset;
+        // Probe with a connect, never with bind: `TcpListener::bind` also listens, and when
+        // another test thread forks a child (spawning xray) at that moment, the child keeps
+        // the listening socket until it execs, so the very next bind of this port fails.
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_err() {
+            return port;
+        }
+    }
 }
 
 async fn wait_port(port: u16, open: bool, secs: u64) -> bool {
@@ -493,4 +517,208 @@ async fn busy_port_blocks_start_before_spawning() {
         matches!(err, CoreError::PortBusy { what: "http", .. }),
         "{err}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// 5. System proxy wired to the real core (fake desktop, real Xray).
+// ---------------------------------------------------------------------------
+
+struct Rig {
+    app: AppState,
+    rx: UnboundedReceiver<BgEvent>,
+    desktop: Arc<MockProxy>,
+    controller: Arc<ProxyController>,
+    core_cfg: CoreConfig,
+    _tmp: TempDir,
+}
+
+/// An app with one manual server pointing at a dead loopback port (the core starts fine,
+/// it just has nowhere to forward), a fake desktop that has its own proxy configured,
+/// and a proxy controller over it.
+fn rig(xray: &Path, tag: &str, set_system_proxy: bool) -> Rig {
+    let tmp = TempDir::new(tag);
+    let core_cfg = CoreConfig {
+        xray_path: xray.to_string_lossy().into_owned(),
+        socks_port: free_port(),
+        http_port: free_port(),
+        ..CoreConfig::default()
+    };
+    let config = Config {
+        core: core_cfg.clone(),
+        proxy: ProxyConfig {
+            set_system_proxy,
+            ..ProxyConfig::default()
+        },
+        servers: Vec::new(),
+    };
+    let desktop = Arc::new(MockProxy::with_user_settings(&[
+        ("enabled", "1"),
+        ("server", "corp-proxy:3128"),
+        ("bypass", "*.corp"),
+    ]));
+    let controller = Arc::new(ProxyController::new(
+        Box::new(SharedMock(desktop.clone())),
+        StateStore::new(tmp.path().join("state")),
+    ));
+    let (tx, rx) = unbounded_channel();
+    let mut app = AppState::with_config(tx.clone(), config, None)
+        .with_run_dir(tmp.path().join("run"))
+        .with_proxy(ProxyHandle::spawn(controller.clone(), tx));
+    app.submit_input(format!("vless://{UUID}@127.0.0.1:1?security=none#local"));
+    assert!(app.popup.is_none(), "{:?}", app.popup);
+    app.selected = app.rows().len() - 1; // the manual server
+    Rig {
+        app,
+        rx,
+        desktop,
+        controller,
+        core_cfg,
+        _tmp: tmp,
+    }
+}
+
+/// Feeds background events (and ticks while idle) into the app until `done` holds.
+async fn pump(
+    app: &mut AppState,
+    rx: &mut UnboundedReceiver<BgEvent>,
+    done: impl Fn(&AppState) -> bool,
+) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !done(app) {
+        assert!(
+            Instant::now() < deadline,
+            "timed out; conn={:?} popup={:?} status={:?}",
+            app.conn,
+            app.popup,
+            app.status
+        );
+        match timeout(Duration::from_millis(250), rx.recv()).await {
+            Ok(Some(ev)) => app.handle_event(Event::Bg(ev)),
+            Ok(None) => panic!("event channel closed"),
+            Err(_) => app.handle_event(Event::Tick),
+        }
+    }
+}
+
+fn connected(app: &AppState) -> bool {
+    matches!(app.conn, Conn::Connected(_))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn system_proxy_follows_the_connection_and_restores_users_settings() {
+    let xray = require_xray!();
+    let mut r = rig(&xray, "sysproxy", true);
+    let before = r.desktop.snapshot();
+
+    r.app.handle_action(Action::Enter); // connect
+    pump(&mut r.app, &mut r.rx, |a| connected(a) && a.proxy_active).await;
+    let during = r.desktop.snapshot();
+    assert_eq!(
+        during.values["server"],
+        format!("127.0.0.1:{}", r.core_cfg.http_port)
+    );
+    assert!(r.controller.is_active());
+
+    r.app.handle_action(Action::Disconnect);
+    pump(&mut r.app, &mut r.rx, |a| !a.proxy_active).await;
+    assert_eq!(
+        r.desktop.snapshot(),
+        before,
+        "the user's own proxy must be back"
+    );
+    assert!(!r.controller.is_active());
+    assert!(r.app.popup.is_none(), "{:?}", r.app.popup);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn quitting_restores_the_system_proxy() {
+    let xray = require_xray!();
+    let mut r = rig(&xray, "sysproxy-quit", true);
+    let before = r.desktop.snapshot();
+
+    r.app.handle_action(Action::Enter);
+    pump(&mut r.app, &mut r.rx, |a| connected(a) && a.proxy_active).await;
+    assert_ne!(r.desktop.snapshot(), before);
+
+    r.app.shutdown().await;
+    assert_eq!(r.desktop.snapshot(), before);
+    assert!(!r.controller.is_active());
+    assert!(
+        wait_port(r.core_cfg.socks_port, false, 5).await,
+        "core must be stopped too"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn crashed_core_does_not_leave_a_dead_system_proxy() {
+    use crate::app::Popup;
+    let xray = require_xray!();
+    let mut r = rig(&xray, "sysproxy-crash", true);
+    let before = r.desktop.snapshot();
+
+    r.app.handle_action(Action::Enter);
+    pump(&mut r.app, &mut r.rx, |a| connected(a) && a.proxy_active).await;
+    let pid = r.app.core_pid().expect("core pid");
+    // Only the exact process this test started.
+    let killed = StdCommand::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+
+    pump(&mut r.app, &mut r.rx, |a| {
+        matches!(a.conn, Conn::Error(_)) && !a.proxy_active
+    })
+    .await;
+    assert_eq!(
+        r.desktop.snapshot(),
+        before,
+        "a dead core must not keep the proxy on"
+    );
+    assert!(
+        matches!(r.app.popup, Some(Popup::Error(_))),
+        "the user must see the failure"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unsupported_desktop_gets_a_manual_hint_and_is_left_alone() {
+    let xray = require_xray!();
+    let mut r = rig(&xray, "sysproxy-unsupported", true);
+    r.desktop
+        .unsupported
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let before = r.desktop.snapshot();
+
+    r.app.handle_action(Action::Enter);
+    pump(&mut r.app, &mut r.rx, connected).await;
+    let hint = r.app.status.clone().expect("a hint must be shown");
+    assert!(
+        hint.contains(&format!("127.0.0.1:{}", r.core_cfg.socks_port)),
+        "{hint}"
+    );
+    assert!(
+        hint.contains(&format!("127.0.0.1:{}", r.core_cfg.http_port)),
+        "{hint}"
+    );
+    assert!(hint.contains("TUN"), "{hint}");
+    assert_eq!(r.desktop.snapshot(), before);
+    assert!(!r.app.proxy_active);
+    r.app.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn set_system_proxy_false_never_touches_the_system() {
+    let xray = require_xray!();
+    let mut r = rig(&xray, "sysproxy-off", false);
+    let before = r.desktop.snapshot();
+
+    r.app.handle_action(Action::Enter);
+    pump(&mut r.app, &mut r.rx, connected).await;
+    sleep(Duration::from_millis(500)).await; // give a wrongly queued command time to run
+    assert_eq!(r.desktop.snapshot(), before);
+    assert!(!r.controller.is_active());
+    r.app.shutdown().await;
+    assert_eq!(r.desktop.snapshot(), before);
 }

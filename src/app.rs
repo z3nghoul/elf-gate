@@ -4,7 +4,9 @@ use crate::mock::{self, Lcg};
 use crate::model::server::{Ping, Security, Server, Transport};
 use crate::model::subscription::Subscription;
 use crate::parser;
+use crate::platform::ProxyAddr;
 use crate::storage::{Config, ServerEntry, Storage};
+use crate::sysproxy::{ProxyCmd, ProxyHandle};
 use crate::xray::validate::{self, Verdict};
 use crate::xray::{self, process::Core};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -90,6 +92,11 @@ pub struct AppState {
     storage: Option<Storage>,
     /// The running Xray process, if any.
     core: Option<Core>,
+    proxy: Option<ProxyHandle>,
+    /// We asked the worker to switch the system proxy on and have not asked to undo it.
+    proxy_requested: bool,
+    /// The worker reported the system proxy as switched on.
+    pub proxy_active: bool,
     /// A core start or stop is in flight; new connect requests wait for it.
     busy: bool,
     run_dir: PathBuf,
@@ -150,6 +157,9 @@ impl AppState {
             config,
             storage,
             core: None,
+            proxy: None,
+            proxy_requested: false,
+            proxy_active: false,
             busy: false,
             run_dir: std::env::temp_dir().join("elf-gate-run"),
             next_id,
@@ -166,16 +176,70 @@ impl AppState {
         app
     }
 
+    /// PID of the running core (tests use it to simulate a crash).
+    #[cfg(all(test, unix))]
+    pub(crate) fn core_pid(&self) -> Option<u32> {
+        self.core.as_ref().and_then(|c| c.pid())
+    }
+
     /// Directory for generated core configs (`run/`).
     pub fn with_run_dir(mut self, dir: PathBuf) -> Self {
         self.run_dir = dir;
         self
     }
 
-    /// Stops the core before the application exits.
+    pub fn with_proxy(mut self, handle: ProxyHandle) -> Self {
+        self.proxy = Some(handle);
+        self
+    }
+
+    /// Restores the system proxy and stops the core before the application exits.
     pub async fn shutdown(&mut self) {
+        if let Some(handle) = &self.proxy {
+            let controller = handle.controller.clone();
+            let _ = tokio::task::spawn_blocking(move || controller.close()).await;
+            self.proxy_active = false;
+        }
         if let Some(core) = self.core.take() {
             core.stop().await;
+        }
+    }
+
+    /// Points the system proxy at the local core, if the user wants that and it can work.
+    fn request_proxy_on(&mut self) {
+        let Some(handle) = &self.proxy else { return };
+        if !self.config.proxy.set_system_proxy || self.mode != Mode::Proxy || self.proxy_requested {
+            return;
+        }
+        let core = &self.config.core;
+        if !handle.controller.is_supported() {
+            let hint = format!(
+                "Системный прокси не поддерживается в этом окружении. Настройте вручную: \
+                 SOCKS5 127.0.0.1:{}, HTTP 127.0.0.1:{}. Либо используйте режим TUN (t).",
+                core.socks_port, core.http_port
+            );
+            self.log(Level::Warning, hint.clone());
+            self.status = Some(hint);
+            return;
+        }
+        handle.send(ProxyCmd::Enable {
+            addr: ProxyAddr {
+                host: "127.0.0.1".into(),
+                socks_port: core.socks_port,
+                http_port: core.http_port,
+            },
+            bypass: self.config.proxy.bypass.clone(),
+        });
+        self.proxy_requested = true;
+    }
+
+    /// Puts the user's own proxy settings back.
+    fn request_proxy_off(&mut self) {
+        if self.proxy_requested {
+            if let Some(handle) = &self.proxy {
+                handle.send(ProxyCmd::Disable);
+            }
+            self.proxy_requested = false;
         }
     }
 
@@ -321,6 +385,7 @@ impl AppState {
                     let pid = core.pid().map(|p| p.to_string()).unwrap_or_default();
                     self.core = Some(*core);
                     self.conn = Conn::Connected(id);
+                    self.request_proxy_on();
                     let name = self.server_by_id(id).map(|s| s.name.clone());
                     self.log(
                         Level::Info,
@@ -337,9 +402,27 @@ impl AppState {
                 if self.conn == Conn::Connecting(id) {
                     self.conn = Conn::Error("не удалось запустить ядро".into());
                     self.popup = Some(Popup::Error(error));
+                    self.request_proxy_off();
                 }
             }
             BgEvent::CoreStopped => self.busy = false,
+            BgEvent::ProxyChanged { active, error } => match error {
+                None => {
+                    self.proxy_active = active;
+                    let msg = if active {
+                        "system proxy enabled"
+                    } else {
+                        "system proxy restored"
+                    };
+                    self.log(Level::Info, msg);
+                }
+                Some(e) => {
+                    self.proxy_active = false;
+                    self.proxy_requested = false;
+                    self.log(Level::Error, format!("[Error] system proxy: {e}"));
+                    self.popup = Some(Popup::Error(format!("Системный прокси: {e}")));
+                }
+            },
             BgEvent::ServerRejected { id, reason } => self.mark_rejected(id, &reason),
             BgEvent::ConnectFailed { id, reason } => {
                 if self.conn == Conn::Connecting(id) {
@@ -426,7 +509,7 @@ impl AppState {
 
     // ---------- actions ----------
 
-    fn handle_action(&mut self, action: Action) {
+    pub(crate) fn handle_action(&mut self, action: Action) {
         use Action::*;
         // Server-list actions only make sense on the main screen.
         let main_only = matches!(
@@ -660,6 +743,7 @@ impl AppState {
         }
         self.conn = Conn::Disconnected;
         self.log(Level::Info, "disconnected");
+        self.request_proxy_off();
     }
 
     /// Detects a core that died on its own.
@@ -667,6 +751,7 @@ impl AppState {
         let Some(core) = &mut self.core else { return };
         let Some(info) = core.try_exit() else { return };
         self.core = None;
+        self.request_proxy_off();
         self.conn = Conn::Error("ядро завершилось".into());
         self.log(
             Level::Error,
@@ -690,6 +775,10 @@ impl AppState {
             Mode::Tun => Mode::Proxy,
         };
         self.log(Level::Info, format!("mode: {}", mode_name(self.mode)));
+        if self.mode == Mode::Tun {
+            // TUN needs no system proxy (stage 5 brings the real TUN mode).
+            self.request_proxy_off();
+        }
         // Switching the mode while connected restarts the connection.
         if let Conn::Connected(id) | Conn::Connecting(id) = self.conn {
             self.connect(id);

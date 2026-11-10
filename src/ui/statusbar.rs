@@ -49,6 +49,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         Span::styled(text, th.text()),
         sep.clone(),
         Span::styled(mode_name(app.mode), th.title()),
+    ];
+    if app.proxy_active {
+        spans.push(Span::styled(" sys-proxy", th.good()));
+    }
+    spans.extend([
         sep.clone(),
         Span::styled(
             format!(
@@ -58,7 +63,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             ),
             th.text(),
         ),
-    ];
+    ]);
     if let Some(msg) = &app.status {
         spans.push(sep.clone());
         spans.push(Span::styled(msg.clone(), th.warn()));

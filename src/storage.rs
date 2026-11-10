@@ -1,3 +1,4 @@
+use crate::platform::ProxySnapshot;
 use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -7,6 +8,7 @@ use thiserror::Error;
 
 const APP_DIR: &str = "elf-gate";
 const CONFIG_FILE: &str = "config.toml";
+const STATE_FILE: &str = "state.json";
 
 /// Configuration directory: `%APPDATA%\elf-gate` on Windows, `~/.config/elf-gate` on Linux.
 pub fn config_dir() -> PathBuf {
@@ -61,6 +63,33 @@ impl Default for CoreConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ProxyConfig {
+    /// `false`: the system proxy is never touched (programs are configured by hand).
+    pub set_system_proxy: bool,
+    pub bypass: Vec<String>,
+}
+
+impl Default for ProxyConfig {
+    fn default() -> Self {
+        Self {
+            set_system_proxy: true,
+            bypass: [
+                "localhost",
+                "127.*",
+                "10.*",
+                "172.16.*",
+                "192.168.*",
+                "<local>",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        }
+    }
+}
+
 /// A server added by hand; stored as its original link.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ServerEntry {
@@ -71,7 +100,65 @@ pub struct ServerEntry {
 #[serde(default)]
 pub struct Config {
     pub core: CoreConfig,
+    pub proxy: ProxyConfig,
     pub servers: Vec<ServerEntry>,
+}
+
+/// Set while we have changed the system proxy; holds what to put back.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProxyState {
+    pub previous: ProxySnapshot,
+    pub address: String,
+}
+
+/// Service state that must survive a crash (`state.json`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct State {
+    pub proxy: Option<ProxyState>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StateStore {
+    path: PathBuf,
+}
+
+impl StateStore {
+    pub fn new(dir: impl Into<PathBuf>) -> Self {
+        Self {
+            path: dir.into().join(STATE_FILE),
+        }
+    }
+
+    pub fn default_location() -> Self {
+        Self::new(state_dir())
+    }
+
+    pub fn load(&self) -> Result<State, StorageError> {
+        let text = match fs::read_to_string(&self.path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(State::default()),
+            Err(source) => {
+                return Err(StorageError::Read {
+                    path: self.path.clone(),
+                    source,
+                })
+            }
+        };
+        serde_json::from_str(&text).map_err(|e| StorageError::Parse {
+            path: self.path.clone(),
+            message: e.to_string(),
+        })
+    }
+
+    pub fn save(&self, state: &State) -> Result<(), StorageError> {
+        let text = serde_json::to_string_pretty(state)
+            .map_err(|e| StorageError::Serialize(e.to_string()))?;
+        write_atomic(&self.path, &text).map_err(|source| StorageError::Write {
+            path: self.path.clone(),
+            source,
+        })
+    }
 }
 
 /// Reads and writes `config.toml` in one directory.
@@ -120,7 +207,9 @@ fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension("toml.tmp");
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
     fs::write(&tmp, text)?;
     fs::rename(&tmp, path)
 }

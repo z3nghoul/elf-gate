@@ -8,6 +8,7 @@ mod parser;
 #[allow(dead_code)]
 mod platform;
 mod storage;
+mod sysproxy;
 mod ui;
 mod xray;
 
@@ -21,7 +22,9 @@ use event::EventLoop;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::{self, Stdout};
-use storage::{Config, Storage};
+use std::sync::Arc;
+use storage::{Config, StateStore, Storage};
+use sysproxy::{ProxyController, ProxyHandle};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
@@ -53,7 +56,9 @@ fn install_panic_hook() {
     std::panic::set_hook(Box::new(move |info| {
         restore_terminal();
         tracing::error!("panic: {info}");
-        // Later stages: disable system proxy, stop core and TUN here.
+        // Never leave the user with a dead system proxy. (The core dies with us through
+        // the platform child guard; stage 5 adds TUN cleanup here.)
+        sysproxy::emergency_restore();
         previous(info);
     }));
 }
@@ -64,11 +69,21 @@ fn setup_terminal() -> Result<Term> {
     Ok(Terminal::new(CrosstermBackend::new(io::stdout()))?)
 }
 
-async fn run(terminal: &mut Term, config: Config, storage: Storage) -> Result<()> {
+async fn run(
+    terminal: &mut Term,
+    config: Config,
+    storage: Storage,
+    proxy: Arc<ProxyController>,
+    notes: Vec<String>,
+) -> Result<()> {
     let (mut events, tx) = EventLoop::new();
     mock::spawn_log_generator(tx.clone());
-    let mut app = AppState::with_config(tx, config, Some(storage))
-        .with_run_dir(storage::state_dir().join("run"));
+    let mut app = AppState::with_config(tx.clone(), config, Some(storage))
+        .with_run_dir(storage::state_dir().join("run"))
+        .with_proxy(ProxyHandle::spawn(proxy, tx));
+    for note in notes {
+        app.log(event::Level::Warning, note);
+    }
     app.start_background_checks();
 
     while !app.should_quit {
@@ -95,9 +110,33 @@ async fn main() -> Result<()> {
             std::process::exit(1);
         }
     };
+
+    // System proxy: undo what a previous crashed run may have left behind, then make sure
+    // every exit path (panic, SIGTERM/SIGHUP, console close) restores it.
+    let proxy = Arc::new(ProxyController::new(
+        platform::system_proxy(),
+        StateStore::default_location(),
+    ));
+    let mut notes = Vec::new();
+    match proxy.recover() {
+        Ok(Some(note)) => notes.push(note),
+        Ok(None) => {}
+        Err(e) => notes.push(format!("не удалось восстановить системный прокси: {e}")),
+    }
+    sysproxy::set_global(proxy.clone());
+    let signals = platform::shutdown_signals().install(Box::new(|| {
+        sysproxy::emergency_restore();
+        restore_terminal();
+        std::process::exit(0);
+    }));
+    if let Err(e) = signals {
+        notes.push(format!("обработчик завершения не установлен: {e}"));
+    }
+
     let mut terminal = setup_terminal()?;
-    let result = run(&mut terminal, config, storage).await;
+    let result = run(&mut terminal, config, storage, proxy, notes).await;
     restore_terminal();
+    sysproxy::emergency_restore();
     if let Err(e) = &result {
         tracing::error!("fatal: {e:#}");
     }
