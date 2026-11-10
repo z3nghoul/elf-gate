@@ -7,6 +7,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  XRAY_VERSION: v26.11.9
 
 jobs:
   build:
@@ -27,7 +28,6 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         env:
-          XRAY_VERSION: v26.11.9
           XRAY_SHA256: b651f7e1d9966ee2c1b1ee1bf8b52c72771824d3065dce96bbc8bcc19ed95f82
         run: |
           curl -fsSL -o "$RUNNER_TEMP/xray.zip" \
@@ -37,6 +37,17 @@ jobs:
           unzip -q -o "$RUNNER_TEMP/xray.zip" xray geoip.dat geosite.dat -d bin
           chmod +x bin/xray
           bin/xray version | head -1
+      # The Windows archive is only checksummed (no unpacking, no running): it pins the
+      # release we develop against until the Windows job gets its own Xray tests.
+      - name: Verify Xray Windows archive checksum
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          XRAY_WIN_SHA256: 1262522266337b824f07beb8e1375786b437683b3890105469088f8e17e0a69d
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/xray-win.zip" \
+            "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-windows-64.zip"
+          echo "${XRAY_WIN_SHA256}  $RUNNER_TEMP/xray-win.zip" | sha256sum -c -
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
