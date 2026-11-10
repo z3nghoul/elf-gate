@@ -195,10 +195,10 @@ mod tests {
             let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             l.local_addr().unwrap().port()
         };
-        assert_eq!(
-            tcp_ping("127.0.0.1", closed, Duration::from_secs(2)).await,
-            Ping::Error
-        );
+        // Windows retries a refused loopback connect for about two seconds, so "closed" can
+        // surface as a timeout there; either way it is not a measurement.
+        let bad = tcp_ping("127.0.0.1", closed, Duration::from_secs(1)).await;
+        assert!(matches!(bad, Ping::Error | Ping::Timeout), "{bad:?}");
     }
 
     #[test]
