@@ -1,5 +1,8 @@
 mod details;
 mod help;
+#[cfg(test)]
+mod hint_tests;
+pub mod hints;
 mod logs;
 mod popup;
 mod rules;
@@ -14,7 +17,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use theme::Theme;
 
-pub const MIN_WIDTH: u16 = 80;
+pub const MIN_WIDTH: u16 = 60;
 pub const MIN_HEIGHT: u16 = 24;
 
 pub fn render(f: &mut Frame, app: &mut AppState) {
@@ -26,16 +29,23 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
             "Увеличьте окно (минимум {MIN_WIDTH}x{MIN_HEIGHT}, сейчас {}x{})",
             area.width, area.height
         );
+        let [top, bar] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
         f.render_widget(
             Paragraph::new(msg)
                 .style(th.warn())
                 .alignment(Alignment::Center),
-            area,
+            top,
         );
+        hints::render(f, bar, app, &th);
         return;
     }
 
-    let [body, status] = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(area);
+    let [body, status, keys] = Layout::vertical([
+        Constraint::Min(3),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(area);
 
     match app.screen {
         Screen::Main => {
@@ -56,6 +66,8 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
     }
     statusbar::render(f, status, app, &th);
     popup::render(f, area, app, &th);
+    // Last, in its own row: no panel and no dialog is drawn over it.
+    hints::render(f, keys, app, &th);
 }
 
 #[cfg(test)]
@@ -133,7 +145,7 @@ mod tests {
         let (tx, _rx) = unbounded_channel();
         let mut app = AppState::with_demo(tx);
         // Mock list: FI-1 uses ws, Финляндия-3 uses grpc.
-        let out = draw(MIN_WIDTH, MIN_HEIGHT, &mut app);
+        let out = draw(80, MIN_HEIGHT, &mut app);
         println!("{out}");
         assert!(out.matches("[устар.]").count() >= 2, "{out}");
 
@@ -180,7 +192,7 @@ mod tests {
         let (tx, _rx) = unbounded_channel();
         let mut app = AppState::new(tx);
         app.link = crate::app::LinkState::Up;
-        let out = draw(MIN_WIDTH, MIN_HEIGHT, &mut app);
+        let out = draw(80, MIN_HEIGHT, &mut app);
         println!("{out}");
         assert!(out.contains("Нажмите a, чтобы добавить сервер"), "{out}");
         assert!(out.contains("Нет серверов"), "details pane hint: {out}");

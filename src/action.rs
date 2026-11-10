@@ -42,6 +42,16 @@ pub enum Action {
     DebugPanic,
 }
 
+/// Where a binding applies (the key bar shows only what works on the current screen).
+pub mod scope {
+    pub const MAIN: u8 = 1;
+    pub const RULES: u8 = 2;
+    pub const SETTINGS: u8 = 4;
+    pub const LOGS: u8 = 8;
+    pub const HELP: u8 = 16;
+    pub const ALL: u8 = MAIN | RULES | SETTINGS | LOGS | HELP;
+}
+
 pub struct Binding {
     /// Text shown in the help screen.
     pub label: &'static str,
@@ -49,6 +59,14 @@ pub struct Binding {
     pub action: Action,
     pub keys: &'static [(KeyCode, KeyModifiers)],
     pub hidden: bool,
+    /// The key as written in the key bar (short).
+    pub bar: &'static str,
+    /// The default caption in the key bar (the screen may refine it for the selected item).
+    pub short: &'static str,
+    /// 1 = never dropped first, larger = dropped earlier when the window is narrow.
+    pub prio: u8,
+    /// Bit set of [`scope`] values.
+    pub scopes: u8,
 }
 
 const N: KeyModifiers = KeyModifiers::NONE;
@@ -62,6 +80,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Quit,
         keys: &[(KeyCode::Char('q'), N), (KeyCode::Char('c'), C)],
         hidden: false,
+        bar: "q",
+        short: "выход",
+        prio: 1,
+        scopes: scope::ALL,
     },
     Binding {
         label: "Q",
@@ -69,6 +91,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::QuitAll,
         keys: &[(KeyCode::Char('Q'), N)],
         hidden: false,
+        bar: "Q",
+        short: "стоп VPN",
+        prio: 9,
+        scopes: scope::ALL,
     },
     Binding {
         label: "j k / стрелки",
@@ -76,6 +102,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Down,
         keys: &[(KeyCode::Char('j'), N), (KeyCode::Down, N)],
         hidden: false,
+        bar: "j/k",
+        short: "выбор",
+        prio: 5,
+        scopes: scope::MAIN | scope::RULES | scope::SETTINGS | scope::LOGS,
     },
     Binding {
         label: "",
@@ -83,6 +113,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Up,
         keys: &[(KeyCode::Char('k'), N), (KeyCode::Up, N)],
         hidden: true,
+        bar: "",
+        short: "",
+        prio: 9,
+        scopes: 0,
     },
     Binding {
         label: "PgUp / PgDn",
@@ -90,6 +124,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::PageDown,
         keys: &[(KeyCode::PageDown, N)],
         hidden: false,
+        bar: "PgUp/PgDn",
+        short: "страница",
+        prio: 8,
+        scopes: scope::LOGS,
     },
     Binding {
         label: "",
@@ -97,6 +135,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::PageUp,
         keys: &[(KeyCode::PageUp, N)],
         hidden: true,
+        bar: "",
+        short: "",
+        prio: 9,
+        scopes: 0,
     },
     Binding {
         label: "g / G",
@@ -104,6 +146,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Bottom,
         keys: &[(KeyCode::Char('G'), N), (KeyCode::End, N)],
         hidden: false,
+        bar: "g/G",
+        short: "начало/конец",
+        prio: 8,
+        scopes: scope::LOGS,
     },
     Binding {
         label: "",
@@ -111,6 +157,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Top,
         keys: &[(KeyCode::Char('g'), N), (KeyCode::Home, N)],
         hidden: true,
+        bar: "",
+        short: "",
+        prio: 9,
+        scopes: 0,
     },
     Binding {
         label: "Tab / Shift+Tab",
@@ -118,6 +168,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::FocusNext,
         keys: &[(KeyCode::Tab, N)],
         hidden: false,
+        bar: "Tab",
+        short: "панель",
+        prio: 7,
+        scopes: scope::MAIN,
     },
     Binding {
         label: "",
@@ -125,6 +179,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::FocusPrev,
         keys: &[(KeyCode::BackTab, N)],
         hidden: true,
+        bar: "",
+        short: "",
+        prio: 9,
+        scopes: 0,
     },
     Binding {
         label: "Enter",
@@ -132,6 +190,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Enter,
         keys: &[(KeyCode::Enter, N)],
         hidden: false,
+        bar: "Enter",
+        short: "подключить",
+        prio: 1,
+        scopes: scope::MAIN | scope::SETTINGS,
     },
     Binding {
         label: "d",
@@ -139,6 +201,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Disconnect,
         keys: &[(KeyCode::Char('d'), N)],
         hidden: false,
+        bar: "d",
+        short: "отключить",
+        prio: 3,
+        scopes: scope::MAIN,
     },
     Binding {
         label: "t",
@@ -146,6 +212,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::ToggleMode,
         keys: &[(KeyCode::Char('t'), N)],
         hidden: false,
+        bar: "t",
+        short: "PROXY/TUN",
+        prio: 3,
+        scopes: scope::MAIN,
     },
     Binding {
         label: "p",
@@ -153,6 +223,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::PingAll,
         keys: &[(KeyCode::Char('p'), N)],
         hidden: false,
+        bar: "p",
+        short: "пинг",
+        prio: 4,
+        scopes: scope::MAIN,
     },
     Binding {
         label: "o",
@@ -160,6 +234,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::SortPing,
         keys: &[(KeyCode::Char('o'), N)],
         hidden: false,
+        bar: "o",
+        short: "сортировка",
+        prio: 7,
+        scopes: scope::MAIN,
     },
     Binding {
         label: "u",
@@ -167,6 +245,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::UpdateSubs,
         keys: &[(KeyCode::Char('u'), N)],
         hidden: false,
+        bar: "u",
+        short: "подписки",
+        prio: 5,
+        scopes: scope::MAIN,
     },
     Binding {
         label: "a",
@@ -174,6 +256,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Add,
         keys: &[(KeyCode::Char('a'), N)],
         hidden: false,
+        bar: "a",
+        short: "добавить",
+        prio: 2,
+        scopes: scope::MAIN | scope::RULES,
     },
     Binding {
         label: "x",
@@ -181,6 +267,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Delete,
         keys: &[(KeyCode::Char('x'), N)],
         hidden: false,
+        bar: "x",
+        short: "удалить",
+        prio: 3,
+        scopes: scope::MAIN | scope::RULES,
     },
     Binding {
         label: "r",
@@ -188,6 +278,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Rules,
         keys: &[(KeyCode::Char('r'), N)],
         hidden: false,
+        bar: "r",
+        short: "правила",
+        prio: 5,
+        scopes: scope::MAIN,
     },
     Binding {
         label: "s",
@@ -195,6 +289,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Settings,
         keys: &[(KeyCode::Char('s'), N)],
         hidden: false,
+        bar: "s",
+        short: "настройки",
+        prio: 5,
+        scopes: scope::MAIN,
     },
     Binding {
         label: "l",
@@ -202,6 +300,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Logs,
         keys: &[(KeyCode::Char('l'), N)],
         hidden: false,
+        bar: "l",
+        short: "журнал",
+        prio: 6,
+        scopes: scope::MAIN,
     },
     Binding {
         label: "/",
@@ -209,6 +311,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Filter,
         keys: &[(KeyCode::Char('/'), N)],
         hidden: false,
+        bar: "/",
+        short: "фильтр",
+        prio: 6,
+        scopes: scope::MAIN,
     },
     Binding {
         label: "f",
@@ -216,6 +322,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Fingerprint,
         keys: &[(KeyCode::Char('f'), N)],
         hidden: false,
+        bar: "f",
+        short: "fp",
+        prio: 7,
+        scopes: scope::MAIN,
     },
     Binding {
         label: "h",
@@ -223,6 +333,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::ShowHidden,
         keys: &[(KeyCode::Char('h'), N)],
         hidden: false,
+        bar: "h",
+        short: "скрытые",
+        prio: 7,
+        scopes: scope::MAIN,
     },
     Binding {
         label: "b",
@@ -230,6 +344,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Role,
         keys: &[(KeyCode::Char('b'), N)],
         hidden: false,
+        bar: "b",
+        short: "роль",
+        prio: 8,
+        scopes: scope::MAIN,
     },
     Binding {
         label: "z",
@@ -237,6 +355,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Fragment,
         keys: &[(KeyCode::Char('z'), N)],
         hidden: false,
+        bar: "z",
+        short: "фрагмент.",
+        prio: 8,
+        scopes: scope::MAIN,
     },
     Binding {
         label: "Space",
@@ -244,6 +366,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Toggle,
         keys: &[(KeyCode::Char(' '), N)],
         hidden: false,
+        bar: "Space",
+        short: "вкл/выкл",
+        prio: 1,
+        scopes: scope::RULES,
     },
     Binding {
         label: "m",
@@ -251,6 +377,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::RoutingMode,
         keys: &[(KeyCode::Char('m'), N)],
         hidden: false,
+        bar: "m",
+        short: "exclude/include",
+        prio: 3,
+        scopes: scope::RULES,
     },
     Binding {
         label: "?",
@@ -258,6 +388,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Help,
         keys: &[(KeyCode::Char('?'), N)],
         hidden: false,
+        bar: "?",
+        short: "помощь",
+        prio: 1,
+        scopes: scope::ALL,
     },
     Binding {
         label: "Esc",
@@ -265,6 +399,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Back,
         keys: &[(KeyCode::Esc, N)],
         hidden: false,
+        bar: "Esc",
+        short: "назад",
+        prio: 1,
+        scopes: scope::RULES | scope::SETTINGS | scope::LOGS | scope::HELP,
     },
     #[cfg(debug_assertions)]
     Binding {
@@ -273,6 +411,10 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::DebugPanic,
         keys: &[(KeyCode::F(12), N)],
         hidden: true,
+        bar: "",
+        short: "",
+        prio: 9,
+        scopes: 0,
     },
 ];
 
