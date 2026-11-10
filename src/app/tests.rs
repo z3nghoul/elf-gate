@@ -150,6 +150,17 @@ async fn enter_connects_and_a_greyed_out_server_is_explained_instead() {
 }
 
 #[tokio::test]
+async fn enter_on_the_connected_server_disconnects_it() {
+    let (mut a, mut rx) = app_with(&[REALITY, "vless://u@h2.example.com:443?security=tls#Two"]);
+    a.conn = Conn::Connected(1);
+    a.handle_action(Action::Enter);
+    assert_eq!(sent(&mut rx), vec![Cmd::Disconnect]);
+    a.selected = 2; // another server: switch to it
+    a.handle_action(Action::Enter);
+    assert_eq!(sent(&mut rx), vec![Cmd::Connect(2)]);
+}
+
+#[tokio::test]
 async fn delete_asks_first_then_names_the_server_or_group() {
     let (mut a, mut rx) = app_with(&[REALITY]);
     a.handle_action(Action::Delete);

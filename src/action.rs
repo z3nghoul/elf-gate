@@ -126,7 +126,7 @@ pub const BINDINGS: &[Binding] = &[
     },
     Binding {
         label: "Enter",
-        desc: "подключиться / свернуть группу",
+        desc: "подключиться / отключиться (на текущем сервере) / свернуть группу",
         action: Action::Enter,
         keys: &[(KeyCode::Enter, N)],
         hidden: false,
