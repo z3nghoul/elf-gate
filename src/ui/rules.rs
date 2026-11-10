@@ -122,6 +122,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 } else {
                     format!("процессы: {names}. ")
                 };
+                if p.block_udp443 && app.vision_in_use() {
+                    // First, so the footer (two lines) cannot cut it off.
+                    text.push_str(
+                        "Выбранный сервер с flow=vision: UDP/443 закрыт ядром, пресет не нужен. ",
+                    );
+                }
                 text.push_str(&p.note);
                 text
             })

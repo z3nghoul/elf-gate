@@ -206,6 +206,50 @@ pub fn effective_rules(
     out
 }
 
+/// Entries for the system proxy's bypass list: plain domains and IPs that the rules send
+/// direct. Only in `exclude` mode (in `include` the listed things are the ones that must use the
+/// proxy). `geosite`, `keyword:` and odd CIDRs cannot be written as bypass patterns and are left
+/// to Xray's own routing. CIDRs are kept only where they map to `a.b.*` wildcards.
+pub fn bypass_additions(mode: RoutingMode, rules: &EffectiveRules) -> Vec<String> {
+    if mode != RoutingMode::Exclude {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for d in &rules.domains {
+        match d.split_once(':') {
+            Some(("domain", name)) => {
+                push_unique(&mut out, name.to_string());
+                push_unique(&mut out, format!("*.{name}"));
+            }
+            Some(("full", name)) => push_unique(&mut out, name.to_string()),
+            _ => {}
+        }
+    }
+    for ip in &rules.ips {
+        if ip.starts_with("geoip:") {
+            continue;
+        }
+        match ip.split_once('/') {
+            None if ip.parse::<std::net::Ipv4Addr>().is_ok() => push_unique(&mut out, ip.clone()),
+            Some((addr, prefix)) => {
+                let (Ok(v4), Ok(n)) = (addr.parse::<std::net::Ipv4Addr>(), prefix.parse::<u8>())
+                else {
+                    continue;
+                };
+                let o = v4.octets();
+                match n {
+                    8 => push_unique(&mut out, format!("{}.*", o[0])),
+                    16 => push_unique(&mut out, format!("{}.{}.*", o[0], o[1])),
+                    24 => push_unique(&mut out, format!("{}.{}.{}.*", o[0], o[1], o[2])),
+                    _ => {}
+                }
+            }
+            None => {}
+        }
+    }
+    out
+}
+
 // ---------------------------------------------------------------- validation
 
 /// Checks a user-typed rule value; the error text is shown in the UI.
@@ -292,6 +336,14 @@ mod tests {
             .processes_windows
             .iter()
             .all(|n| !n.ends_with(".exe")));
+        let ua = presets.iter().find(|p| p.id == "ua-direct").unwrap();
+        assert!(
+            ua.geosite.is_empty() && ua.geoip.is_empty() && ua.domains.contains(&"ua".to_string()),
+            "the bundled geodata has no ua sets: the preset is a domain list"
+        );
+        assert!(ua.note.contains("geoip:ua"));
+        let quic = presets.iter().find(|p| p.id == "block-quic").unwrap();
+        assert!(quic.block_udp443 && quic.note.contains("xtls-rprx-vision"));
     }
 
     #[test]
@@ -345,6 +397,41 @@ mod tests {
         assert!(e.domains.contains(&"domain:discordapp.net".to_string()));
         assert!(e.ips.contains(&"10.1.0.0/16".to_string()));
         assert_eq!(e.always_direct_ips, vec!["geoip:private".to_string()]);
+    }
+
+    #[test]
+    fn direct_domains_and_ips_feed_the_system_proxy_bypass_list_in_exclude_mode_only() {
+        let rules = vec![
+            Rule::new(RuleKind::Domain, "example.com"),
+            Rule {
+                domain_match: Some(DomainMatch::Full),
+                ..Rule::new(RuleKind::Domain, "exact.example.org")
+            },
+            Rule {
+                domain_match: Some(DomainMatch::Keyword),
+                ..Rule::new(RuleKind::Domain, "kw")
+            },
+            Rule::new(RuleKind::Geosite, "category-ru"),
+            Rule::new(RuleKind::Ip, "203.0.113.7"),
+            Rule::new(RuleKind::Ip, "10.20.0.0/16"),
+            Rule::new(RuleKind::Ip, "10.20.30.0/25"),
+            Rule::new(RuleKind::Geoip, "ru"),
+        ];
+        let e = effective_rules(RoutingMode::Exclude, &rules, &[], &[], false);
+        assert_eq!(
+            bypass_additions(RoutingMode::Exclude, &e),
+            [
+                "example.com",
+                "*.example.com",
+                "exact.example.org",
+                "203.0.113.7",
+                "10.20.*"
+            ]
+        );
+        assert!(
+            bypass_additions(RoutingMode::Include, &e).is_empty(),
+            "in include mode the listed things must NOT bypass the proxy"
+        );
     }
 
     #[test]

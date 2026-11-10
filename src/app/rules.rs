@@ -366,6 +366,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn direct_rules_extend_the_proxy_bypass_list() {
+        let dir = temp_dir("bypass");
+        let mut a = app(&dir);
+        a.config
+            .rules
+            .push(Rule::new(RuleKind::Domain, "example.com"));
+        a.config.presets.enabled.push("games-direct".into());
+        let bypass = a.proxy_bypass();
+        assert!(
+            bypass.contains(&"localhost".to_string()),
+            "the user's own list stays"
+        );
+        assert!(bypass.contains(&"*.example.com".to_string()));
+        assert!(
+            bypass.contains(&"*.steampowered.com".to_string()),
+            "presets count too"
+        );
+        a.config.mode.routing = RoutingMode::Include;
+        assert_eq!(
+            a.proxy_bypass(),
+            a.config.proxy.bypass,
+            "include mode adds nothing"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn vision_servers_are_flagged_as_not_needing_the_quic_preset() {
+        let dir = temp_dir("vision");
+        let mut a = app(&dir);
+        a.submit_input(
+            "vless://u@h.example.com:443?flow=xtls-rprx-vision&security=reality&sni=x.org&pbk=K&sid=ab#V"
+                .into(),
+        );
+        a.selected = a.rows().len() - 1;
+        assert!(a.vision_in_use());
+        let ids = a.rule_items();
+        let quic = ids
+            .iter()
+            .position(|i| matches!(i, RuleItem::Preset(id) if id == "block-quic"))
+            .unwrap();
+        a.rules_cursor = quic;
+        let out = crate::ui::tests_support::draw(120, 40, &mut a);
+        assert!(out.contains("UDP/443 закрыт ядром"), "{out}");
+        a.screen = Screen::Main;
+        let out = crate::ui::tests_support::draw(120, 40, &mut a);
+        assert!(
+            out.contains("QUIC:") && out.contains("flow=vision"),
+            "{out}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
     async fn rules_screen_renders_modes_and_inactive_notes() {
         let dir = temp_dir("render");
         let mut a = app(&dir);

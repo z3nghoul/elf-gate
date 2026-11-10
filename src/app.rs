@@ -2,7 +2,7 @@ use crate::action::{map_key, Action};
 use crate::build_info;
 use crate::event::{now_hms, BgEvent, BgTx, Event, Level, LogLine};
 use crate::mock::{self, Lcg};
-use crate::model::rule::{builtin_presets, Rule, RuleKind};
+use crate::model::rule::{builtin_presets, bypass_additions, effective_rules, Rule, RuleKind};
 use crate::model::server::{Ping, Security, Server, FINGERPRINTS};
 use crate::model::subscription::Subscription;
 use crate::parser;
@@ -164,6 +164,8 @@ pub struct AppState {
     proxy: Option<ProxyHandle>,
     /// We asked the worker to switch the system proxy on and have not asked to undo it.
     proxy_requested: bool,
+    /// The bypass list the system proxy was last given.
+    proxy_bypass_sent: Vec<String>,
     /// The worker reported the system proxy as switched on.
     pub proxy_active: bool,
     /// Demo data and fake numbers are enabled (debug builds).
@@ -272,6 +274,7 @@ impl AppState {
             core: None,
             proxy: None,
             proxy_requested: false,
+            proxy_bypass_sent: Vec::new(),
             proxy_active: false,
             mock,
             busy: false,
@@ -352,10 +355,13 @@ impl AppState {
     /// Points the system proxy at the local core, if the user wants that and it can work.
     fn request_proxy_on(&mut self) {
         let Some(handle) = &self.proxy else { return };
-        if !self.config.proxy.set_system_proxy
-            || self.conn_mode != Mode::Proxy
-            || self.proxy_requested
-        {
+        if !self.config.proxy.set_system_proxy || self.conn_mode != Mode::Proxy {
+            return;
+        }
+        let bypass = self.proxy_bypass();
+        // Already on with the same list: nothing to do. Rules may have changed: send it again
+        // (the controller keeps the user's original settings across repeated enables).
+        if self.proxy_requested && self.proxy_bypass_sent == bypass {
             return;
         }
         let core = &self.config.core;
@@ -375,9 +381,28 @@ impl AppState {
                 socks_port: core.socks_port,
                 http_port: core.http_port,
             },
-            bypass: self.config.proxy.bypass.clone(),
+            bypass: bypass.clone(),
         });
+        self.proxy_bypass_sent = bypass;
         self.proxy_requested = true;
+    }
+
+    /// `[proxy].bypass` plus plain domains and IPs of the "direct" rules (exclude mode).
+    fn proxy_bypass(&self) -> Vec<String> {
+        let rules = effective_rules(
+            self.config.mode.routing,
+            &self.config.rules,
+            &self.config.presets.enabled,
+            &builtin_presets(),
+            cfg!(windows),
+        );
+        let mut bypass = self.config.proxy.bypass.clone();
+        for extra in bypass_additions(self.config.mode.routing, &rules) {
+            if !bypass.contains(&extra) {
+                bypass.push(extra);
+            }
+        }
+        bypass
     }
 
     /// Puts the user's own proxy settings back.
@@ -1095,6 +1120,16 @@ impl AppState {
                 self.connect(id);
             }
         }
+    }
+
+    /// The connected server (else the selected one) uses `flow=xtls-rprx-vision`, with which Xray
+    /// itself refuses UDP/443 (QUIC).
+    pub fn vision_in_use(&self) -> bool {
+        let server = match self.conn {
+            Conn::Connected(id) | Conn::Connecting(id) => self.server_by_id(id),
+            _ => self.selected_server(),
+        };
+        server.is_some_and(|s| s.flow.contains("vision"))
     }
 
     /// Shown in the details pane when the connection check fails although the server answers

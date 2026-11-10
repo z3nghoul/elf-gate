@@ -3,6 +3,29 @@ source: src/xray/config.rs
 expression: cfg
 ---
 {
+  "dns": {
+    "queryStrategy": "UseIP",
+    "servers": [
+      {
+        "address": "192.168.1.1",
+        "domains": [
+          "domain:ua",
+          "domain:ukr.net",
+          "domain:1plus1.video",
+          "domain:privat24.ua",
+          "domain:monobank.ua"
+        ],
+        "port": 53,
+        "skipFallback": true,
+        "tag": "dns-local-0"
+      },
+      {
+        "address": "1.1.1.1",
+        "port": 53,
+        "tag": "dns-tunnel"
+      }
+    ]
+  },
   "inbounds": [
     {
       "listen": "127.0.0.1",
@@ -104,11 +127,38 @@ expression: cfg
     {
       "protocol": "blackhole",
       "tag": "block"
+    },
+    {
+      "protocol": "dns",
+      "tag": "dns-out"
     }
   ],
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
+      {
+        "inboundTag": [
+          "tun-in"
+        ],
+        "network": "udp",
+        "outboundTag": "dns-out",
+        "port": "53",
+        "type": "field"
+      },
+      {
+        "inboundTag": [
+          "dns-tunnel"
+        ],
+        "outboundTag": "proxy",
+        "type": "field"
+      },
+      {
+        "inboundTag": [
+          "dns-local-0"
+        ],
+        "outboundTag": "direct",
+        "type": "field"
+      },
       {
         "domain": [
           "full:connectivitycheck.gstatic.com"
@@ -125,6 +175,17 @@ expression: cfg
           "elf-gate",
           "elf-gated"
         ],
+        "type": "field"
+      },
+      {
+        "domain": [
+          "domain:ua",
+          "domain:ukr.net",
+          "domain:1plus1.video",
+          "domain:privat24.ua",
+          "domain:monobank.ua"
+        ],
+        "outboundTag": "direct",
         "type": "field"
       }
     ]

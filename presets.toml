@@ -6,6 +6,21 @@
 # Process names have no ".exe": Xray strips it, so one name works on Windows and Linux.
 # NOTE: process names are matched case-sensitively against the real file name after symlinks
 # are resolved (docs/tun-research.md). Linux names must be checked against the installed client.
+#
+# Linux process names, checked on a real machine (Arch, November 2026):
+#   Discord   VERIFIED: the Flatpak client (com.discordapp.Discord) runs /app/discord/Discord.
+#   steam, steamwebhelper   VERIFIED: ~/.local/share/Steam/ubuntu12_32/steam; /usr/bin/steam is only
+#             a launcher script and never shows up as the process name.
+#   vesktop   NOT RIGHT for every package: the Arch package vesktop-bin runs under the system Electron
+#             (the process is called `electron44`). The AppImage and Flatpak builds are expected to use
+#             `vesktop`, but that is unverified. On Arch pick the process on the rules screen (`a`).
+#   DiscordPTB, DiscordCanary   UNVERIFIED: names follow Discord's own naming; the Arch package
+#             discord-canary installs /usr/bin/discord-canary but the real executable name was not checked.
+#   java      UNVERIFIED: the real file name is `java` for OpenJDK, but launchers (Prism, Minecraft) may
+#             start it through a wrapper.
+#   qbittorrent, transmission-gtk, transmission-qt   UNVERIFIED: not installed on the check machine.
+#   deluge    LIKELY WRONG: Deluge is a Python program, the process is `python3.x`, not `deluge`.
+#             Add the real name from the process list if you use it.
 
 [[preset]]
 id = "discord-only"
@@ -39,10 +54,12 @@ geoip = ["ru"]
 
 [[preset]]
 id = "ua-direct"
-title = "Украинские сайты напрямую"
+title = "Украинские сайты напрямую (по списку доменов)"
 routing = "exclude"
-geosite = ["category-ua"]
-geoip = ["ua"]
+# The Xray bundle used here has neither geoip:ua nor geosite:category-ua, so the preset is a domain
+# list: the whole .ua zone plus a few big sites outside it. It does not match by IP address.
+domains = ["ua", "ukr.net", "1plus1.video", "privat24.ua", "monobank.ua"]
+note = "В сборке Xray нет geoip:ua и geosite:category-ua: пресет работает по списку доменов (зона .ua и несколько крупных сайтов), по IP-адресам не работает."
 
 [[preset]]
 id = "local-direct"
@@ -57,4 +74,4 @@ title = "Блокировать UDP 443 (QUIC)"
 routing = "exclude"
 block_udp443 = true
 always = true
-note = "При flow=xtls-rprx-vision Xray уже блокирует UDP/443 сам; правило нужно для остальных серверов."
+note = "По умолчанию выключен. При flow=xtls-rprx-vision Xray уже закрывает UDP/443 сам, пресет нужен для остальных серверов. Голос и стримы Discord идут по UDP на других портах и не затрагиваются."
