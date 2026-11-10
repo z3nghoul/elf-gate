@@ -2,7 +2,50 @@ use super::{fragment_name, ParseError};
 use crate::model::server::{Ping, Security, Server, TlsParams, Transport, TransportParams};
 use percent_encoding::percent_decode_str;
 use std::collections::HashMap;
+use std::net::IpAddr;
 use url::Url;
+
+/// Suffixes of non-IP server addresses that Xray 26.x accepts for unencrypted VLESS.
+/// Found empirically with `xray run -test` (v26.11.9); the integration tests re-check
+/// this table against the installed Xray.
+const PRIVATE_DOMAIN_SUFFIXES: &[&str] = &[
+    "local",
+    "lan",
+    "internal",
+    "test",
+    "localhost",
+    "localdomain",
+    "home.arpa",
+    "example",
+    "invalid",
+];
+
+/// Does Xray allow VLESS without TLS/Reality and without `encryption` to this address?
+/// It only does for private IPs and private-looking names.
+pub fn xray_allows_plain_vless(address: &str) -> bool {
+    if let Ok(ip) = address.parse::<IpAddr>() {
+        return match ip {
+            IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+            IpAddr::V6(v6) => {
+                let first = v6.segments()[0];
+                v6.is_loopback() || first & 0xfe00 == 0xfc00 || first & 0xffc0 == 0xfe80
+            }
+        };
+    }
+    let name = address.to_ascii_lowercase();
+    if name.is_empty() || !name.is_ascii() {
+        return false;
+    }
+    if !name.contains('.') {
+        return true; // single-label name such as `vps1`
+    }
+    PRIVATE_DOMAIN_SUFFIXES
+        .iter()
+        .any(|suffix| name == *suffix || name.ends_with(&format!(".{suffix}")))
+}
+
+pub const PLAIN_VLESS_REASON: &str = "несовместим с текущим Xray: VLESS без шифрования \
+(security=none, encryption=none) на публичный адрес запрещён. Нужен TLS/Reality или encryption";
 
 /// `vless://uuid@host:port?params#name`
 pub fn parse(link: &str) -> Result<Server, ParseError> {
@@ -50,6 +93,17 @@ pub fn parse(link: &str) -> Result<Server, ParseError> {
         }
     };
 
+    let encryption = match get("encryption") {
+        e if e.trim().is_empty() => "none".to_string(),
+        e => e,
+    };
+    if security == Security::None
+        && encryption.eq_ignore_ascii_case("none")
+        && !xray_allows_plain_vless(&address)
+    {
+        unsupported.get_or_insert_with(|| PLAIN_VLESS_REASON.to_string());
+    }
+
     let flag = |v: String| matches!(v.to_ascii_lowercase().as_str(), "1" | "true");
     let tls = TlsParams {
         sni: get("sni"),
@@ -87,6 +141,7 @@ pub fn parse(link: &str) -> Result<Server, ParseError> {
         port,
         uuid,
         flow: get("flow"),
+        encryption,
         security,
         transport,
         tls,
@@ -171,28 +226,32 @@ mod tests {
 
     #[test]
     fn raw_unicode_name_in_fragment() {
-        let s = parse_link(&format!("vless://{UUID}@h.example.com:443#Финляндия 🚀")).unwrap();
+        let s = parse_link(&format!(
+            "vless://{UUID}@h.example.com:443?security=tls#Финляндия 🚀"
+        ))
+        .unwrap();
         assert_eq!(s.name, "Финляндия 🚀");
     }
 
     #[test]
     fn ipv6_address_in_brackets() {
-        let s = parse_link(&format!("vless://{UUID}@[2001:db8::1]:443?type=tcp#v6")).unwrap();
-        assert_eq!(s.address, "2001:db8::1");
-        assert_eq!(s.host_port(), "[2001:db8::1]:443");
+        let s = parse_link(&format!("vless://{UUID}@[fd00::1]:443?type=tcp#v6")).unwrap();
+        assert_eq!(s.address, "fd00::1");
+        assert_eq!(s.host_port(), "[fd00::1]:443");
     }
 
     #[test]
     fn ipv4_address() {
-        let s = parse_link(&format!("vless://{UUID}@203.0.113.7:2053#ip")).unwrap();
-        assert_eq!(s.address, "203.0.113.7");
+        let s = parse_link(&format!("vless://{UUID}@10.0.0.7:2053#ip")).unwrap();
+        assert_eq!(s.address, "10.0.0.7");
         assert_eq!(s.port, 2053);
     }
 
     #[test]
     fn optional_params_missing() {
-        let s = parse_link(&format!("vless://{UUID}@h.example.com:443")).unwrap();
-        assert_eq!(s.security, Security::None);
+        let s = parse_link(&format!("vless://{UUID}@h.example.com:443?security=tls")).unwrap();
+        assert_eq!(s.security, Security::Tls);
+        assert_eq!(s.encryption, "none");
         assert_eq!(s.transport, Transport::Tcp);
         assert_eq!(s.flow, "");
         assert!(s.tls.alpn.is_empty());
@@ -212,14 +271,20 @@ mod tests {
 
     #[test]
     fn whitespace_around_link_is_trimmed() {
-        let s = parse_link(&format!("  vless://{UUID}@h.example.com:443#x \n")).unwrap();
+        let s = parse_link(&format!(
+            "  vless://{UUID}@h.example.com:443?security=tls#x \n"
+        ))
+        .unwrap();
         assert_eq!(s.name, "x");
         assert!(!s.link.contains('\n'));
     }
 
     #[test]
     fn unsupported_transport_is_marked_not_dropped() {
-        let s = parse_link(&format!("vless://{UUID}@h.example.com:443?type=kcp#K")).unwrap();
+        let s = parse_link(&format!(
+            "vless://{UUID}@h.example.com:443?security=tls&type=kcp#K"
+        ))
+        .unwrap();
         assert!(!s.is_supported());
         assert_eq!(s.name, "K");
     }
@@ -242,5 +307,98 @@ mod tests {
             parse_link(&format!("vless://{UUID}@:443")),
             Err(ParseError::MissingHost | ParseError::InvalidUrl(_))
         ));
+    }
+
+    const PQ_ENC: &str =
+        "mlkem768x25519plus.native.0rtt.45M6KAE8QF6VlzscrkIrjshB78IYPvGemYDCFrzFi14";
+
+    #[test]
+    fn encryption_is_passed_through_unchanged() {
+        let s = parse_link(&format!(
+            "vless://{UUID}@8.8.8.8:443?security=none&encryption={PQ_ENC}#pq"
+        ))
+        .unwrap();
+        assert_eq!(s.encryption, PQ_ENC);
+        // A real encryption makes plain transport to a public address legitimate.
+        assert!(s.is_supported());
+    }
+
+    #[test]
+    fn plain_vless_to_public_address_is_marked_incompatible() {
+        for host in [
+            "8.8.8.8",
+            "example.com",
+            "de1.vpn.example.org",
+            "[2001:db8::1]",
+            "100.64.0.1",
+        ] {
+            let s = parse_link(&format!(
+                "vless://{UUID}@{host}:443?security=none&encryption=none#p"
+            ))
+            .unwrap();
+            let reason = s
+                .unsupported
+                .unwrap_or_else(|| panic!("{host} must be incompatible"));
+            assert!(reason.contains("Xray"), "{reason}");
+        }
+        // Missing params default to security=none, encryption=none.
+        assert!(!parse_link(&format!("vless://{UUID}@8.8.8.8:443#p"))
+            .unwrap()
+            .is_supported());
+    }
+
+    #[test]
+    fn plain_vless_to_private_address_is_fine() {
+        for host in [
+            "10.0.0.5",
+            "192.168.1.9",
+            "172.16.3.3",
+            "127.0.0.1",
+            "[::1]",
+            "[fd00::1]",
+            "vps1",
+            "box.lan",
+            "x.home.arpa",
+        ] {
+            let s = parse_link(&format!("vless://{UUID}@{host}:443?security=none#p")).unwrap();
+            assert!(s.is_supported(), "{host}");
+        }
+    }
+
+    #[test]
+    fn tls_and_reality_to_public_address_are_fine() {
+        for q in ["security=tls", "security=reality&pbk=K&sni=x.org"] {
+            let s = parse_link(&format!("vless://{UUID}@8.8.8.8:443?{q}#p")).unwrap();
+            assert!(s.is_supported(), "{q}");
+        }
+    }
+
+    #[test]
+    fn address_table() {
+        for (addr, ok) in [
+            ("127.0.0.1", true),
+            ("10.1.2.3", true),
+            ("172.16.0.1", true),
+            ("172.32.0.1", false),
+            ("192.168.1.1", true),
+            ("169.254.1.1", true),
+            ("100.64.0.1", false),
+            ("8.8.8.8", false),
+            ("::1", true),
+            ("fd00::1", true),
+            ("fe80::1", true),
+            ("2001:db8::1", false),
+            ("example.com", false),
+            ("localhost", true),
+            ("myserver", true),
+            ("foo.local", true),
+            ("foo.example", true),
+            ("foo.dev", false),
+            ("foo.corp", false),
+            ("", false),
+            ("тест", false),
+        ] {
+            assert_eq!(xray_allows_plain_vless(addr), ok, "{addr}");
+        }
     }
 }

@@ -1,13 +1,15 @@
 use crate::action::{map_key, Action};
-use crate::event::{BgEvent, BgTx, Event, Level, LogLine};
+use crate::event::{now_hms, BgEvent, BgTx, Event, Level, LogLine};
 use crate::mock::{self, Lcg};
 use crate::model::server::{Ping, Security, Server, Transport};
 use crate::model::subscription::Subscription;
 use crate::parser;
 use crate::storage::{Config, ServerEntry, Storage};
+use crate::xray::{self, process::Core};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 use std::collections::VecDeque;
+use std::path::PathBuf;
 
 pub const LOG_CAPACITY: usize = 2000;
 /// Name of the group holding servers added by hand (persisted in `config.toml`).
@@ -85,6 +87,11 @@ pub struct AppState {
     pub should_quit: bool,
     pub config: Config,
     storage: Option<Storage>,
+    /// The running Xray process, if any.
+    core: Option<Core>,
+    /// A core start or stop is in flight; new connect requests wait for it.
+    busy: bool,
+    run_dir: PathBuf,
     next_id: u64,
     tx: BgTx,
     rng: Lcg,
@@ -141,6 +148,9 @@ impl AppState {
             should_quit: false,
             config,
             storage,
+            core: None,
+            busy: false,
+            run_dir: std::env::temp_dir().join("elf-gate-run"),
             next_id,
             tx,
             rng: Lcg::from_clock(),
@@ -153,6 +163,19 @@ impl AppState {
             app.log(Level::Warning, format!("skipped saved server, {e}"));
         }
         app
+    }
+
+    /// Directory for generated core configs (`run/`).
+    pub fn with_run_dir(mut self, dir: PathBuf) -> Self {
+        self.run_dir = dir;
+        self
+    }
+
+    /// Stops the core before the application exits.
+    pub async fn shutdown(&mut self) {
+        if let Some(core) = self.core.take() {
+            core.stop().await;
+        }
     }
 
     // ---------- rows / selection ----------
@@ -220,7 +243,7 @@ impl AppState {
 
     pub fn log(&mut self, level: Level, text: impl Into<String>) {
         self.push_log(LogLine {
-            time: mock::now_hms(),
+            time: now_hms(),
             level,
             text: text.into(),
         });
@@ -261,6 +284,7 @@ impl AppState {
     }
 
     fn on_tick(&mut self) {
+        self.poll_core();
         if matches!(self.conn, Conn::Connected(_)) {
             self.up_bytes += self.rng.next() % 2_000;
             self.down_bytes += self.rng.next() % 20_000;
@@ -290,6 +314,31 @@ impl AppState {
                     );
                 }
             }
+            BgEvent::CoreStarted { id, core } => {
+                self.busy = false;
+                if self.conn == Conn::Connecting(id) {
+                    let pid = core.pid().map(|p| p.to_string()).unwrap_or_default();
+                    self.core = Some(*core);
+                    self.conn = Conn::Connected(id);
+                    let name = self.server_by_id(id).map(|s| s.name.clone());
+                    self.log(
+                        Level::Info,
+                        format!("connected to {} (xray pid {pid})", name.unwrap_or_default()),
+                    );
+                } else {
+                    // The user cancelled while the core was starting.
+                    self.spawn_stop(*core);
+                }
+            }
+            BgEvent::CoreFailed { id, error } => {
+                self.busy = false;
+                self.log(Level::Error, format!("[Error] {error}"));
+                if self.conn == Conn::Connecting(id) {
+                    self.conn = Conn::Error("не удалось запустить ядро".into());
+                    self.popup = Some(Popup::Error(error));
+                }
+            }
+            BgEvent::CoreStopped => self.busy = false,
             BgEvent::ConnectFailed { id, reason } => {
                 if self.conn == Conn::Connecting(id) {
                     self.conn = Conn::Error("не удалось подключиться".into());
@@ -525,27 +574,98 @@ impl AppState {
     }
 
     fn connect(&mut self, id: u64) {
+        if self.busy {
+            self.status = Some("Подождите: ядро запускается или останавливается".into());
+            return;
+        }
+        let Some(server) = self.server_by_id(id).cloned() else {
+            return;
+        };
         self.up_bytes = 0;
         self.down_bytes = 0;
         self.conn = Conn::Connecting(id);
-        let name = self.server_by_id(id).map(|s| s.name.clone());
-        self.log(
-            Level::Info,
-            format!("connecting to {} (mock)", name.unwrap_or_default()),
-        );
-        // Mock rule: servers whose last ping failed refuse the connection.
-        let ok = !matches!(
-            self.server_by_id(id).map(|s| s.ping),
-            Some(Ping::Timeout | Ping::Error)
-        );
-        mock::spawn_connect(self.tx.clone(), id, ok);
+        let old = self.core.take();
+
+        if server.link.is_empty() {
+            // Mock server (stage 1 demo data): no real process.
+            self.log(Level::Info, format!("connecting to {} (mock)", server.name));
+            if let Some(old) = old {
+                self.spawn_stop(old);
+            }
+            // Mock rule: servers whose last ping failed refuse the connection.
+            let ok = !matches!(server.ping, Ping::Timeout | Ping::Error);
+            mock::spawn_connect(self.tx.clone(), id, ok);
+            return;
+        }
+
+        self.log(Level::Info, format!("starting core for {}", server.name));
+        self.busy = true;
+        let tx = self.tx.clone();
+        let core_cfg = self.config.core.clone();
+        let run_dir = self.run_dir.clone();
+        tokio::spawn(async move {
+            if let Some(old) = old {
+                old.stop().await;
+            }
+            let started = match xray::config::build(&server, &core_cfg) {
+                Ok(cfg) => Core::start(&core_cfg, &cfg, &run_dir, tx.clone())
+                    .await
+                    .map_err(|e| e.to_string()),
+                Err(e) => Err(e.to_string()),
+            };
+            let ev = match started {
+                Ok(core) => BgEvent::CoreStarted {
+                    id,
+                    core: Box::new(core),
+                },
+                Err(error) => BgEvent::CoreFailed { id, error },
+            };
+            let _ = tx.send(ev);
+        });
+    }
+
+    /// Stops a core in the background; `busy` stays set until it is done.
+    fn spawn_stop(&mut self, core: Core) {
+        self.busy = true;
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            core.stop().await;
+            let _ = tx.send(BgEvent::CoreStopped);
+        });
     }
 
     fn disconnect(&mut self) {
-        if self.conn != Conn::Disconnected {
-            self.conn = Conn::Disconnected;
-            self.log(Level::Info, "disconnected");
+        if self.conn == Conn::Disconnected {
+            return;
         }
+        // A core that is still starting is stopped when its start result arrives.
+        if let Some(core) = self.core.take() {
+            self.spawn_stop(core);
+        }
+        self.conn = Conn::Disconnected;
+        self.log(Level::Info, "disconnected");
+    }
+
+    /// Detects a core that died on its own.
+    fn poll_core(&mut self) {
+        let Some(core) = &mut self.core else { return };
+        let Some(info) = core.try_exit() else { return };
+        self.core = None;
+        self.conn = Conn::Error("ядро завершилось".into());
+        self.log(
+            Level::Error,
+            format!(
+                "[Error] core exited ({}) {}",
+                info.code,
+                info.tail.replace('\n', " | ")
+            ),
+        );
+        let last: Vec<&str> = info.tail.lines().rev().take(6).collect();
+        let last = last.into_iter().rev().collect::<Vec<_>>().join("\n");
+        self.popup = Some(Popup::Error(format!(
+            "Ядро Xray завершилось ({}).\n\n{last}",
+            info.code
+        )));
     }
 
     fn toggle_mode(&mut self) {
@@ -808,7 +928,7 @@ mod tests {
         let storage = Storage::new(&dir);
         let (tx, _rx) = unbounded_channel();
         let mut a = AppState::with_config(tx, Config::default(), Some(storage.clone()));
-        a.submit_input("vless://u@h.example.com:443#Saved".into());
+        a.submit_input("vless://u@h.example.com:443?security=tls#Saved".into());
         a.submit_input("trojan://p@h:443#Grey".into());
 
         let (tx, _rx) = unbounded_channel();

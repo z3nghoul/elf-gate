@@ -1,4 +1,5 @@
 use crate::model::server::Ping;
+use crate::xray::process::Core;
 use crossterm::event::{Event as TermEvent, EventStream, KeyEvent, KeyEventKind};
 use futures_util::StreamExt;
 use std::time::Duration;
@@ -19,13 +20,42 @@ pub struct LogLine {
     pub text: String,
 }
 
+/// Local wall-clock-free `HH:MM:SS` (UTC) used for log lines.
+pub fn now_hms() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+        % 86_400;
+    format!("{:02}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
+}
+
 /// Results of background tasks.
 #[derive(Debug)]
 pub enum BgEvent {
     Log(LogLine),
-    Ping { id: u64, result: Ping },
+    Ping {
+        id: u64,
+        result: Ping,
+    },
+    /// Mock connection (servers without a real link).
     Connected(u64),
-    ConnectFailed { id: u64, reason: String },
+    /// The Xray process for server `id` is up and listening.
+    CoreStarted {
+        id: u64,
+        core: Box<Core>,
+    },
+    CoreFailed {
+        id: u64,
+        error: String,
+    },
+    /// A background stop finished; the core ports are free again.
+    CoreStopped,
+    ConnectFailed {
+        id: u64,
+        reason: String,
+    },
     SubsUpdated,
 }
 

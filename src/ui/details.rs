@@ -37,6 +37,10 @@ fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
     lines.push(field("Адрес:", s.host_port(), th));
     opt(&mut lines, "UUID:", &s.uuid, th);
     opt(&mut lines, "Flow:", &s.flow, th);
+    if !s.encryption.eq_ignore_ascii_case("none") {
+        let short: String = s.encryption.chars().take(28).collect();
+        opt(&mut lines, "Encryption:", &format!("{short}..."), th);
+    }
     opt(&mut lines, "SNI:", &s.tls.sni, th);
     opt(&mut lines, "Fingerprint:", &s.tls.fingerprint, th);
     opt(&mut lines, "ALPN:", &s.tls.alpn.join(","), th);

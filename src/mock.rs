@@ -1,7 +1,7 @@
 //! Stage 1 only: fake data and fake background tasks. Removed once real
 //! parsing, fetching and the Xray process exist (stages 2-6).
 
-use crate::event::{BgEvent, BgTx, Level, LogLine};
+use crate::event::{now_hms, BgEvent, BgTx, Level, LogLine};
 use crate::model::server::{Ping, Security, Server, TlsParams, Transport, TransportParams};
 use crate::model::subscription::{Subscription, SubscriptionInfo};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -26,15 +26,6 @@ impl Lcg {
     }
 }
 
-pub fn now_hms() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-        % 86_400;
-    format!("{:02}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
-}
-
 pub fn make_server(id: u64, name: &str, host: &str, sec: Security, tr: Transport) -> Server {
     Server {
         id,
@@ -43,6 +34,7 @@ pub fn make_server(id: u64, name: &str, host: &str, sec: Security, tr: Transport
         port: 443,
         uuid: "00000000-0000-4000-8000-000000000000".into(),
         flow: String::new(),
+        encryption: "none".into(),
         security: sec,
         transport: tr,
         tls: TlsParams {

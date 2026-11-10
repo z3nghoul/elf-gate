@@ -96,7 +96,12 @@ fn stream_settings(s: &Server) -> Value {
 fn proxy_outbound(s: &Server) -> Value {
     let mut user = Map::new();
     user.insert("id".into(), json!(s.uuid));
-    user.insert("encryption".into(), json!("none"));
+    let encryption = if s.encryption.is_empty() {
+        "none"
+    } else {
+        &s.encryption
+    };
+    user.insert("encryption".into(), json!(encryption));
     put(&mut user, "flow", &s.flow);
     json!({
         "tag": "proxy",
@@ -208,7 +213,8 @@ mod tests {
 
     #[test]
     fn custom_ports_and_log_level() {
-        let server = parse_link(&format!("vless://{UUID}@h.example.com:443#x")).unwrap();
+        let server =
+            parse_link(&format!("vless://{UUID}@h.example.com:443?security=tls#x")).unwrap();
         let core = CoreConfig {
             socks_port: 1111,
             http_port: 2222,
@@ -231,43 +237,13 @@ mod tests {
         ));
     }
 
-    /// Runs every fixture through a real Xray (`xray run -test`).
-    /// Skipped unless `ELF_GATE_XRAY` points to the binary; the `.dat` files
-    /// are looked up next to it.
     #[test]
-    fn generated_configs_pass_xray_test() {
-        let Ok(xray) = std::env::var("ELF_GATE_XRAY") else {
-            eprintln!("ELF_GATE_XRAY not set, skipping");
-            return;
-        };
-        let xray = std::path::PathBuf::from(xray);
-        let asset_dir = xray.parent().unwrap().to_path_buf();
-        let key = "4GObrWHDR0TyD84iQ06z24v4YBxQ69vxeG1MCqOyFlI";
-        let links = [
-            format!("vless://{UUID}@de.example.com:443?flow=xtls-rprx-vision&security=reality&sni=www.microsoft.com&fp=chrome&pbk={key}&sid=ab12cd34&type=tcp#a"),
-            format!("vless://{UUID}@nl.example.com:443?security=reality&sni=example.org&pbk={key}&sid=0123abcd&type=xhttp&path=%2Fxh&host=cdn.example.org&mode=packet-up#b"),
-            format!("vless://{UUID}@fi.example.com:8443?security=tls&sni=fi.example.com&alpn=h2%2Chttp%2F1.1&type=ws&path=%2Fws&host=fi.example.com#c"),
-            format!("vless://{UUID}@g.example.com:443?security=tls&sni=g.example.com&type=grpc&serviceName=svc#d"),
-            format!("vless://{UUID}@[fd00::1]:2053?type=tcp#e"),
-        ];
-        for (i, link) in links.iter().enumerate() {
-            let path = std::env::temp_dir().join(format!(
-                "elf-gate-xray-test-{}-{i}.json",
-                std::process::id()
-            ));
-            std::fs::write(&path, serde_json::to_vec_pretty(&config_for(link)).unwrap()).unwrap();
-            let out = std::process::Command::new(&xray)
-                .args(["run", "-test", "-c"])
-                .arg(&path)
-                .env("XRAY_LOCATION_ASSET", &asset_dir)
-                .output()
-                .unwrap();
-            let _ = std::fs::remove_file(&path);
-            let text = String::from_utf8_lossy(&out.stdout);
-            assert!(
-                out.status.success() && text.contains("Configuration OK"),
-                "{link}\n{text}"
-            );
-        }
+    fn encryption_reaches_the_outbound_unchanged() {
+        let enc = "mlkem768x25519plus.native.0rtt.45M6KAE8QF6VlzscrkIrjshB78IYPvGemYDCFrzFi14";
+        let cfg = config_for(&format!(
+            "vless://{UUID}@8.8.8.8:443?security=none&encryption={enc}#pq"
+        ));
+        let user = &cfg["outbounds"][0]["settings"]["vnext"][0]["users"][0];
+        assert_eq!(user["encryption"], enc);
     }
 }

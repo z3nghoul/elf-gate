@@ -59,6 +59,8 @@ pub struct Server {
     pub port: u16,
     pub uuid: String,
     pub flow: String,
+    /// VLESS `encryption` from the link, passed to the outbound unchanged (`none` by default).
+    pub encryption: String,
     pub security: Security,
     pub transport: Transport,
     pub tls: TlsParams,
@@ -80,6 +82,7 @@ impl Server {
             port: 0,
             uuid: String::new(),
             flow: String::new(),
+            encryption: "none".into(),
             security: Security::None,
             transport: Transport::Tcp,
             tls: TlsParams::default(),

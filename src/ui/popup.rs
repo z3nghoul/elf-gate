@@ -37,17 +37,21 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             ],
             th.border(true),
         ),
-        Popup::Error(msg) => (
-            "Ошибка".to_string(),
-            vec![
-                Line::from(Span::styled(msg.clone(), th.bad())),
-                Line::default(),
-                Line::from(Span::styled("любая клавиша - закрыть", th.muted())),
-            ],
-            th.bad(),
-        ),
+        Popup::Error(msg) => {
+            let mut lines: Vec<Line> = msg
+                .lines()
+                .map(|l| Line::from(Span::styled(l.to_string(), th.bad())))
+                .collect();
+            lines.push(Line::default());
+            lines.push(Line::from(Span::styled(
+                "любая клавиша - закрыть",
+                th.muted(),
+            )));
+            ("Ошибка".to_string(), lines, th.bad())
+        }
     };
-    let rect = centered(area, w, 7);
+    let h = (lines.len() as u16 + 2).clamp(7, area.height.saturating_sub(2));
+    let rect = centered(area, w, h);
     f.render_widget(Clear, rect);
     f.render_widget(
         Paragraph::new(lines).wrap(Wrap { trim: false }).block(
