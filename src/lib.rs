@@ -16,6 +16,7 @@ pub mod platform;
 pub mod proto;
 pub mod storage;
 pub mod sysproxy;
+pub mod tray;
 pub mod tun;
 pub mod ui;
 pub mod xray;

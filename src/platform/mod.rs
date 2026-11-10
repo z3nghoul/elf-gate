@@ -324,3 +324,19 @@ pub async fn ipc_connect() -> std::io::Result<BoxStream> {
 pub fn spawn_detached(program: &Path, args: &[String]) -> Result<(), PlatformError> {
     imp::ipc::spawn_detached(program, args)
 }
+
+// ---------------------------------------------------------------- tray
+
+/// Shows the tray icon and feeds menu choices to `on_action`. `Err` means there is no tray
+/// here (no StatusNotifier on Linux, for example): the process works the same without it.
+pub async fn tray_start(
+    model: tokio::sync::watch::Receiver<crate::tray::TrayModel>,
+    on_action: std::sync::Arc<dyn Fn(crate::tray::TrayAction) + Send + Sync>,
+) -> Result<(), String> {
+    imp::tray::start(model, on_action).await
+}
+
+/// Opens the interface in a terminal window (the tray's "open interface").
+pub fn open_interface(program: &Path) -> Result<(), PlatformError> {
+    imp::tray::open_interface(program)
+}

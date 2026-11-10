@@ -4,4 +4,5 @@ pub mod ipc;
 pub mod privileges;
 pub mod proxy;
 pub mod signals;
+pub mod tray;
 pub mod tun;

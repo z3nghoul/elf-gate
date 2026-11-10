@@ -133,6 +133,16 @@ async fn hello_view_single_instance_and_private_socket() {
         "{first}"
     );
     c.until("a view", |_| true).await;
+    // Without a desktop session there is no tray: that is a log line, not an error.
+    let mut saw_tray_note = false;
+    for _ in 0..5 {
+        let l = c.lines.next_line().await.unwrap().unwrap();
+        if l.contains("в трее недоступен") {
+            saw_tray_note = true;
+            break;
+        }
+    }
+    assert!(saw_tray_note, "the no-tray case must be logged");
 
     // A second background process refuses to start and exits at once; the first keeps serving.
     let mut second = env.daemon();

@@ -5,4 +5,5 @@ pub mod privileges;
 pub mod proxy;
 pub mod signals;
 pub mod supervise;
+pub mod tray;
 pub mod tun;

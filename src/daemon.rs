@@ -27,6 +27,48 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     Some(guard)
 }
 
+/// Shows the tray icon when the desktop has one; otherwise just notes it in the log.
+async fn start_tray(
+    engine: &mut Engine,
+    hub: &Arc<crate::engine::Hub>,
+    cmd_tx: &mpsc::UnboundedSender<Cmd>,
+) {
+    use crate::tray::{cmd_for, model_from_view, TrayAction, TrayModel};
+    if std::env::var_os("ELF_GATE_NO_TRAY").is_some() {
+        return;
+    }
+    let latest = Arc::new(std::sync::Mutex::new(engine.view()));
+    let (model_tx, model_rx) = tokio::sync::watch::channel(TrayModel::initial());
+    let (cmds, view) = (cmd_tx.clone(), latest.clone());
+    let on_action = Arc::new(move |a: TrayAction| {
+        if a == TrayAction::OpenUi {
+            if let Ok(me) = std::env::current_exe() {
+                let ui = me.with_file_name(format!("elf-gate{}", std::env::consts::EXE_SUFFIX));
+                let _ = platform::open_interface(&ui);
+            }
+        } else if let Some(c) = cmd_for(&a, &view.lock().unwrap()) {
+            let _ = cmds.send(c);
+        }
+    });
+    match platform::tray_start(model_rx, on_action).await {
+        Ok(()) => {
+            engine.tray = true;
+            let mut feed = hub.subscribe().view;
+            tokio::spawn(async move {
+                while feed.changed().await.is_ok() {
+                    let v = feed.borrow_and_update().clone();
+                    let _ = model_tx.send(model_from_view(&v));
+                    *latest.lock().unwrap() = (*v).clone();
+                }
+            });
+        }
+        Err(e) => engine.log(
+            crate::event::Level::Info,
+            format!("значок в трее недоступен: {e}"),
+        ),
+    }
+}
+
 /// Runs the background process; the return value is the exit code.
 /// `args` are the command-line flags (`--tun`: connect to the last server in TUN mode).
 pub async fn run(args: &[String]) -> i32 {
@@ -89,6 +131,7 @@ pub async fn run(args: &[String]) -> i32 {
         engine.auto_connect();
     }
     let hub = engine.hub();
+    start_tray(&mut engine, &hub, &cmd_tx).await;
     engine.flush_view();
 
     let mut tick = tokio::time::interval(Duration::from_millis(250));
