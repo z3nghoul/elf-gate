@@ -313,7 +313,13 @@ impl Core {
             // Last line of defence: dropping the handle (e.g. while a panic unwinds) kills it.
             .kill_on_drop(true);
         // geoip.dat / geosite.dat are expected next to the binary.
-        cmd.env("XRAY_LOCATION_ASSET", asset_dir(&binary));
+        if super::validate::asset_env_disabled() {
+            // The check only passed the way a shell runs it: start the core that way too.
+            cmd.env_remove("XRAY_LOCATION_ASSET")
+                .current_dir(asset_dir(&binary));
+        } else {
+            cmd.env("XRAY_LOCATION_ASSET", asset_dir(&binary));
+        }
         guard.prepare(&mut cmd);
 
         let mut child = cmd.spawn().map_err(|e| CoreError::Spawn(e.to_string()))?;

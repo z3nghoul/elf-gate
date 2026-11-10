@@ -83,6 +83,8 @@ impl CheckCache {
     pub fn store(&mut self, key: String, verdict: &Verdict) {
         let value = match verdict {
             Verdict::Accepted => None,
+            // A file the core could not see says nothing about the config: do not remember it.
+            Verdict::Rejected(reason) if validate::is_environmental(reason) => return,
             Verdict::Rejected(reason) => Some(reason.clone()),
             Verdict::Unavailable(_) => return,
         };

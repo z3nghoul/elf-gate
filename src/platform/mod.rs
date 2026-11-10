@@ -222,6 +222,12 @@ pub fn privileges() -> Box<dyn Privileges> {
     Box::new(imp::privileges::Elevation)
 }
 
+/// What limits this process (Linux: no_new_privs, seccomp, capabilities, mount namespace, LSM
+/// label, ids), for the error report when a child cannot see files the parent sees.
+pub fn process_restrictions() -> String {
+    imp::child::restrictions()
+}
+
 /// Entry of the hidden `--supervise` mode (Linux only); the return value is the exit code.
 pub fn run_supervisor(args: &[String]) -> i32 {
     #[cfg(unix)]
