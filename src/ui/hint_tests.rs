@@ -376,3 +376,38 @@ fn every_shown_key_is_the_key_the_table_maps_to_that_action() {
     press(&mut a, KeyCode::Char('z'));
     assert!(a.popup.is_none(), "any key closes a notice");
 }
+
+#[test]
+fn the_status_line_wraps_into_rows_instead_of_being_cut() {
+    use super::statusbar::rows;
+    use super::theme::Theme;
+    let th = Theme::by_name("dark");
+    let mut a = app(&[REALITY]);
+    a.conn = Conn::Connected(1);
+    a.traffic.speed_up = 320;
+    a.traffic.speed_down = 2_400;
+    a.traffic.proxy_up = 305_200;
+    a.traffic.direct_up = 76_400;
+    a.status = Some("a message that is shown after the traffic".into());
+    let text = |rs: &[ratatui::text::Line]| {
+        rs.iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let wide = rows(&a, &th, 200);
+    assert_eq!(wide.len(), 1, "{}", text(&wide));
+    let narrow = rows(&a, &th, 60);
+    assert!(narrow.len() >= 2 && narrow.len() <= 3, "{}", text(&narrow));
+    for l in &narrow {
+        assert!(l.width() <= 60, "{l}");
+    }
+    // Nothing is lost: every piece is on the screen in some row.
+    let all = text(&narrow);
+    for piece in ["PROXY", "320", "message"] {
+        assert!(all.contains(piece), "{piece} missing:\n{all}");
+    }
+    // The frame grows with the rows and the panels give the space up.
+    let frame = draw(60, 30, &mut a);
+    assert!(frame.contains("message"), "{frame}");
+}
