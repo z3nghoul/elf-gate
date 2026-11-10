@@ -28,8 +28,8 @@ const TAIL_LINES: usize = 20;
 
 #[derive(Debug, Error)]
 pub enum CoreError {
-    #[error("ядро Xray не найдено: «{0}». Положите его рядом с elf-gate или укажите xray_path в config.toml")]
-    BinaryNotFound(String),
+    #[error("ядро Xray не найдено: «{0}»{1}. Положите его рядом с elf-gate или укажите xray_path в config.toml")]
+    BinaryNotFound(String, String),
     #[error("порт {port} ({what}) уже занят другой программой")]
     PortBusy { port: u16, what: &'static str },
     #[error("не удалось записать конфиг ядра {path}: {source}")]
@@ -61,7 +61,27 @@ fn resolve_binary_in(
     exe_dir: Option<&Path>,
     path_var: Option<&std::ffi::OsStr>,
 ) -> Result<PathBuf, CoreError> {
-    let not_found = || CoreError::BinaryNotFound(xray_path.to_string());
+    // Say where we looked: "not found" next to a file that exists is otherwise a mystery.
+    let looked = || {
+        let beside = exe_dir.map_or(
+            "(путь к elf-gate неизвестен)".to_string(),
+            |d| d.display().to_string(),
+        );
+        format!(
+            " (искал: {}; рядом с программой: {beside}; PATH: {})",
+            if Path::new(xray_path).components().count() > 1 {
+                "по указанному пути"
+            } else {
+                "по имени"
+            },
+            if path_var.is_some() {
+                "задан"
+            } else {
+                "не задан"
+            }
+        )
+    };
+    let not_found = || CoreError::BinaryNotFound(xray_path.to_string(), looked());
     if xray_path.trim().is_empty() {
         return Err(not_found());
     }
@@ -87,6 +107,47 @@ fn resolve_binary_in(
         .chain(on_path)
         .find(|candidate| candidate.is_file())
         .ok_or_else(not_found)
+}
+
+/// Where the core looks for `geoip.dat` and `geosite.dat`: next to the binary as it is called,
+/// else next to the real file behind a symlink. Always passed to the core explicitly
+/// (`XRAY_LOCATION_ASSET`), so the lookup never depends on the environment or on how the
+/// process found its own path.
+pub fn asset_dir(binary: &Path) -> PathBuf {
+    let has_data = |d: &Path| d.join("geoip.dat").is_file() || d.join("geosite.dat").is_file();
+    let direct = binary
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    if has_data(&direct) {
+        return direct;
+    }
+    binary
+        .canonicalize()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .filter(|d| has_data(d))
+        .unwrap_or(direct)
+}
+
+/// One line for the log: the core and where its data files are (and whether they are there).
+pub fn describe_core(binary: &Path) -> String {
+    let dir = asset_dir(binary);
+    let yn = |f: &str| {
+        if dir.join(f).is_file() {
+            "есть"
+        } else {
+            "НЕТ"
+        }
+    };
+    format!(
+        "xray: {}, ассеты: {} (geoip.dat: {}, geosite.dat: {})",
+        binary.display(),
+        dir.display(),
+        yn("geoip.dat"),
+        yn("geosite.dat")
+    )
 }
 
 /// Checks that the ports the core will bind are free.
@@ -212,6 +273,11 @@ impl Core {
             None => resolve_binary(&core.xray_path)?,
         };
         check_ports(core)?;
+        let _ = log_tx.send(BgEvent::Log(LogLine {
+            time: now_hms(),
+            level: Level::Info,
+            text: describe_core(&binary),
+        }));
 
         let config_path = run_dir.join(opts.config_name.as_deref().unwrap_or("xray.json"));
         let write = || -> io::Result<()> {
@@ -247,9 +313,7 @@ impl Core {
             // Last line of defence: dropping the handle (e.g. while a panic unwinds) kills it.
             .kill_on_drop(true);
         // geoip.dat / geosite.dat are expected next to the binary.
-        if let Some(dir) = binary.parent().filter(|d| !d.as_os_str().is_empty()) {
-            cmd.env("XRAY_LOCATION_ASSET", dir);
-        }
+        cmd.env("XRAY_LOCATION_ASSET", asset_dir(&binary));
         guard.prepare(&mut cmd);
 
         let mut child = cmd.spawn().map_err(|e| CoreError::Spawn(e.to_string()))?;
@@ -377,10 +441,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_asset_dir_is_beside_the_binary_or_beside_the_real_file_of_a_symlink() {
+        let base = std::env::temp_dir().join(format!("elf-gate-assets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (real, link) = (base.join("real"), base.join("link"));
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::create_dir_all(&link).unwrap();
+        std::fs::write(real.join("xray"), b"x").unwrap();
+        std::fs::write(real.join("geoip.dat"), b"x").unwrap();
+        assert_eq!(asset_dir(&real.join("xray")), real);
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(real.join("xray"), link.join("xray")).unwrap();
+            assert_eq!(asset_dir(&link.join("xray")), real, "follows the symlink");
+        }
+        let line = describe_core(&real.join("xray"));
+        assert!(
+            line.contains("geoip.dat: есть") && line.contains("geosite.dat: НЕТ"),
+            "{line}"
+        );
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn the_not_found_message_says_where_it_looked() {
+        let err = resolve_binary_in("xray", Some(Path::new("/opt/app")), None).unwrap_err();
+        let text = err.to_string();
+        assert!(
+            text.contains("/opt/app") && text.contains("PATH: не задан"),
+            "{text}"
+        );
+    }
+
+    #[test]
     fn missing_binary_is_reported() {
         for p in ["", "/definitely/not/here/xray", "no-such-xray-binary-xyz"] {
             let err = resolve_binary(p).unwrap_err();
-            assert!(matches!(err, CoreError::BinaryNotFound(_)), "{p}");
+            assert!(matches!(err, CoreError::BinaryNotFound(..)), "{p}");
             assert!(err.to_string().contains("рядом с elf-gate"));
         }
     }

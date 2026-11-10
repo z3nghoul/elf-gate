@@ -28,6 +28,8 @@ pub enum Problem {
     },
     /// The core cannot create the TUN device (no capability, not root, not administrator).
     NeedsPrivileges,
+    /// `geoip.dat` / `geosite.dat` are not next to the core (the privileged copy needs its own).
+    GeodataMissing(PathBuf),
     /// Not blocking: strict reverse-path filtering breaks "direct" traffic through the tunnel.
     RpFilterStrict(RpFilter),
 }
@@ -87,6 +89,10 @@ pub fn preflight(host: &dyn TunHost, config: &Config) -> Preflight {
                 problems.push(Problem::MissingWintun(dir.join("wintun.dll")));
             }
         }
+        let assets = crate::xray::process::asset_dir(core);
+        if !assets.join("geoip.dat").is_file() || !assets.join("geosite.dat").is_file() {
+            problems.push(Problem::GeodataMissing(assets));
+        }
         if let Err(reason) = host.trusted_binary(core) {
             problems.push(Problem::UntrustedCore {
                 path: core.clone(),
@@ -139,6 +145,11 @@ pub fn explain(problem: &Problem, config: &Config) -> String {
         Problem::CoreMissing(p) => format!(
             "Для режима TUN нужна копия Xray, принадлежащая root: {} не найден.\n\nУстановка (выполните сами, elf-gate sudo не вызывает):\n  {}\n\nЗапасной путь: запустить  sudo elf-gate  (конфиг останется в вашей домашней папке).",
             p.display(),
+            install_commands(normal_core.as_deref(), LINUX_CORE_DIR).join("\n  ")
+        ),
+        Problem::GeodataMissing(dir) => format!(
+            "Рядом с ядром для режима TUN нет geoip.dat и/или geosite.dat: {}.\nКопия ядра ищет их только рядом с собой.\n\nУстановка (выполните сами, elf-gate sudo не вызывает):\n  {}",
+            dir.display(),
             install_commands(normal_core.as_deref(), LINUX_CORE_DIR).join("\n  ")
         ),
         Problem::NoTunDevice => {
@@ -310,9 +321,32 @@ mod tests {
     fn config_with_core(dir: &Path) -> Config {
         let core = dir.join("xray");
         std::fs::write(&core, b"x").unwrap();
+        std::fs::write(dir.join("geoip.dat"), b"x").unwrap();
+        std::fs::write(dir.join("geosite.dat"), b"x").unwrap();
         let mut c = Config::default();
         c.tun.xray_path = core.display().to_string();
         c
+    }
+
+    #[test]
+    fn missing_geodata_next_to_the_core_blocks_with_install_commands() {
+        let dir = temp_dir("geodata");
+        let cfg = config_with_core(&dir);
+        std::fs::remove_file(dir.join("geoip.dat")).unwrap();
+        let p = preflight(&MockTunHost::healthy(), &cfg);
+        assert!(p.setup.is_none());
+        let problem = p
+            .problems
+            .iter()
+            .find(|p| matches!(p, Problem::GeodataMissing(_)))
+            .expect("a geodata problem");
+        assert!(problem.is_blocking());
+        let text = explain(problem, &cfg);
+        assert!(
+            text.contains("geoip.dat") && text.contains("sudo install"),
+            "{text}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

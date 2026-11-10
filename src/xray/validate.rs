@@ -67,9 +67,7 @@ pub async fn check_config(binary: &Path, cfg: &serde_json::Value, run_dir: &Path
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    if let Some(dir) = binary.parent().filter(|d| !d.as_os_str().is_empty()) {
-        cmd.env("XRAY_LOCATION_ASSET", dir);
-    }
+    cmd.env("XRAY_LOCATION_ASSET", super::process::asset_dir(binary));
     guard.prepare(&mut cmd);
 
     let verdict = match cmd.spawn() {

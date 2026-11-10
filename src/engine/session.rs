@@ -101,7 +101,11 @@ async fn start_core(
     }
     let cfg = build_with(server, core_cfg, &plan).map_err(|e| e.to_string())?;
     if let Verdict::Rejected(reason) = checker.check_config(&binary, &cfg, run_dir).await {
-        return Err(format!("Xray отверг итоговый конфиг (проверьте правила): {reason}").into());
+        return Err(format!(
+            "Xray отверг итоговый конфиг (проверьте правила): {reason}\n{}",
+            crate::xray::process::describe_core(&binary)
+        )
+        .into());
     }
 
     let opts = StartOptions {
@@ -492,6 +496,8 @@ mod tests {
         config.tun.xray_path = if core_exists {
             let core = dir.join("xray");
             std::fs::write(&core, b"x").unwrap();
+            std::fs::write(dir.join("geoip.dat"), b"x").unwrap();
+            std::fs::write(dir.join("geosite.dat"), b"x").unwrap();
             core.display().to_string()
         } else {
             "/definitely/not/here/xray".into()

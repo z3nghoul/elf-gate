@@ -25,6 +25,14 @@ elif [[ -f "$SRC_XRAY" ]] && ! cmp -s "$SRC_XRAY" "$DST_XRAY"; then
     needs_setup=1
 fi
 
+# Копия ядра ищет geoip.dat и geosite.dat только рядом с собой: держим их там же и обновляем, если исходники изменились.
+GEO_FILES=(geoip.dat geosite.dat)
+for f in "${GEO_FILES[@]}"; do
+    if [[ -f "$DIR/bin/$f" ]] && ! cmp -s "$DIR/bin/$f" "$DST_DIR/$f"; then
+        needs_setup=1
+    fi
+done
+
 if [[ $needs_setup -eq 1 ]]; then
     if [[ ! -f "$SRC_XRAY" ]]; then
         echo "Не найден $SRC_XRAY" >&2
@@ -34,6 +42,13 @@ if [[ $needs_setup -eq 1 ]]; then
     sudo mkdir -p "$DST_DIR"
     sudo install -o root -g root -m 0755 "$SRC_XRAY" "$DST_XRAY"
     sudo setcap cap_net_admin+ep "$DST_XRAY"
+    for f in "${GEO_FILES[@]}"; do
+        if [[ -f "$DIR/bin/$f" ]]; then
+            sudo install -o root -g root -m 0644 "$DIR/bin/$f" "$DST_DIR/$f"
+        else
+            echo "Предупреждение: нет $DIR/bin/$f, TUN не стартует без него в $DST_DIR" >&2
+        fi
+    done
     echo "Готово."
 fi
 
