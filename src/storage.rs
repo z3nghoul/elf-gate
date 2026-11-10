@@ -157,7 +157,7 @@ impl Default for PresetsConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct UiConfig {
     /// `"<group>/<name>"` of the server connected last (used by `--tun`).
@@ -166,6 +166,19 @@ pub struct UiConfig {
     pub tun_intro_done: bool,
     /// Connect to `last_server` in the last traffic mode when the program starts. Off by default.
     pub auto_connect: bool,
+    /// `dark` or `light`.
+    pub theme: String,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            last_server: None,
+            tun_intro_done: false,
+            auto_connect: false,
+            theme: "dark".into(),
+        }
+    }
 }
 
 /// A server added by hand; stored as its original link.
@@ -225,6 +238,8 @@ pub struct PingConfig {
     pub mode: PingMode,
     pub url: String,
     pub timeout_ms: u64,
+    /// Background TCP ping of all servers every this many seconds; 0 = off.
+    pub auto_interval_secs: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -241,6 +256,7 @@ impl Default for PingConfig {
             mode: PingMode::Tcp,
             url: "https://www.gstatic.com/generate_204".into(),
             timeout_ms: 3000,
+            auto_interval_secs: 60,
         }
     }
 }

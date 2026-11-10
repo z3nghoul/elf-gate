@@ -12,6 +12,8 @@ use crate::proto::{Alert, Ask, Cmd, RuleRef, Traffic, Update, View};
 use crate::storage::Config;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
+mod settings;
+pub use settings::SettingId;
 use std::collections::VecDeque;
 use std::sync::Arc;
 #[cfg(test)]
@@ -53,12 +55,14 @@ pub enum ConfirmKind {
 }
 
 /// What a text input popup is for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputPurpose {
     /// A share link (or subscription URL).
     Link,
     /// The value of a new routing rule.
     Rule(RuleKind),
+    /// A text or number setting.
+    Setting(SettingId),
 }
 
 /// What a selection popup applies its choice to.
@@ -147,6 +151,7 @@ pub struct AppState {
     pub status: Option<String>,
     pub should_quit: bool,
     pub rules_cursor: usize,
+    pub settings_cursor: usize,
     pub link: LinkState,
     /// Servers are listed by ping instead of in their own order.
     pub sorted_by_ping: bool,
@@ -186,6 +191,7 @@ impl AppState {
             status: None,
             should_quit: false,
             rules_cursor: 0,
+            settings_cursor: 0,
             link: LinkState::Connecting,
             sorted_by_ping: false,
             pending_alerts: VecDeque::new(),
@@ -530,6 +536,7 @@ impl AppState {
                     match purpose {
                         InputPurpose::Link => self.submit_input(buf),
                         InputPurpose::Rule(kind) => self.submit_rule(kind, buf),
+                        InputPurpose::Setting(id) => self.submit_setting(id, buf),
                     }
                     self.show_next_alert();
                 }
@@ -576,6 +583,9 @@ impl AppState {
             Enter | Filter | PingAll | SortPing | UpdateSubs | Fingerprint | Role | Fragment
         ) || (matches!(action, Delete | Add) && !on_rules);
         if main_only && self.screen != Screen::Main {
+            if action == Enter && self.screen == Screen::Settings {
+                self.settings_activate();
+            }
             return;
         }
         // These two exist only on the rules screen.
@@ -693,6 +703,8 @@ impl AppState {
     fn navigate(&mut self, delta: isize) {
         if self.screen == Screen::Rules {
             self.rules_move(delta);
+        } else if self.screen == Screen::Settings {
+            self.settings_move(delta);
         } else if self.logs_active() {
             self.scroll_logs(delta < 0, 1);
         } else if self.servers_active() {

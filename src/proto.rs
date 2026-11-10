@@ -52,6 +52,7 @@ pub enum Setting {
     PingMode(crate::storage::PingMode),
     PingUrl(String),
     PingTimeoutMs(u64),
+    PingAutoIntervalSecs(u64),
     TunName(String),
     TunnelDns(String),
     AutoConnect(bool),

@@ -18,7 +18,7 @@ pub const MIN_WIDTH: u16 = 80;
 pub const MIN_HEIGHT: u16 = 24;
 
 pub fn render(f: &mut Frame, app: &mut AppState) {
-    let th = Theme::dark();
+    let th = Theme::by_name(&app.config.ui.theme);
     let area = f.area();
 
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
@@ -51,7 +51,7 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
         }
         Screen::LogsFull => logs::render(f, body, app, &th),
         Screen::Rules => rules::render(f, body, app, &th),
-        Screen::Settings => settings::render(f, body, &th),
+        Screen::Settings => settings::render(f, body, app, &th),
         Screen::Help => help::render(f, body, &th),
     }
     statusbar::render(f, status, app, &th);

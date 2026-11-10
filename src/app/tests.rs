@@ -418,3 +418,64 @@ async fn vision_servers_are_flagged_as_not_needing_the_quic_preset() {
         "{out}"
     );
 }
+
+// ---------------- settings ----------------
+
+#[tokio::test]
+async fn settings_rows_switch_cycle_and_edit() {
+    let (mut a, mut rx) = app_with(&[REALITY]);
+    a.screen = Screen::Settings;
+    let idx =
+        |a: &AppState, id: SettingId| a.settings_rows().iter().position(|r| r.0 == id).unwrap();
+
+    a.settings_cursor = idx(&a, SettingId::AutoConnect);
+    a.handle_action(Action::Enter);
+    a.settings_cursor = idx(&a, SettingId::Theme);
+    a.handle_action(Action::Enter);
+    a.settings_cursor = idx(&a, SettingId::Autostart);
+    a.handle_action(Action::Enter);
+    assert_eq!(
+        sent(&mut rx),
+        vec![
+            Cmd::Set(crate::proto::Setting::AutoConnect(true)),
+            Cmd::Set(crate::proto::Setting::Theme("light".into())),
+            Cmd::Set(crate::proto::Setting::Autostart(true)),
+        ]
+    );
+
+    a.settings_cursor = idx(&a, SettingId::SocksPort);
+    a.handle_action(Action::Enter);
+    assert!(matches!(a.popup, Some(Popup::Input { .. })));
+    for _ in 0..5 {
+        press(&mut a, KeyCode::Backspace);
+    }
+    for c in "2000".chars() {
+        press(&mut a, KeyCode::Char(c));
+    }
+    press(&mut a, KeyCode::Enter);
+    assert_eq!(
+        sent(&mut rx),
+        vec![Cmd::Set(crate::proto::Setting::SocksPort(2000))]
+    );
+
+    a.handle_action(Action::Enter);
+    for _ in 0..5 {
+        press(&mut a, KeyCode::Backspace);
+    }
+    press(&mut a, KeyCode::Char('x'));
+    press(&mut a, KeyCode::Enter);
+    assert!(matches!(&a.popup, Some(Popup::Error(t)) if t.contains("порт")));
+    assert!(sent(&mut rx).is_empty());
+}
+
+#[tokio::test]
+async fn the_light_theme_and_the_settings_screen_render() {
+    let (mut a, _rx) = app_with(&[REALITY]);
+    a.config.ui.theme = "light".into();
+    a.screen = Screen::Settings;
+    let out = crate::ui::tests_support::draw(100, 30, &mut a);
+    assert!(
+        out.contains("Запускать при входе в систему") && out.contains("Тема"),
+        "{out}"
+    );
+}

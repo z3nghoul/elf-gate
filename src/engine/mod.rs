@@ -976,8 +976,100 @@ impl Engine {
     // ---------- settings (stage 8) ----------
 
     fn apply_setting(&mut self, setting: crate::proto::Setting) {
-        // Filled in by the settings screen work (stage 8).
-        let _ = setting;
+        use crate::proto::Setting::*;
+        let port_ok = |p: u16| p >= 1024;
+        match setting {
+            XrayPath(v) => self.config.core.xray_path = v,
+            TunXrayPath(v) => self.config.tun.xray_path = v,
+            SocksPort(p) | HttpPort(p) | ApiPort(p) if !port_ok(p) => {
+                self.error_alert("Порт должен быть от 1024 до 65535");
+                return;
+            }
+            SocksPort(p) => self.config.core.socks_port = p,
+            HttpPort(p) => self.config.core.http_port = p,
+            ApiPort(p) => self.config.core.api_port = p,
+            LogLevel(v) => {
+                if !["debug", "info", "warning", "error", "none"].contains(&v.as_str()) {
+                    self.error_alert("Уровень лога: debug, info, warning, error или none");
+                    return;
+                }
+                self.config.core.log_level = v;
+            }
+            SetSystemProxy(v) => self.config.proxy.set_system_proxy = v,
+            PingMode(m) => self.config.ping.mode = m,
+            PingUrl(v) => self.config.ping.url = v,
+            PingTimeoutMs(v) => self.config.ping.timeout_ms = v.clamp(500, 30_000),
+            PingAutoIntervalSecs(v) => self.config.ping.auto_interval_secs = v,
+            TunName(v) => {
+                if v.is_empty() || v.len() > 15 {
+                    self.error_alert("Имя интерфейса: от 1 до 15 символов");
+                    return;
+                }
+                self.config.tun.name = v;
+            }
+            TunnelDns(v) => self.config.tun.tunnel_dns = v,
+            AutoConnect(v) => self.config.ui.auto_connect = v,
+            Theme(v) => {
+                if v != "dark" && v != "light" {
+                    return;
+                }
+                self.config.ui.theme = v;
+            }
+            Autostart(on) => {
+                let result = if on {
+                    crate::ipc::Spawn::default_for_current_exe()
+                        .map(|sp| {
+                            let mut cmd = vec![sp.program.display().to_string()];
+                            cmd.extend(sp.args);
+                            cmd
+                        })
+                        .ok_or_else(|| "не найден путь к программе".to_string())
+                        .and_then(|cmd| {
+                            crate::platform::autostart()
+                                .enable(&cmd)
+                                .map_err(|e| e.to_string())
+                        })
+                } else {
+                    crate::platform::autostart()
+                        .disable()
+                        .map_err(|e| e.to_string())
+                };
+                match result {
+                    Ok(()) => self.autostart_on = on,
+                    Err(e) => {
+                        self.error_alert(format!("Автозапуск: {e}"));
+                        return;
+                    }
+                }
+                self.log(
+                    Level::Info,
+                    format!("автозапуск при входе: {}", if on { "вкл" } else { "выкл" }),
+                );
+                return;
+            }
+            SubscriptionUserAgent { name, value } => {
+                if let Some(s) = self
+                    .config
+                    .subscriptions
+                    .iter_mut()
+                    .find(|s| s.name == name)
+                {
+                    s.user_agent = value;
+                }
+            }
+            SubscriptionHours { name, hours } => {
+                if let Some(s) = self
+                    .config
+                    .subscriptions
+                    .iter_mut()
+                    .find(|s| s.name == name)
+                {
+                    s.auto_update_hours = hours;
+                }
+            }
+        }
+        self.save_config();
+        self.status("Настройка сохранена (порты и пути применятся при следующем подключении)");
     }
 }
 
@@ -994,6 +1086,34 @@ pub(crate) fn apply_overrides(config: &Config, group: &str, server: &mut Server)
     server.fp_auto = found.is_some_and(|o| o.fp_auto);
     server.fragment = found.is_some_and(|o| o.fragment);
     server.role = found.and_then(|o| o.role);
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+    use crate::proto::Setting;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    #[tokio::test]
+    async fn settings_are_validated_applied_and_saved() {
+        let dir = std::env::temp_dir().join(format!("elf-gate-set-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (tx, _rx) = unbounded_channel();
+        let mut e = Engine::build(tx, Config::default(), Some(Storage::new(&dir)), false);
+        e.handle_cmd(Cmd::Set(Setting::SocksPort(80)));
+        assert_eq!(e.config.core.socks_port, 10808);
+        assert!(matches!(e.alerts().last(), Some(Alert::Error(_))));
+        e.handle_cmd(Cmd::Set(Setting::SocksPort(2000)));
+        e.handle_cmd(Cmd::Set(Setting::Theme("light".into())));
+        e.handle_cmd(Cmd::Set(Setting::PingAutoIntervalSecs(0)));
+        e.handle_cmd(Cmd::Set(Setting::LogLevel("loud".into())));
+        assert_eq!(e.config.core.log_level, "warning");
+        let saved = Storage::new(&dir).load().unwrap();
+        assert_eq!(saved.core.socks_port, 2000);
+        assert_eq!(saved.ui.theme, "light");
+        assert_eq!(saved.ping.auto_interval_secs, 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 pub fn mode_name(m: Mode) -> &'static str {
