@@ -488,7 +488,7 @@ mod tests {
 
     /// An app in TUN mode with one real server and a scripted host. The TUN core path points at
     /// a file that exists unless `core_exists` is false.
-    fn tun_app(host: MockTunHost, core_exists: bool, dir: &Path) -> (AppState, u64) {
+    fn tun_app(host: MockTunHost, core_exists: bool, dir: &Path) -> (Engine, u64) {
         let mut config = Config::default();
         config.tun.xray_path = if core_exists {
             let core = dir.join("xray");
@@ -498,8 +498,8 @@ mod tests {
             "/definitely/not/here/xray".into()
         };
         let (tx, _rx) = unbounded_channel();
-        let mut a = AppState::build(tx, config, None, false).with_tun_host(Arc::new(host));
-        a.submit_input("vless://u@10.0.0.5:443?security=none#Real".into());
+        let mut a = Engine::build(tx, config, None, false).with_tun_host(Arc::new(host));
+        a.add_link("vless://u@10.0.0.5:443?security=none#Real".into());
         a.mode = Mode::Tun;
         a.selected = a.rows().len() - 1;
         let id = a.selected_server().unwrap().id;
@@ -511,10 +511,11 @@ mod tests {
         let dir = temp_dir("offer");
         let (mut a, id) = tun_app(MockTunHost::healthy(), true, &dir);
         a.connect(id);
-        let Some(Popup::Confirm { text, kind }) = &a.popup else {
-            panic!("preset offer expected, got {:?}", a.popup)
+        let alerts = a.alerts();
+        let Some(Alert::Ask { text, ask }) = alerts.first() else {
+            panic!("preset offer expected, got {alerts:?}")
         };
-        assert_eq!(*kind, ConfirmKind::PresetOffer(id));
+        assert_eq!(*ask, Ask::PresetOffer(id));
         assert!(text.contains("Discord"), "{text}");
         assert_eq!(
             a.conn,
@@ -531,7 +532,7 @@ mod tests {
         // instead of spawning anything.
         let (mut a, id) = tun_app(MockTunHost::healthy(), false, &dir);
         assert_eq!(a.config.mode.routing, RoutingMode::Exclude);
-        a.confirm(ConfirmKind::PresetOffer(id));
+        a.handle_cmd(Cmd::Answer { ask: Ask::PresetOffer(id), yes: true });
         assert_eq!(a.config.mode.routing, RoutingMode::Include);
         assert!(a
             .config
@@ -545,9 +546,9 @@ mod tests {
             .contains(&"local-direct".to_string()));
         assert!(a.config.ui.tun_intro_done);
         assert!(
-            matches!(a.popup, Some(Popup::Error(_))),
+            matches!(a.alerts().last(), Some(Alert::Error(_))),
             "the missing core is reported: {:?}",
-            a.popup
+            a.alerts()
         );
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -556,7 +557,7 @@ mod tests {
     async fn declining_the_offer_keeps_everything_through_the_vpn() {
         let dir = temp_dir("decline");
         let (mut a, id) = tun_app(MockTunHost::healthy(), false, &dir);
-        a.decline(ConfirmKind::PresetOffer(id));
+        a.handle_cmd(Cmd::Answer { ask: Ask::PresetOffer(id), yes: false });
         assert_eq!(a.config.mode.routing, RoutingMode::Exclude);
         assert_eq!(a.config.presets.enabled, ["local-direct"]);
         assert!(
@@ -624,9 +625,9 @@ mod tests {
             let (mut a, id) = tun_app(host, core_exists, &dir);
             a.config.ui.tun_intro_done = true;
             a.connect(id);
-            let text = match &a.popup {
-                Some(Popup::Error(t)) => t.clone(),
-                other => panic!("an error popup expected for {needle}, got {other:?}"),
+            let text = match a.alerts().last() {
+                Some(Alert::Error(t)) => t.clone(),
+                other => panic!("an error alert expected for {needle}, got {other:?}"),
             };
             assert!(text.contains(needle), "{needle} not in: {text}");
             assert_eq!(a.conn, Conn::Disconnected);
@@ -647,15 +648,15 @@ mod tests {
         a.connect(id);
         if cfg!(windows) {
             assert!(matches!(
-                a.popup,
-                Some(Popup::Confirm {
-                    kind: ConfirmKind::RestartElevated,
+                a.alerts().last(),
+                Some(Alert::Ask {
+                    ask: Ask::RelaunchElevated,
                     ..
                 })
             ));
         } else {
-            let Some(Popup::Error(text)) = &a.popup else {
-                panic!("{:?}", a.popup)
+            let Some(Alert::Error(text)) = a.alerts().last().cloned() else {
+                panic!("{:?}", a.alerts())
             };
             assert!(
                 text.contains("sudo setcap") && text.contains("sudo elf-gate"),
@@ -670,16 +671,16 @@ mod tests {
     #[tokio::test]
     async fn declining_elevation_explains_that_tun_needs_it() {
         let (tx, _rx) = unbounded_channel();
-        let mut a = AppState::build(tx, Config::default(), None, false);
-        a.decline(ConfirmKind::RestartElevated);
-        assert!(a.status.as_deref().unwrap().contains("администратора"));
+        let mut a = Engine::build(tx, Config::default(), None, false);
+        a.handle_cmd(Cmd::Answer { ask: Ask::RelaunchElevated, yes: false });
+        assert!(a.last_status().unwrap().contains("администратора"));
     }
 
     #[tokio::test]
     async fn a_start_error_about_permissions_becomes_the_privileges_dialog() {
         let (tx, _rx) = unbounded_channel();
-        let mut a = AppState::build(tx, Config::default(), None, false);
-        a.submit_input("vless://u@10.0.0.5:443?security=none#Real".into());
+        let mut a = Engine::build(tx, Config::default(), None, false);
+        a.add_link("vless://u@10.0.0.5:443?security=none#Real".into());
         let id = a.subs[0].servers[0].id;
         a.conn = Conn::Connecting(id);
         a.on_core_failed(
@@ -688,16 +689,15 @@ mod tests {
             true,
         );
         assert!(matches!(a.conn, Conn::Error(_)));
-        assert!(a.popup.is_some());
+        assert!(!a.alerts().is_empty());
         // An ordinary failure shows the error text itself.
-        a.popup = None;
-        a.conn = Conn::Connecting(id);
+                a.conn = Conn::Connecting(id);
         a.on_core_failed(
             id,
             "порт 10808 (socks) уже занят другой программой".into(),
             false,
         );
-        assert!(matches!(&a.popup, Some(Popup::Error(t)) if t.contains("10808")));
+        assert!(matches!(a.alerts().last(), Some(Alert::Error(t)) if t.contains("10808")));
     }
 
     #[tokio::test]
@@ -715,7 +715,7 @@ mod tests {
         a.connect(id);
         // A notice, and the start went on (the background task was spawned).
         assert!(
-            matches!(&a.popup, Some(Popup::Notice(t)) if t.contains("sysctl -w") && t.contains("не меняет"))
+            matches!(a.alerts().last(), Some(Alert::Notice(t)) if t.contains("sysctl -w") && t.contains("не меняет"))
         );
         assert_eq!(a.conn, Conn::Connecting(id));
         assert!(a.busy);
@@ -725,8 +725,8 @@ mod tests {
     #[tokio::test]
     async fn connection_check_results_are_shown_and_drive_the_fp_hint() {
         let (tx, _rx) = unbounded_channel();
-        let mut a = AppState::build(tx, Config::default(), None, false);
-        a.submit_input(
+        let mut a = Engine::build(tx, Config::default(), None, false);
+        a.add_link(
             "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R"
                 .into(),
         );
@@ -761,8 +761,8 @@ mod tests {
     #[tokio::test]
     async fn core_log_noise_never_produces_a_hint() {
         let (tx, _rx) = unbounded_channel();
-        let mut a = AppState::build(tx, Config::default(), None, false);
-        a.submit_input(
+        let mut a = Engine::build(tx, Config::default(), None, false);
+        a.add_link(
             "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R"
                 .into(),
         );
@@ -787,12 +787,12 @@ mod tests {
         let dir = temp_dir("toggle");
         let storage = Storage::new(&dir);
         let (tx, _rx) = unbounded_channel();
-        let mut a = AppState::build(tx, Config::default(), Some(storage.clone()), false);
+        let mut a = Engine::build(tx, Config::default(), Some(storage.clone()), false);
         assert_eq!(a.mode, Mode::Proxy);
-        a.handle_action(Action::ToggleMode);
+        a.handle_cmd(Cmd::ToggleMode);
         assert_eq!(a.mode, Mode::Tun);
         assert_eq!(storage.load().unwrap().mode.traffic, Mode::Tun);
-        a.handle_action(Action::ToggleMode);
+        a.handle_cmd(Cmd::ToggleMode);
         assert_eq!(a.mode, Mode::Proxy);
         assert_eq!(storage.load().unwrap().mode.traffic, Mode::Proxy);
         let _ = std::fs::remove_dir_all(dir);
@@ -805,14 +805,14 @@ mod tests {
         a.mode = Mode::Proxy;
         a.config.ui.last_server = None;
         a.start_tun_from_cli();
-        assert!(a.status.as_deref().unwrap().contains("Нет сервера"));
+        assert!(a.last_status().unwrap().contains("Нет сервера"));
 
         a.config.ui.last_server = Some("manual/Real".into());
         a.config.ui.tun_intro_done = true;
         a.start_tun_from_cli();
         assert_eq!(a.mode, Mode::Tun);
         // The core is missing in this fixture: the start stops at the problem popup.
-        assert!(matches!(a.popup, Some(Popup::Error(_))));
+        assert!(matches!(a.alerts().last(), Some(Alert::Error(_))));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -838,7 +838,7 @@ mod tests {
         assert_eq!(a.mode, Mode::Tun, "the last traffic mode is restored");
         // The TUN core is missing in this fixture, so the start stops at the problem popup:
         // proof that the connection was attempted for the remembered server.
-        assert!(matches!(a.popup, Some(Popup::Error(_))));
+        assert!(matches!(a.alerts().last(), Some(Alert::Error(_))));
         assert_eq!(a.server_by_id(id).unwrap().name, "Real");
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -850,7 +850,7 @@ mod tests {
         tun::mark_up(&store, 777, "elfgate0");
         let host = Arc::new(MockTunHost::healthy());
         let (tx, _rx) = unbounded_channel();
-        let mut a = AppState::build(tx, Config::default(), None, false)
+        let mut a = Engine::build(tx, Config::default(), None, false)
             .with_state_store(store.clone())
             .with_tun_host(host.clone());
         let note = a.startup_tun_cleanup().unwrap();

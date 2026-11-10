@@ -341,9 +341,9 @@ mod tests {
         })
     }
 
-    fn app_in(dir: &std::path::Path) -> AppState {
+    fn app_in(dir: &std::path::Path) -> Engine {
         let (tx, _rx) = unbounded_channel();
-        AppState::build(tx, Config::default(), Some(Storage::new(dir)), false)
+        Engine::build(tx, Config::default(), Some(Storage::new(dir)), false)
     }
 
     fn dir(tag: &str) -> PathBuf {
@@ -371,7 +371,7 @@ mod tests {
         // A fresh start has the same list without any network.
         let storage = Storage::new(&d);
         let (tx, _rx) = unbounded_channel();
-        let b = AppState::build(tx, storage.load().unwrap(), Some(storage), false);
+        let b = Engine::build(tx, storage.load().unwrap(), Some(storage), false);
         assert_eq!(b.subs[0].servers.len(), 2);
         assert_eq!(b.subs[0].servers[1].name, "B");
         assert!(b.subs[0].updated.is_some());
@@ -387,7 +387,7 @@ mod tests {
             "ua".into(),
             Err("нет сети".into()),
         );
-        assert!(matches!(a.popup, Some(Popup::Error(_))));
+        assert!(matches!(a.alerts().last(), Some(Alert::Error(_))));
         assert!(a.subs.is_empty() && a.config.subscriptions.is_empty());
 
         a.on_sub_added(
@@ -400,7 +400,7 @@ mod tests {
         a.on_sub_fetched(name.clone(), Err("timeout".into()));
         assert_eq!(a.subs[0].servers.len(), 2, "old servers stay");
         assert!(!a.updating.contains(&name));
-        assert!(a.status.as_deref().unwrap().contains("timeout"));
+        assert!(a.last_status().unwrap().as_str().contains("timeout"));
         let _ = std::fs::remove_dir_all(d);
     }
 
@@ -475,7 +475,8 @@ mod tests {
         let d = dir("del");
         let mut a = app_in(&d);
         a.on_sub_added("https://x.example/1".into(), "ua".into(), Ok(update(&[A])));
-        a.confirm(ConfirmKind::DeleteGroup(0));
+        let n = a.subs[0].name.clone();
+        a.delete_group(&n);
         assert!(a.subs.is_empty());
         assert!(a.config.subscriptions.is_empty());
         let storage = Storage::new(&d);

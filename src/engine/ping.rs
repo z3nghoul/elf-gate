@@ -255,10 +255,10 @@ mod tests {
     const REALITY: &str =
         "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R1";
 
-    fn app() -> (AppState, u64) {
+    fn app() -> (Engine, u64) {
         let (tx, _rx) = unbounded_channel();
-        let mut a = AppState::build(tx, Config::default(), None, false);
-        a.submit_input(REALITY.into());
+        let mut a = Engine::build(tx, Config::default(), None, false);
+        a.add_link(REALITY.into());
         let id = a.subs[0].servers[0].id;
         (a, id)
     }
@@ -300,7 +300,7 @@ mod tests {
         a.on_fp_searched(id, Some("Xray 1".into()), None, false);
         assert_eq!(a.server_by_id(id).unwrap().fp_override, None);
         assert_eq!(a.stored_search_version(id).as_deref(), Some("Xray 1"));
-        assert!(a.status.as_deref().unwrap().contains("не удалось"));
+        assert!(a.last_status().unwrap().as_str().contains("не удалось"));
         // A skipped run changes nothing.
         let before = a.config.overrides.clone();
         a.on_fp_searched(id, Some("Xray 1".into()), None, true);
@@ -317,8 +317,8 @@ mod tests {
             }
         });
         let (tx, mut rx) = unbounded_channel();
-        let mut a = AppState::build(tx, Config::default(), None, false);
-        a.submit_input(format!("vless://u@127.0.0.1:{port}?security=none#Local"));
+        let mut a = Engine::build(tx, Config::default(), None, false);
+        a.add_link(format!("vless://u@127.0.0.1:{port}?security=none#Local"));
         let id = a.subs[0].servers[0].id;
         a.ping_all();
         assert_eq!(a.server_by_id(id).unwrap().ping, Ping::Pending);

@@ -130,7 +130,7 @@ mod tests {
     const REALITY: &str =
         "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R";
 
-    fn app_with(links: &[&str]) -> (AppState, Vec<u64>) {
+    fn app_with(links: &[&str]) -> (Engine, Vec<u64>) {
         let dir = std::env::temp_dir().join(format!(
             "elf-gate-opts-{}-{}",
             std::process::id(),
@@ -138,9 +138,9 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         let (tx, _rx) = unbounded_channel();
-        let mut a = AppState::build(tx, Config::default(), Some(Storage::new(dir)), false);
+        let mut a = Engine::build(tx, Config::default(), Some(Storage::new(dir)), false);
         for l in links {
-            a.submit_input((*l).into());
+            a.add_link((*l).into());
         }
         let ids = a.subs[0].servers.iter().map(|s| s.id).collect();
         (a, ids)
@@ -154,8 +154,8 @@ mod tests {
                 .replace("#R", "#R2")
                 .replace("h.example", "h2.example"),
         ]);
-        a.set_role(ids[0], 1);
-        a.set_role(ids[1], 1);
+        a.set_role(ids[0], Some(ServerRole::Primary));
+        a.set_role(ids[1], Some(ServerRole::Primary));
         assert_eq!(
             a.server_by_id(ids[0]).unwrap().role,
             None,
@@ -175,7 +175,7 @@ mod tests {
             "and so does config.toml"
         );
         // Clearing removes the entry completely.
-        a.set_role(ids[1], 0);
+        a.set_role(ids[1], None);
         assert!(a.config.overrides.is_empty());
     }
 
@@ -187,8 +187,8 @@ mod tests {
                 .replace("#R", "#R2")
                 .replace("h.example", "h2.example"),
         ]);
-        a.set_role(ids[0], 1);
-        a.set_role(ids[1], 2);
+        a.set_role(ids[0], Some(ServerRole::Primary));
+        a.set_role(ids[1], Some(ServerRole::Backup));
         assert_eq!(a.backup_for(ids[0]).unwrap().id, ids[1]);
         assert!(
             a.backup_for(ids[1]).is_none(),
@@ -199,7 +199,7 @@ mod tests {
     #[tokio::test]
     async fn roles_and_fragmentation_survive_a_restart_and_leave_the_link_alone() {
         let (mut a, ids) = app_with(&[REALITY]);
-        a.set_role(ids[0], 2);
+        a.set_role(ids[0], Some(ServerRole::Backup));
         a.set_fragment(ids[0], true);
         let storage = a.storage.clone().unwrap();
         let text = std::fs::read_to_string(storage.config_path()).unwrap();
@@ -210,7 +210,7 @@ mod tests {
         assert_eq!(a.config.servers[0].link, REALITY);
 
         let (tx, _rx) = unbounded_channel();
-        let b = AppState::build(tx, storage.load().unwrap(), Some(storage), false);
+        let b = Engine::build(tx, storage.load().unwrap(), Some(storage), false);
         let s = &b.subs[0].servers[0];
         assert_eq!(s.role, Some(ServerRole::Backup));
         assert!(s.fragment);
@@ -219,8 +219,8 @@ mod tests {
     #[tokio::test]
     async fn fragmentation_is_for_tls_and_reality_only() {
         let (mut a, _) = app_with(&["vless://u@10.0.0.5:443?security=none#Plain"]);
-        a.selected = 1;
-        a.toggle_fragment();
-        assert!(a.status.as_deref().unwrap().contains("TLS или Reality"));
+        let id = a.subs[0].servers[0].id;
+        a.set_fragment(id, true);
+        assert!(a.last_status().unwrap().as_str().contains("TLS или Reality"));
     }
 }
