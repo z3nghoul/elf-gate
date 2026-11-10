@@ -590,3 +590,38 @@ async fn a_status_message_goes_away_by_itself() {
     a.handle_event(Event::Tick);
     assert_eq!(a.status.as_deref(), Some("again"));
 }
+
+#[tokio::test]
+async fn hotkeys_work_in_the_cyrillic_layouts_and_text_fields_take_the_characters_as_they_are() {
+    // The key where Q sits, typed on the Russian layout: quit.
+    let (mut a, _rx) = app_with(&[REALITY]);
+    press(&mut a, KeyCode::Char('\u{439}'));
+    assert!(a.should_quit);
+    // The Ukrainian i is the S key: the settings screen.
+    let (mut a, _rx) = app_with(&[REALITY]);
+    press(&mut a, KeyCode::Char('\u{456}'));
+    assert_eq!(a.screen, Screen::Settings);
+    // Ctrl + the Russian key of P toggles the privacy mode.
+    let (mut a, mut rx) = app_with(&[REALITY]);
+    a.handle_key(KeyEvent::new(
+        KeyCode::Char('\u{437}'),
+        KeyModifiers::CONTROL,
+    ));
+    assert!(a.privacy());
+    assert!(!sent(&mut rx).is_empty());
+    // A link field: the Cyrillic stays Cyrillic.
+    let (mut a, _rx) = app_with(&[]);
+    a.handle_action(Action::Add);
+    for c in "\u{439}\u{446}\u{443}\u{43a}\u{435}\u{43d}".chars() {
+        press(&mut a, KeyCode::Char(c));
+    }
+    assert!(
+        matches!(&a.popup, Some(Popup::Input { buf, .. }) if buf == "\u{439}\u{446}\u{443}\u{43a}\u{435}\u{43d}")
+    );
+    // The filter field too.
+    let (mut a, _rx) = app_with(&[REALITY]);
+    a.handle_action(Action::Filter);
+    press(&mut a, KeyCode::Char('\u{439}'));
+    press(&mut a, KeyCode::Char('\u{44b}'));
+    assert_eq!(a.filter, "\u{439}\u{44b}");
+}

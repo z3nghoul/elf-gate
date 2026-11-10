@@ -449,7 +449,7 @@ fn names_with_emoji_keep_the_list_and_the_frame_aligned() {
     }
     assert!(frame.contains("DE #5 LTE"), "{frame}");
     // The all-emoji name falls back to the address.
-    assert!(frame.contains("h3.example.co\u{2026}"), "{frame}");
+    assert!(frame.contains("h3.example.com:443"), "{frame}");
     // Every row has the same width and the latency column starts at one place.
     let lines: Vec<&str> = frame.lines().collect();
     let width = lines[0].chars().count();
@@ -465,4 +465,53 @@ fn names_with_emoji_keep_the_list_and_the_frame_aligned() {
         "{cols:?}\n{frame}"
     );
     insta::assert_snapshot!("emoji_names_list", frame);
+}
+
+#[test]
+fn the_name_column_takes_the_room_up_to_the_latency_and_a_dagger_marks_a_deprecated_transport() {
+    use crate::model::server::Ping;
+    let name = "DE #5 LTE \u{2014} \u{423}\u{43d}\u{438}\u{432}\u{435}\u{440}\u{441}\u{430}\u{43b}\u{44c}\u{43d}\u{44b}\u{439}";
+    let links = [
+        format!("vless://u@a.example.com:443?security=tls&sni=x.org#{name}"),
+        format!("vless://u@b.example.com:443?security=tls&sni=x.org&type=ws&path=/#NL #1 LTE \u{2014} {name}"),
+        "vless://u@c.example.com:443?security=tls&sni=x.org#Short".to_string(),
+    ];
+    let refs: Vec<&str> = links.iter().map(String::as_str).collect();
+    for width in [100u16, 150] {
+        let mut a = remote(app(&refs));
+        for (i, s) in a.subs[0].servers.iter_mut().enumerate() {
+            s.ping = Ping::Ms(40 + i as u32 * 25);
+            s.ping_at = Some(1);
+        }
+        let frame = draw(width, 30, &mut a);
+        // The ping column starts at one place in every row of the list.
+        let left: Vec<String> = frame
+            .lines()
+            .map(|l| l.chars().take(width as usize * 45 / 100).collect())
+            .collect();
+        let cols: Vec<usize> = left
+            .iter()
+            .filter(|l| l.contains(" ms"))
+            .map(|l| l.split(" ms").next().unwrap().chars().count())
+            .collect();
+        assert!(
+            cols.len() == 3 && cols.windows(2).all(|w| w[0] == w[1]),
+            "{cols:?}\n{frame}"
+        );
+        if width == 150 {
+            assert!(
+                frame.contains(name),
+                "the whole name must be visible:\n{frame}"
+            );
+        } else {
+            assert!(frame.contains('\u{2026}'), "{frame}");
+        }
+        // The dagger is not cut away with the name, and no `[depr.]` label is left.
+        assert!(frame.contains('\u{2020}'), "{frame}");
+        assert!(
+            !frame.contains("[depr.]") && !frame.contains("[\u{443}\u{441}\u{442}\u{430}\u{440}"),
+            "{frame}"
+        );
+        insta::assert_snapshot!(format!("name_column_{width}"), frame);
+    }
 }

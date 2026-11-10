@@ -494,9 +494,6 @@ sort_original = "Original server order"
 sort_ping = "Sorted by ping (o - restore the order)"
 traffic = "↑{up}/s ↓{down}/s | VPN {pu}↑ {pd}↓ | direct {du}↑ {dd}↓"
 
-[tag]
-deprecated = "[depr.]"
-
 [tray]
 connect = "Connect"
 connected = "elf-gate: connected, {name}"

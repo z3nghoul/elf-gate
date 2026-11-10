@@ -553,7 +553,12 @@ impl AppState {
                 mut selected,
                 kind,
             } => {
-                match key.code {
+                // j / k move the choice on a Russian or Ukrainian layout too.
+                let code = match key.code {
+                    KeyCode::Char(c) => KeyCode::Char(crate::action::qwerty(c)),
+                    other => other,
+                };
+                match code {
                     KeyCode::Esc => {
                         self.show_next_alert();
                         return;

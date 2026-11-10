@@ -4,10 +4,10 @@ expression: frame
 ---
 ┌ Серверы ──────────────────────────────────┐┌ Детали ─────────────────────────────────────────────┐
 │  ▼ EtherVPN (4)                           ││Имя:           DE #5 LTE — Универсальный             │
-│>   DE #5 LTE — У…           30 ms         ││Протокол:      VLESS+TLS                             │
-│    VN Auto | ver…           47 ms         ││Транспорт:     tcp                                   │
-│    Plain                    64 ms         ││Адрес:         h0.example.com:443                    │
-│    h3.example.co…           81 ms         ││SNI:           x.org                                 │
+│>   DE #5 LTE — Универсал…        30 ms    ││Протокол:      VLESS+TLS                             │
+│    VN Auto | very long n…        47 ms    ││Транспорт:     tcp                                   │
+│    Plain                         64 ms    ││Адрес:         h0.example.com:443                    │
+│    h3.example.com:443            81 ms    ││SNI:           x.org                                 │
 │                                           ││Fingerprint:   не задан                              │
 │                                           ││Фрагмент:      выключена                             │
 │                                           ││Роль:          нет                                   │
