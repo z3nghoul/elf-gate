@@ -1,0 +1,107 @@
+name: Windows test build
+
+# Builds elf-gate-windows-test.zip for a human tester: release exe, Xray with a verified
+# checksum, readable instructions. Run it by hand (Actions > Windows test build > Run workflow)
+# or push a tag like windows-test-1 or v0.1.0.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*', 'windows-test-*']
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  XRAY_VERSION: v26.11.9
+  XRAY_WIN_SHA256: 1262522266337b824f07beb8e1375786b437683b3890105469088f8e17e0a69d
+
+jobs:
+  package:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release exe
+        env:
+          ELF_GATE_COMMIT: ${{ github.sha }}
+        run: cargo build --release
+
+      - name: Download Xray and verify SHA256
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'xray-win.zip'
+          Invoke-WebRequest -Uri "https://github.com/XTLS/Xray-core/releases/download/$env:XRAY_VERSION/Xray-windows-64.zip" -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLower()
+          if ($actual -ne $env:XRAY_WIN_SHA256) {
+            throw "Xray archive SHA256 mismatch. expected $env:XRAY_WIN_SHA256, got $actual"
+          }
+          Write-Host "Xray archive SHA256 OK"
+          Expand-Archive -Path $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'xray-win')
+
+      - name: Assemble the package
+        run: |
+          $x = Join-Path $env:RUNNER_TEMP 'xray-win'
+          $out = 'elf-gate-windows-test'
+          New-Item -ItemType Directory -Path $out | Out-Null
+          Copy-Item 'target\release\elf-gate.exe' $out
+          foreach ($f in 'xray.exe', 'geoip.dat', 'geosite.dat') { Copy-Item (Join-Path $x $f) $out }
+          # Xray is MPL-2.0: its license must travel with the binary.
+          Copy-Item (Join-Path $x 'LICENSE') (Join-Path $out 'LICENSE-Xray')
+
+          # Smoke test: the binaries start (a missing DLL or a bad build fails the job here).
+          $versionLine = (& (Join-Path $out 'elf-gate.exe') --version) | Out-String
+          $versionLine = $versionLine.Trim()
+          Write-Host $versionLine
+          & (Join-Path $out 'xray.exe') version | Select-Object -First 1
+
+          # Texts for the tester: fill in the build info, UTF-8 with BOM and CRLF so that
+          # Notepad shows Russian text correctly.
+          $date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'
+          $utf8bom = New-Object System.Text.UTF8Encoding($true)
+          function Write-Text($src, $dstName) {
+            $t = [System.IO.File]::ReadAllText($src, [System.Text.Encoding]::UTF8)
+            $t = $t.Replace('{{VERSION_LINE}}', $versionLine).Replace('{{DATE}}', $date).Replace('{{XRAY_VERSION}}', $env:XRAY_VERSION)
+            $t = ($t -replace "`r`n", "`n") -replace "`n", "`r`n"
+            [System.IO.File]::WriteAllText((Join-Path $out $dstName), $t, $utf8bom)
+          }
+          Write-Text 'packaging\windows-test\ТЕСТ-README.txt' 'ТЕСТ-README.txt'
+          Write-Text 'packaging\windows-test\ЧЕК-ЛИСТ.txt' 'ЧЕК-ЛИСТ.txt'
+          $ver = "$versionLine`r`nXray $env:XRAY_VERSION`r`nBuilt $date`r`nGitHub run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID`r`n"
+          [System.IO.File]::WriteAllText((Join-Path $out 'ВЕРСИЯ.txt'), $ver, $utf8bom)
+
+          $sums = foreach ($f in 'elf-gate.exe', 'xray.exe', 'geoip.dat', 'geosite.dat', 'LICENSE-Xray') {
+            $h = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $out $f)).Hash.ToLower()
+            "$h  $f"
+          }
+          [System.IO.File]::WriteAllText((Join-Path $out 'SHA256SUMS.txt'), (($sums -join "`r`n") + "`r`n"), $utf8bom)
+
+      - name: Guard - no server links or stray files in the package
+        run: |
+          $out = 'elf-gate-windows-test'
+          $allowed = @('elf-gate.exe', 'xray.exe', 'geoip.dat', 'geosite.dat', 'LICENSE-Xray',
+                       'ТЕСТ-README.txt', 'ЧЕК-ЛИСТ.txt', 'ВЕРСИЯ.txt', 'SHA256SUMS.txt')
+          $present = (Get-ChildItem -Path $out -Recurse -File).Name
+          $unexpected = $present | Where-Object { $allowed -notcontains $_ }
+          if ($unexpected) { throw "Unexpected files in the package: $($unexpected -join ', ')" }
+          $missing = $allowed | Where-Object { $present -notcontains $_ }
+          if ($missing) { throw "Missing files in the package: $($missing -join ', ')" }
+          # A share link looks like scheme://something@host. Mentioning the scheme alone is fine.
+          $bad = Select-String -Path (Join-Path $out '*.txt') -Pattern '(vless|vmess|trojan|ss|hysteria2)://[^\s]*@' -Encoding UTF8
+          if ($bad) { throw "A server link was found in the package: $($bad.Path -join ', ')" }
+          Write-Host "Package content OK: $($present -join ', ')"
+
+      - name: Zip
+        run: Compress-Archive -Path 'elf-gate-windows-test' -DestinationPath 'elf-gate-windows-test.zip' -CompressionLevel Optimal
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: elf-gate-windows-test
+          path: elf-gate-windows-test.zip
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
