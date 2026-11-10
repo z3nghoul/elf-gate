@@ -152,13 +152,13 @@ fn no_screen_shows_a_secret_in_privacy_mode() {
     }
     // And a few of them as snapshots, so a change in the masking is seen in review.
     let (mut a, _rx) = app();
-    insta::assert_snapshot!("privacy_main_server_details", draw(100, 32, &mut a));
+    snap!("privacy_main_server_details", draw(100, 32, &mut a));
     let (mut a, _rx) = app();
     a.screen = Screen::Settings;
-    insta::assert_snapshot!("privacy_settings", draw(100, 32, &mut a));
+    snap!("privacy_settings", draw(100, 32, &mut a));
     let (mut a, _rx) = app();
     a.screen = Screen::LogsFull;
-    insta::assert_snapshot!("privacy_logs", draw(100, 32, &mut a));
+    snap!("privacy_logs", draw(100, 32, &mut a));
 }
 
 #[test]
@@ -320,7 +320,7 @@ fn a_json_subscription_chain_shows_no_host_zone_and_no_home_directory() {
         logs.contains("~/.local/state/elf-gate/run/xray.json") && logs.contains("xray: ~/bin/xray"),
         "{logs}"
     );
-    insta::assert_snapshot!("privacy_json_chain_main", frames[0]);
-    insta::assert_snapshot!("privacy_json_chain_logs", frames[1]);
-    insta::assert_snapshot!("privacy_json_chain_settings", frames[2]);
+    snap!("privacy_json_chain_main", frames[0]);
+    snap!("privacy_json_chain_logs", frames[1]);
+    snap!("privacy_json_chain_settings", frames[2]);
 }

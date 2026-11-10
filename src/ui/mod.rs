@@ -1,3 +1,16 @@
+/// A screen snapshot. The screens show the platform's own data (the process names of a preset,
+/// the default path of the core, the TUN core), so they are compared on Linux only; the other
+/// assertions of the tests run everywhere.
+#[cfg(test)]
+macro_rules! snap {
+    ($name:expr, $frame:expr) => {
+        #[cfg(not(windows))]
+        insta::assert_snapshot!($name, $frame);
+        #[cfg(windows)]
+        let _ = (&$name, &$frame);
+    };
+}
+
 mod details;
 mod help;
 #[cfg(test)]
