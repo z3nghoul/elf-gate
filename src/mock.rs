@@ -47,6 +47,7 @@ pub fn make_server(id: u64, name: &str, host: &str, sec: Security, tr: Transport
         },
         params: TransportParams::default(),
         link: String::new(),
+        fp_override: None,
         unsupported: None,
         ping: Ping::Unknown,
     }

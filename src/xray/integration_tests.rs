@@ -550,6 +550,7 @@ fn rig(xray: &Path, tag: &str, set_system_proxy: bool) -> Rig {
             ..ProxyConfig::default()
         },
         servers: Vec::new(),
+        overrides: Vec::new(),
     };
     let desktop = Arc::new(MockProxy::with_user_settings(&[
         ("enabled", "1"),

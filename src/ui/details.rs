@@ -1,5 +1,5 @@
 use crate::app::{AppState, Focus, Row, Screen};
-use crate::model::server::Server;
+use crate::model::server::{Security, Server};
 use crate::ui::statusbar::format_bytes;
 use crate::ui::theme::Theme;
 use ratatui::layout::Rect;
@@ -12,6 +12,22 @@ fn field<'a>(label: &str, value: String, th: &Theme) -> Line<'a> {
         Span::styled(format!("{label:<13}"), th.muted()),
         Span::styled(value, th.text()),
     ])
+}
+
+/// Current fingerprint with its origin: override, link value or Xray's default.
+fn fingerprint_label(s: &Server) -> String {
+    let from_link = if s.tls.fingerprint.is_empty() {
+        "не задан".to_string()
+    } else {
+        s.tls.fingerprint.clone()
+    };
+    match &s.fp_override {
+        Some(o) => format!("{o} (выбран; в ссылке: {from_link}; f - сменить)"),
+        None if s.tls.fingerprint.is_empty() && s.security == Security::Reality => {
+            "chrome (по умолчанию; f - сменить)".to_string()
+        }
+        None => format!("{from_link} (f - сменить)"),
+    }
 }
 
 /// Appends `label: value` only when the value is not empty.
@@ -45,7 +61,9 @@ fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
         opt(&mut lines, "Encryption:", &format!("{short}..."), th);
     }
     opt(&mut lines, "SNI:", &s.tls.sni, th);
-    opt(&mut lines, "Fingerprint:", &s.tls.fingerprint, th);
+    if matches!(s.security, Security::Tls | Security::Reality) {
+        lines.push(field("Fingerprint:", fingerprint_label(s), th));
+    }
     opt(&mut lines, "ALPN:", &s.tls.alpn.join(","), th);
     opt(&mut lines, "PublicKey:", &s.tls.public_key, th);
     opt(&mut lines, "ShortId:", &s.tls.short_id, th);
@@ -64,7 +82,13 @@ fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
 pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     let focused = app.screen == Screen::Main && app.focus == Focus::Details;
     let lines = match app.selected_row() {
-        Some(Row::Server(i, j)) => server_lines(&app.subs[i].servers[j], th),
+        Some(Row::Server(i, j)) => {
+            let mut l = server_lines(&app.subs[i].servers[j], th);
+            if let Some(hint) = app.fp_hint() {
+                l.push(Line::from(Span::styled(hint, th.warn())));
+            }
+            l
+        }
         Some(Row::Group(i)) => {
             let sub = &app.subs[i];
             let mut l = vec![

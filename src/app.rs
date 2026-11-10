@@ -1,11 +1,11 @@
 use crate::action::{map_key, Action};
 use crate::event::{now_hms, BgEvent, BgTx, Event, Level, LogLine};
 use crate::mock::{self, Lcg};
-use crate::model::server::{Ping, Security, Server, Transport};
+use crate::model::server::{Ping, Security, Server, Transport, FINGERPRINTS};
 use crate::model::subscription::Subscription;
 use crate::parser;
 use crate::platform::ProxyAddr;
-use crate::storage::{Config, ServerEntry, Storage};
+use crate::storage::{Config, ServerEntry, ServerOverride, Storage};
 use crate::sysproxy::{ProxyCmd, ProxyHandle};
 use crate::xray::validate::{self, Verdict};
 use crate::xray::{self, process::Core};
@@ -13,6 +13,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 pub const LOG_CAPACITY: usize = 2000;
 /// Name of the group holding servers added by hand (persisted in `config.toml`).
@@ -55,10 +56,32 @@ pub enum ConfirmKind {
     DeleteGroup(usize),
 }
 
+/// What a selection popup applies its choice to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectKind {
+    Fingerprint(u64),
+}
+
+/// Core warnings/errors within this window count as "connections are failing".
+const FAILURE_WINDOW: Duration = Duration::from_secs(30);
+const FAILURE_THRESHOLD: usize = 3;
+
 #[derive(Debug, Clone)]
 pub enum Popup {
-    Input { title: String, buf: String },
-    Confirm { text: String, kind: ConfirmKind },
+    Select {
+        title: String,
+        options: Vec<String>,
+        selected: usize,
+        kind: SelectKind,
+    },
+    Input {
+        title: String,
+        buf: String,
+    },
+    Confirm {
+        text: String,
+        kind: ConfirmKind,
+    },
     Error(String),
 }
 
@@ -88,6 +111,8 @@ pub struct AppState {
     pub down_bytes: u64,
     pub status: Option<String>,
     pub should_quit: bool,
+    /// Times of recent core warnings/errors, for the "try fp=firefox" hint.
+    core_failures: VecDeque<Instant>,
     pub config: Config,
     storage: Option<Storage>,
     /// The running Xray process, if any.
@@ -136,6 +161,12 @@ impl AppState {
                 info: None,
             });
         }
+        for sub in &mut subs {
+            let group = sub.name.clone();
+            for server in &mut sub.servers {
+                server.fp_override = fp_override_for(&config, &group, server);
+            }
+        }
         let mut app = Self {
             subs,
             selected: 0,
@@ -154,6 +185,7 @@ impl AppState {
             down_bytes: 0,
             status: None,
             should_quit: false,
+            core_failures: VecDeque::new(),
             config,
             storage,
             core: None,
@@ -358,7 +390,10 @@ impl AppState {
 
     fn on_bg(&mut self, ev: BgEvent) {
         match ev {
-            BgEvent::Log(line) => self.push_log(line),
+            BgEvent::Log(line) => {
+                self.note_core_failure(&line);
+                self.push_log(line);
+            }
             BgEvent::Ping { id, result } => {
                 if let Some(s) = self
                     .subs
@@ -480,6 +515,31 @@ impl AppState {
             return;
         };
         match popup {
+            Popup::Select {
+                title,
+                options,
+                mut selected,
+                kind,
+            } => {
+                match key.code {
+                    KeyCode::Esc => return,
+                    KeyCode::Enter => {
+                        self.apply_selection(kind, selected);
+                        return;
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        selected = (selected + 1).min(options.len() - 1)
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => selected = selected.saturating_sub(1),
+                    _ => {}
+                }
+                self.popup = Some(Popup::Select {
+                    title,
+                    options,
+                    selected,
+                    kind,
+                });
+            }
             Popup::Input { title, mut buf } => match key.code {
                 KeyCode::Esc => {}
                 KeyCode::Enter => self.submit_input(buf),
@@ -514,7 +574,7 @@ impl AppState {
         // Server-list actions only make sense on the main screen.
         let main_only = matches!(
             action,
-            Enter | Delete | Add | Filter | PingAll | SortPing | UpdateSubs
+            Enter | Delete | Add | Filter | PingAll | SortPing | UpdateSubs | Fingerprint
         );
         if main_only && self.screen != Screen::Main {
             return;
@@ -557,6 +617,7 @@ impl AppState {
             Logs => self.toggle_screen(Screen::LogsFull),
             Help => self.toggle_screen(Screen::Help),
             Filter => self.filtering = true,
+            Fingerprint => self.open_fingerprint_menu(),
             Back => self.back(),
             FocusNext => self.cycle_focus(true),
             FocusPrev => self.cycle_focus(false),
@@ -870,6 +931,124 @@ impl AppState {
         }
     }
 
+    // ---------- TLS fingerprint override ----------
+
+    fn open_fingerprint_menu(&mut self) {
+        let Some(server) = self.selected_server() else {
+            self.status = Some("Выберите сервер (не группу)".into());
+            return;
+        };
+        if !server.is_supported() || !matches!(server.security, Security::Tls | Security::Reality) {
+            self.status = Some("fp применим только к серверам с TLS или Reality".into());
+            return;
+        }
+        let from_link = if server.tls.fingerprint.is_empty() {
+            "по умолчанию"
+        } else {
+            &server.tls.fingerprint
+        };
+        let mut options = vec![format!("как в ссылке ({from_link})")];
+        options.extend(FINGERPRINTS.iter().map(|f| f.to_string()));
+        let selected = server
+            .fp_override
+            .as_deref()
+            .and_then(|o| FINGERPRINTS.iter().position(|f| *f == o))
+            .map_or(0, |i| i + 1);
+        self.popup = Some(Popup::Select {
+            title: format!("TLS fingerprint: {}", server.name),
+            options,
+            selected,
+            kind: SelectKind::Fingerprint(server.id),
+        });
+    }
+
+    fn apply_selection(&mut self, kind: SelectKind, index: usize) {
+        match kind {
+            SelectKind::Fingerprint(id) => {
+                let fp = index
+                    .checked_sub(1)
+                    .and_then(|i| FINGERPRINTS.get(i))
+                    .map(|f| f.to_string());
+                self.set_fingerprint(id, fp);
+            }
+        }
+    }
+
+    /// Stores (or clears, with `None`) the fingerprint override and restarts the core if
+    /// it is running this server, so the change takes effect at once.
+    fn set_fingerprint(&mut self, id: u64, fp: Option<String>) {
+        let mut found = None;
+        for sub in &mut self.subs {
+            let group = sub.name.clone();
+            if let Some(server) = sub.servers.iter_mut().find(|s| s.id == id) {
+                server.fp_override = fp.clone();
+                found = Some((override_key(&group, server), server.name.clone()));
+            }
+        }
+        let Some((key, name)) = found else { return };
+        self.config.overrides.retain(|o| o.server != key);
+        if fp.is_some() {
+            self.config.overrides.push(ServerOverride {
+                server: key,
+                fp: fp.clone(),
+            });
+        }
+        self.core_failures.clear();
+        self.log(
+            Level::Info,
+            format!(
+                "fp for {name}: {}",
+                fp.as_deref().unwrap_or("as in the link")
+            ),
+        );
+        self.save_config();
+        if matches!(self.conn, Conn::Connected(c) | Conn::Connecting(c) if c == id) {
+            if self.busy {
+                self.status = Some("fp сохранён, применится при следующем подключении".into());
+            } else {
+                self.connect(id);
+            }
+        }
+    }
+
+    /// Remembers core warnings/errors; a burst of them hints at a blocked handshake.
+    fn note_core_failure(&mut self, line: &LogLine) {
+        let from_core = line.text.starts_with("[xray");
+        let noise = line.text.contains("deprecated") || line.text.contains(" started");
+        if from_core && line.level != Level::Info && !noise {
+            self.core_failures.push_back(Instant::now());
+        }
+        self.prune_failures();
+    }
+
+    fn prune_failures(&mut self) {
+        while self
+            .core_failures
+            .front()
+            .is_some_and(|t| t.elapsed() > FAILURE_WINDOW)
+        {
+            self.core_failures.pop_front();
+        }
+    }
+
+    /// Shown in the details pane when the core runs but keeps logging failures while a
+    /// fingerprint other than `firefox` is in use.
+    pub fn fp_hint(&self) -> Option<&'static str> {
+        let Conn::Connected(id) = self.conn else {
+            return None;
+        };
+        let server = self.server_by_id(id)?;
+        let recent = self
+            .core_failures
+            .iter()
+            .filter(|t| t.elapsed() <= FAILURE_WINDOW)
+            .count();
+        let fp_matters =
+            matches!(server.security, Security::Tls | Security::Reality) && !server.link.is_empty();
+        (fp_matters && recent >= FAILURE_THRESHOLD && server.effective_fingerprint() != "firefox")
+            .then_some("Соединения не проходят? Попробуйте fp=firefox (клавиша f)")
+    }
+
     /// Greys the server out and keeps Xray's error text for the details pane.
     fn mark_rejected(&mut self, id: u64, reason: &str) {
         let mut name = None;
@@ -975,6 +1154,7 @@ impl AppState {
         }
         self.next_id += 1;
         server.id = self.next_id;
+        server.fp_override = fp_override_for(&self.config, MANUAL_GROUP, &server);
         self.config.servers.push(ServerEntry {
             link: server.link.clone(),
         });
@@ -1003,6 +1183,20 @@ impl AppState {
             self.popup = Some(Popup::Error(e.to_string()));
         }
     }
+}
+
+/// Stable identity of a server for per-server overrides: `"<group>/<name>|<host>:<port>"`.
+pub fn override_key(group: &str, server: &Server) -> String {
+    format!("{group}/{}|{}:{}", server.name, server.address, server.port)
+}
+
+fn fp_override_for(config: &Config, group: &str, server: &Server) -> Option<String> {
+    let key = override_key(group, server);
+    config
+        .overrides
+        .iter()
+        .find(|o| o.server == key)
+        .and_then(|o| o.fp.clone())
 }
 
 pub fn mode_name(m: Mode) -> &'static str {
@@ -1150,5 +1344,157 @@ mod tests {
         a.activate_selected();
         assert!(matches!(a.popup, Some(Popup::Error(_))));
         assert_eq!(a.conn, Conn::Disconnected);
+    }
+
+    const REALITY: &str =
+        "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R1";
+
+    fn app_with_reality() -> (AppState, u64) {
+        let mut a = app();
+        a.submit_input(REALITY.into());
+        a.selected = a.rows().len() - 1;
+        let id = a.selected_server().unwrap().id;
+        (a, id)
+    }
+
+    fn press(a: &mut AppState, code: KeyCode) {
+        a.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    #[tokio::test]
+    async fn fingerprint_menu_stores_a_per_server_override() {
+        let (mut a, id) = app_with_reality();
+        a.handle_action(Action::Fingerprint);
+        let Some(Popup::Select {
+            options, selected, ..
+        }) = &a.popup
+        else {
+            panic!("menu expected, got {:?}", a.popup)
+        };
+        assert_eq!(options[0], "как в ссылке (chrome)");
+        assert_eq!(&options[1..], FINGERPRINTS);
+        assert_eq!(*selected, 0);
+
+        press(&mut a, KeyCode::Down); // chrome
+        press(&mut a, KeyCode::Down); // firefox
+        press(&mut a, KeyCode::Enter);
+        assert!(a.popup.is_none());
+        let s = a.server_by_id(id).unwrap();
+        assert_eq!(s.fp_override.as_deref(), Some("firefox"));
+        assert_eq!(
+            s.tls.fingerprint, "chrome",
+            "the link's fp is never rewritten"
+        );
+        assert_eq!(a.config.overrides.len(), 1);
+        assert_eq!(a.config.overrides[0].server, "manual/R1|h.example.com:443");
+        assert_eq!(
+            a.config.servers[0].link, REALITY,
+            "the stored link is untouched"
+        );
+
+        // The menu opens on the current choice; picking the first entry clears the override.
+        a.handle_action(Action::Fingerprint);
+        assert!(matches!(a.popup, Some(Popup::Select { selected: 2, .. })));
+        press(&mut a, KeyCode::Up);
+        press(&mut a, KeyCode::Up);
+        press(&mut a, KeyCode::Enter);
+        assert_eq!(a.server_by_id(id).unwrap().fp_override, None);
+        assert!(a.config.overrides.is_empty());
+    }
+
+    #[tokio::test]
+    async fn escape_leaves_the_fingerprint_unchanged() {
+        let (mut a, id) = app_with_reality();
+        a.handle_action(Action::Fingerprint);
+        press(&mut a, KeyCode::Down);
+        press(&mut a, KeyCode::Esc);
+        assert!(a.popup.is_none());
+        assert_eq!(a.server_by_id(id).unwrap().fp_override, None);
+    }
+
+    #[tokio::test]
+    async fn fingerprint_override_survives_restart() {
+        let dir = std::env::temp_dir().join(format!("elf-gate-fp-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let storage = Storage::new(&dir);
+        let (tx, _rx) = unbounded_channel();
+        let mut a = AppState::with_config(tx, Config::default(), Some(storage.clone()));
+        a.submit_input(REALITY.into());
+        a.selected = a.rows().len() - 1;
+        let id = a.selected_server().unwrap().id;
+        a.set_fingerprint(id, Some("safari".into()));
+
+        let text = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(
+            text.contains("[[overrides]]") && text.contains("fp = \"safari\""),
+            "{text}"
+        );
+
+        let (tx, _rx) = unbounded_channel();
+        let b = AppState::with_config(tx, storage.load().unwrap(), Some(storage));
+        let manual = b.subs.iter().find(|s| s.name == MANUAL_GROUP).unwrap();
+        assert_eq!(manual.servers[0].fp_override.as_deref(), Some("safari"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn fingerprint_menu_is_for_tls_and_reality_only() {
+        let mut a = app();
+        a.submit_input("vless://u@10.0.0.5:443?security=none#Plain".into());
+        a.selected = a.rows().len() - 1;
+        a.handle_action(Action::Fingerprint);
+        assert!(a.popup.is_none());
+        assert!(a.status.as_deref().unwrap().contains("TLS или Reality"));
+    }
+
+    fn core_warning(text: &str) -> BgEvent {
+        BgEvent::Log(LogLine {
+            time: "00:00:00".into(),
+            level: Level::Warning,
+            text: text.into(),
+        })
+    }
+
+    #[tokio::test]
+    async fn burst_of_core_failures_suggests_firefox() {
+        let (mut a, id) = app_with_reality();
+        a.conn = Conn::Connected(id);
+        assert_eq!(a.fp_hint(), None);
+        for _ in 0..2 {
+            a.on_bg(core_warning(
+                "[xray] [Warning] proxy/vless/outbound: connection ends > EOF",
+            ));
+        }
+        assert_eq!(a.fp_hint(), None, "two failures are not a pattern yet");
+        a.on_bg(core_warning(
+            "[xray:err] [Warning] reality: failed to read server hello",
+        ));
+        assert!(a.fp_hint().unwrap().contains("fp=firefox"));
+
+        // Notices and non-core lines do not count; firefox already in use needs no hint.
+        a.set_fingerprint(id, Some("firefox".into()));
+        a.conn = Conn::Connected(id);
+        for _ in 0..5 {
+            a.on_bg(core_warning("[xray] [Warning] proxy: something failed"));
+        }
+        assert_eq!(a.fp_hint(), None);
+    }
+
+    #[tokio::test]
+    async fn failure_hint_ignores_noise_and_expires() {
+        let (mut a, id) = app_with_reality();
+        a.conn = Conn::Connected(id);
+        for _ in 0..5 {
+            a.on_bg(core_warning("[xray] [Warning] core: Xray 26.11.9 started"));
+            a.on_bg(core_warning(
+                "[xray] [Warning] The feature gRPC is deprecated",
+            ));
+            a.on_bg(core_warning("some mock log line"));
+        }
+        assert_eq!(a.fp_hint(), None);
+
+        let old = Instant::now() - Duration::from_secs(120);
+        a.core_failures.extend([old, old, old, old]);
+        assert_eq!(a.fp_hint(), None, "old failures expire");
     }
 }

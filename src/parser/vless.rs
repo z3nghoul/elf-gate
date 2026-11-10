@@ -100,6 +100,7 @@ pub fn parse(link: &str) -> Result<Server, ParseError> {
         host: get("host"),
         mode: get("mode"),
         service_name: get("serviceName"),
+        authority: get("authority"),
     };
 
     let name = fragment_name(link).unwrap_or_else(|| {
@@ -123,6 +124,7 @@ pub fn parse(link: &str) -> Result<Server, ParseError> {
         tls,
         params,
         link: link.to_string(),
+        fp_override: None,
         unsupported,
         ping: Ping::Unknown,
     })
@@ -399,5 +401,33 @@ mod tests {
         // Incompatible servers are not additionally tagged as deprecated.
         let bad = parse_link(&format!("vless://{UUID}@8.8.8.8:443?type=ws#t")).unwrap();
         assert!(!bad.is_supported() && bad.deprecated_transport().is_none());
+    }
+
+    #[test]
+    fn grpc_authority_and_multi_mode() {
+        let s = parse_link(&format!(
+            "vless://{UUID}@g.example.com:443?security=tls&sni=g.example.com&type=grpc&serviceName=svc&authority=cdn.example.com&mode=multi#G"
+        ))
+        .unwrap();
+        assert_eq!(s.transport, Transport::Grpc);
+        assert_eq!(s.params.service_name, "svc");
+        assert_eq!(s.params.authority, "cdn.example.com");
+        assert_eq!(s.params.mode, "multi");
+    }
+
+    #[test]
+    fn fingerprint_is_kept_exactly_as_in_the_link() {
+        for fp in ["chrome", "firefox", "random", "weird-custom"] {
+            let s = parse_link(&format!(
+                "vless://{UUID}@h.example.com:443?security=reality&pbk=K&sni=x.org&fp={fp}#t"
+            ))
+            .unwrap();
+            assert_eq!(s.tls.fingerprint, fp);
+            assert_eq!(
+                s.fp_override, None,
+                "the parser never substitutes a fingerprint"
+            );
+            assert_eq!(s.effective_fingerprint(), fp);
+        }
     }
 }

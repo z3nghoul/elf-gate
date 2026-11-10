@@ -19,6 +19,30 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     let Some(popup) = &app.popup else { return };
     let w = area.width.saturating_sub(10).clamp(30, 70);
     let (title, lines, border) = match popup {
+        Popup::Select {
+            title,
+            options,
+            selected,
+            ..
+        } => {
+            let mut lines: Vec<Line> = options
+                .iter()
+                .enumerate()
+                .map(|(i, o)| {
+                    if i == *selected {
+                        Line::from(Span::styled(format!("> {o}"), th.selected()))
+                    } else {
+                        Line::from(Span::styled(format!("  {o}"), th.text()))
+                    }
+                })
+                .collect();
+            lines.push(Line::default());
+            lines.push(Line::from(Span::styled(
+                "j/k - выбор, Enter - применить, Esc - отмена",
+                th.muted(),
+            )));
+            (title.clone(), lines, th.border(true))
+        }
         Popup::Input { title, buf } => (
             title.clone(),
             vec![

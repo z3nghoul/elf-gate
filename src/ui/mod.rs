@@ -149,4 +149,49 @@ mod tests {
         assert!(out.contains("Xray отверг конфиг"), "{out}");
         assert!(out.contains("prohibited"), "{out}");
     }
+
+    #[tokio::test]
+    async fn details_show_fingerprint_origin_and_hint() {
+        let (tx, _rx) = unbounded_channel();
+        let mut app = AppState::new(tx);
+        app.submit_input(
+            "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R1"
+                .into(),
+        );
+        app.selected = app.rows().len() - 1;
+        let out = draw(110, 30, &mut app);
+        assert!(
+            out.contains("Fingerprint:") && out.contains("chrome (f - сменить)"),
+            "{out}"
+        );
+
+        let id = app.selected_server().unwrap().id;
+        app.handle_event(crate::event::Event::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('f'),
+            crossterm::event::KeyModifiers::NONE,
+        )));
+        let out = draw(110, 30, &mut app);
+        println!("{out}");
+        assert!(
+            out.contains("как в ссылке (chrome)") && out.contains("firefox"),
+            "{out}"
+        );
+
+        for code in [
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyCode::Enter,
+        ] {
+            app.handle_event(crate::event::Event::Key(crossterm::event::KeyEvent::new(
+                code,
+                crossterm::event::KeyModifiers::NONE,
+            )));
+        }
+        let out = draw(110, 30, &mut app);
+        assert!(out.contains("firefox (выбран; в ссылке: chrome"), "{out}");
+        assert_eq!(
+            app.server_by_id(id).unwrap().fp_override.as_deref(),
+            Some("firefox")
+        );
+    }
 }

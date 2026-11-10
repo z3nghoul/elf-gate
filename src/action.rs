@@ -21,6 +21,7 @@ pub enum Action {
     Settings,
     Logs,
     Filter,
+    Fingerprint,
     Help,
     Back,
     FocusNext,
@@ -188,6 +189,13 @@ pub const BINDINGS: &[Binding] = &[
         desc: "фильтр списка серверов",
         action: Action::Filter,
         keys: &[(KeyCode::Char('/'), N)],
+        hidden: false,
+    },
+    Binding {
+        label: "f",
+        desc: "сменить TLS fingerprint выбранного сервера",
+        action: Action::Fingerprint,
+        keys: &[(KeyCode::Char('f'), N)],
         hidden: false,
     },
     Binding {

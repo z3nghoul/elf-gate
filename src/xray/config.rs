@@ -36,7 +36,7 @@ fn stream_settings(s: &Server) -> Value {
             stream.insert("security".into(), json!("tls"));
             let mut tls = Map::new();
             put(&mut tls, "serverName", &s.tls.sni);
-            put(&mut tls, "fingerprint", &s.tls.fingerprint);
+            put(&mut tls, "fingerprint", s.effective_fingerprint());
             if !s.tls.alpn.is_empty() {
                 tls.insert("alpn".into(), json!(s.tls.alpn));
             }
@@ -50,10 +50,10 @@ fn stream_settings(s: &Server) -> Value {
             let mut r = Map::new();
             put(&mut r, "serverName", &s.tls.sni);
             // Reality requires a fingerprint; chrome is the common default.
-            let fp = if s.tls.fingerprint.is_empty() {
+            let fp = if s.effective_fingerprint().is_empty() {
                 "chrome"
             } else {
-                &s.tls.fingerprint
+                s.effective_fingerprint()
             };
             r.insert("fingerprint".into(), json!(fp));
             put(&mut r, "publicKey", &s.tls.public_key);
@@ -80,6 +80,11 @@ fn stream_settings(s: &Server) -> Value {
         Transport::Grpc => {
             let mut grpc = Map::new();
             grpc.insert("serviceName".into(), json!(s.params.service_name));
+            put(&mut grpc, "authority", &s.params.authority);
+            // v2ray-style links say `mode=multi` for gRPC multi mode.
+            if s.params.mode.eq_ignore_ascii_case("multi") {
+                grpc.insert("multiMode".into(), json!(true));
+            }
             stream.insert("grpcSettings".into(), Value::Object(grpc));
         }
         Transport::Xhttp => {
@@ -201,6 +206,44 @@ mod tests {
         insta::assert_json_snapshot!(config_for(&format!(
             "vless://{UUID}@g.example.com:443?security=tls&sni=g.example.com&type=grpc&serviceName=svc#G"
         )));
+    }
+
+    #[test]
+    fn tls_grpc_authority_and_multi_mode() {
+        insta::assert_json_snapshot!(config_for(&format!(
+            "vless://{UUID}@g.example.com:443?security=tls&sni=g.example.com&type=grpc&serviceName=svc&authority=cdn.example.com&mode=multi#G"
+        )));
+    }
+
+    #[test]
+    fn fingerprint_override_replaces_the_links_fp_in_the_config() {
+        let reality = format!(
+            "vless://{UUID}@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#r"
+        );
+        let mut server = parse_link(&reality).unwrap();
+        let core = CoreConfig::default();
+        let fp = |s: &Server| {
+            build(s, &core).unwrap()["outbounds"][0]["streamSettings"]["realitySettings"]
+                ["fingerprint"]
+                .clone()
+        };
+        assert_eq!(fp(&server), "chrome");
+        server.fp_override = Some("firefox".into());
+        assert_eq!(fp(&server), "firefox");
+        assert_eq!(
+            server.tls.fingerprint, "chrome",
+            "the link's own fp is untouched"
+        );
+
+        let tls =
+            format!("vless://{UUID}@h.example.com:443?security=tls&sni=h.example.com&fp=chrome#t");
+        let mut server = parse_link(&tls).unwrap();
+        server.fp_override = Some("safari".into());
+        let cfg = build(&server, &core).unwrap();
+        assert_eq!(
+            cfg["outbounds"][0]["streamSettings"]["tlsSettings"]["fingerprint"],
+            "safari"
+        );
     }
 
     #[test]

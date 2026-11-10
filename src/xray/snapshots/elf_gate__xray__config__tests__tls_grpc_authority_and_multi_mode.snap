@@ -1,0 +1,97 @@
+---
+source: src/xray/config.rs
+expression: "config_for(&format!(\"vless://{UUID}@g.example.com:443?security=tls&sni=g.example.com&type=grpc&serviceName=svc&authority=cdn.example.com&mode=multi#G\"))"
+---
+{
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "port": 10808,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "ip": "127.0.0.1",
+        "udp": true
+      },
+      "sniffing": {
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "enabled": true
+      },
+      "tag": "socks-in"
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 10809,
+      "protocol": "http",
+      "settings": {},
+      "sniffing": {
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "enabled": true
+      },
+      "tag": "http-in"
+    }
+  ],
+  "log": {
+    "loglevel": "warning"
+  },
+  "outbounds": [
+    {
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "g.example.com",
+            "port": 443,
+            "users": [
+              {
+                "encryption": "none",
+                "id": "b831381d-6324-4d53-ad4f-8cda48b30811"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "grpcSettings": {
+          "authority": "cdn.example.com",
+          "multiMode": true,
+          "serviceName": "svc"
+        },
+        "network": "grpc",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "g.example.com"
+        }
+      },
+      "tag": "proxy"
+    },
+    {
+      "protocol": "freedom",
+      "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "block"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "ip": [
+          "geoip:private"
+        ],
+        "outboundTag": "direct",
+        "type": "field"
+      }
+    ]
+  }
+}

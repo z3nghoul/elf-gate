@@ -96,12 +96,22 @@ pub struct ServerEntry {
     pub link: String,
 }
 
+/// Per-server settings chosen in the UI, kept apart from the link so re-importing a
+/// subscription does not lose them. `server` is `"<group>/<name>|<host>:<port>"`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ServerOverride {
+    pub server: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fp: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Config {
     pub core: CoreConfig,
     pub proxy: ProxyConfig,
     pub servers: Vec<ServerEntry>,
+    pub overrides: Vec<ServerOverride>,
 }
 
 /// Set while we have changed the system proxy; holds what to put back.

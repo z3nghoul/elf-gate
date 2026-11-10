@@ -47,7 +47,13 @@ pub struct TransportParams {
     pub mode: String,
     /// grpc `serviceName`.
     pub service_name: String,
+    /// grpc `authority` (the HTTP/2 `:authority` header).
+    pub authority: String,
 }
+
+/// uTLS fingerprints offered in the UI. `chrome` is Xray's default for Reality, but some
+/// providers' DPI breaks its large post-quantum ClientHello; `firefox` often works there.
+pub const FINGERPRINTS: &[&str] = &["chrome", "firefox", "safari", "ios", "edge", "qq", "random"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Server {
@@ -67,6 +73,9 @@ pub struct Server {
     pub params: TransportParams,
     /// The original link, exactly as the user supplied it.
     pub link: String,
+    /// Per-server fingerprint chosen in the UI (kept in `config.toml`). The `fp` from the
+    /// link stays untouched in `tls.fingerprint`.
+    pub fp_override: Option<String>,
     /// `Some(reason)` when the server was imported but cannot be used yet.
     pub unsupported: Option<String>,
     pub ping: Ping,
@@ -88,9 +97,15 @@ impl Server {
             tls: TlsParams::default(),
             params: TransportParams::default(),
             link: link.to_string(),
+            fp_override: None,
             unsupported: Some(reason),
             ping: Ping::Unknown,
         }
+    }
+
+    /// The fingerprint that goes into the config: the UI override, else the link's `fp`.
+    pub fn effective_fingerprint(&self) -> &str {
+        self.fp_override.as_deref().unwrap_or(&self.tls.fingerprint)
     }
 
     pub fn is_supported(&self) -> bool {
