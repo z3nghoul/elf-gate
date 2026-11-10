@@ -26,9 +26,18 @@ pub trait SystemProxy: Send + Sync {
     fn current(&self) -> Result<Option<String>, PlatformError>;
 }
 
-/// Makes child processes die together with the application.
+/// Ties child processes to the application and stops them.
+///
+/// Usage: `prepare` before spawning, `attach` right after, `terminate` for a
+/// graceful stop request (the caller escalates to a kill after a timeout).
 pub trait ChildGuard: Send + Sync {
+    /// Configures the command: no console window on Windows, death signal on Linux.
     fn prepare(&self, cmd: &mut tokio::process::Command);
+    /// Binds the spawned child to the application's lifetime (Windows Job Object).
+    fn attach(&self, child: &tokio::process::Child) -> Result<(), PlatformError>;
+    /// Asks the child to exit (SIGTERM on Linux, immediate kill on Windows where
+    /// a windowless console process has no graceful signal).
+    fn terminate(&self, child: &mut tokio::process::Child);
 }
 
 pub trait Privileges: Send + Sync {

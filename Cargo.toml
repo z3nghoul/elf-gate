@@ -13,7 +13,7 @@ ratatui = "0.30.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"
-tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "process", "net"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "process", "net", "io-util"] }
 toml = "1.2.1"
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
@@ -22,3 +22,9 @@ url = "2.5.8"
 
 [dev-dependencies]
 insta = { version = "1.49.0", features = ["json"] }
+
+[target."cfg(unix)".dependencies]
+nix = { version = "0.31.3", features = ["process", "signal"] }
+
+[target."cfg(windows)".dependencies]
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
