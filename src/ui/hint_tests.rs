@@ -481,7 +481,9 @@ fn the_name_column_takes_the_room_up_to_the_latency_and_a_dagger_marks_a_depreca
         let mut a = remote(app(&refs));
         for (i, s) in a.subs[0].servers.iter_mut().enumerate() {
             s.ping = Ping::Ms(40 + i as u32 * 25);
-            s.ping_at = Some(1);
+            // No time of the measurement: the details would show its age, and a snapshot
+            // must not depend on the clock.
+            s.ping_at = None;
         }
         let frame = draw(width, 30, &mut a);
         // The ping column starts at one place in every row of the list.
