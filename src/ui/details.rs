@@ -10,7 +10,7 @@ use ratatui::Frame;
 
 fn field<'a>(label: &str, value: String, th: &Theme) -> Line<'a> {
     Line::from(vec![
-        Span::styled(format!("{label:<13}"), th.muted()),
+        Span::styled(format!("{label:<15}"), th.muted()),
         Span::styled(value, th.text()),
     ])
 }
@@ -41,7 +41,7 @@ fn opt<'a>(lines: &mut Vec<Line<'a>>, label: &str, value: &str, th: &Theme) {
     }
 }
 
-fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
+fn server_lines<'a>(s: &Server, connected: bool, th: &Theme) -> Vec<Line<'a>> {
     let mut lines = vec![field(&crate::t!("detail.name"), s.name.clone(), th)];
     if let Some(reason) = &s.unsupported {
         lines.push(Line::from(Span::styled(reason.clone(), th.warn())));
@@ -120,27 +120,50 @@ fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
         },
         th,
     ));
-    lines.push(field(
-        &crate::t!("detail.ping"),
-        if s.ping_at.is_some() {
-            format!(
-                "{} ({})",
-                ping_label_with_age(s.ping, s.ping_at, unix_now()),
-                s.ping_kind.long()
-            )
-        } else {
-            s.ping.label()
-        },
-        th,
-    ));
+    if connected {
+        lines.extend(active_ping_lines(s, th));
+    } else {
+        lines.push(field(
+            &crate::t!("detail.ping"),
+            if s.ping_at.is_some() {
+                format!(
+                    "{} ({})",
+                    ping_label_with_age(s.ping, s.ping_at, unix_now()),
+                    s.ping_kind.long()
+                )
+            } else {
+                s.ping.label()
+            },
+            th,
+        ));
+    }
     lines
+}
+
+/// The two latency lines of the connected server and the hint that they are different metrics.
+fn active_ping_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
+    let ms = |p: crate::model::server::Ping| match p {
+        crate::model::server::Ping::Ms(ms) => format!("{ms} ms"),
+        other => other.label(),
+    };
+    let vpn = if s.vpn_samples > 0 {
+        crate::t!("detail.ping_vpn", ms = ms(s.vpn), k = s.vpn_samples)
+    } else {
+        ms(s.vpn)
+    };
+    vec![
+        field(&crate::t!("detail.ping_tcp"), ms(s.tcp), th),
+        field(&crate::t!("detail.ping_tunnel"), vpn, th),
+        Line::from(Span::styled(crate::t!("detail.ping_hint"), th.muted())),
+    ]
 }
 
 pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     let focused = app.screen == Screen::Main && app.focus == Focus::Details;
     let lines = match app.selected_row() {
         Some(Row::Server(i, j)) => {
-            let mut l = server_lines(&app.shown(&app.subs[i].servers[j]), th);
+            let connected = app.conn == crate::app::Conn::Connected(app.subs[i].servers[j].id);
+            let mut l = server_lines(&app.shown(&app.subs[i].servers[j]), connected, th);
             if app.conn == crate::app::Conn::Connected(app.subs[i].servers[j].id) {
                 match &app.health {
                     crate::app::HealthState::Checking => {
@@ -152,7 +175,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                     }
                     crate::app::HealthState::Ok(d) => {
                         l.push(Line::from(vec![
-                            Span::styled(format!("{:<13}", crate::t!("detail.check")), th.muted()),
+                            Span::styled(format!("{:<15}", crate::t!("detail.check")), th.muted()),
                             Span::styled(
                                 crate::t!("detail.check_ok", ms = d.as_millis()),
                                 th.good(),

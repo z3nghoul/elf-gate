@@ -64,19 +64,25 @@ impl Engine {
         }
         self.last_auto_ping = Some(Instant::now());
         self.ping_servers(false);
-        if let Conn::Connected(id) = self.conn {
-            let (tx, port) = (self.tx.clone(), self.config.core.socks_port);
-            tokio::spawn(async move {
-                if let Ok(d) =
-                    crate::net::health::check(port, crate::net::health::HEALTH_TIMEOUT).await
-                {
-                    let _ = tx.send(BgEvent::ActiveLatency {
-                        id,
-                        ms: d.as_millis().min(u128::from(u32::MAX)) as u32,
-                    });
-                }
+        self.spawn_vpn_series();
+    }
+
+    /// The latency of the live connection: a few requests through the working tunnel, the median
+    /// without the cold first one. The result replaces the previous number only when it arrives.
+    pub(super) fn spawn_vpn_series(&self) {
+        let Conn::Connected(id) = self.conn else {
+            return;
+        };
+        let (tx, port) = (self.tx.clone(), self.config.core.socks_port);
+        tokio::spawn(async move {
+            let series =
+                crate::net::health::latency_series(port, crate::net::health::HEALTH_TIMEOUT).await;
+            let _ = tx.send(BgEvent::ActiveLatency {
+                id,
+                ms: series.map(|(d, _)| d.as_millis().min(u128::from(u32::MAX)) as u32),
+                samples: series.map_or(0, |(_, n)| n.min(255) as u8),
             });
-        }
+        });
     }
 
     /// `manual`: marks servers as pending and also drives the demo pings.
@@ -136,8 +142,21 @@ impl Engine {
             None
         };
         let limit = Duration::from_millis(self.config.ping.timeout_ms.max(500));
+        let active = match self.conn {
+            Conn::Connected(id) => Some(id),
+            _ => None,
+        };
+        if manual {
+            self.spawn_vpn_series();
+        }
         for server in real {
-            if manual {
+            let is_active = Some(server.id) == active;
+            // The connected server keeps its numbers while new ones are measured, and is never
+            // measured through a temporary core: the live tunnel answers for it.
+            if is_active && binary.is_some() {
+                continue;
+            }
+            if manual && !is_active {
                 self.set_ping(server.id, Ping::Pending);
             }
             let tx = self.tx.clone();

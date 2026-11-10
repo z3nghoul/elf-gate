@@ -544,6 +544,15 @@ impl Engine {
 
     /// Publishes the view if it changed since the last time.
     pub fn flush_view(&mut self) {
+        let connected = match self.conn {
+            Conn::Connected(id) => Some(id),
+            _ => None,
+        };
+        for s in self.subs.iter_mut().flat_map(|s| s.servers.iter_mut()) {
+            if Some(s.id) != connected {
+                s.drop_vpn();
+            }
+        }
         let view = self.view();
         let Ok(json) = serde_json::to_string(&view) else {
             return;
@@ -649,27 +658,27 @@ impl Engine {
         match ev {
             BgEvent::Log(line) => self.push_log(line),
             BgEvent::Ping { id, result, kind } => {
+                let active = self.conn == Conn::Connected(id);
                 if let Some(s) = self
                     .subs
                     .iter_mut()
                     .flat_map(|s| s.servers.iter_mut())
                     .find(|s| s.id == id)
                 {
-                    s.ping = result;
-                    s.ping_kind = kind;
-                    s.ping_at = Some(crate::model::subscription::unix_now());
+                    s.apply_ping(result, kind, active, crate::model::subscription::unix_now());
                 }
             }
-            BgEvent::ActiveLatency { id, ms } => {
+            BgEvent::ActiveLatency { id, ms, samples } => {
+                if self.conn != Conn::Connected(id) {
+                    return;
+                }
                 if let Some(s) = self
                     .subs
                     .iter_mut()
                     .flat_map(|s| s.servers.iter_mut())
                     .find(|s| s.id == id)
                 {
-                    s.ping = Ping::Ms(ms);
-                    s.ping_kind = crate::model::server::PingKind::Tunnel;
-                    s.ping_at = Some(crate::model::subscription::unix_now());
+                    s.apply_vpn(ms, samples, crate::model::subscription::unix_now());
                 }
             }
             BgEvent::Connected(id) => {
@@ -680,6 +689,7 @@ impl Engine {
                         Level::Info,
                         format!("connected to {}", name.unwrap_or_default()),
                     );
+                    self.spawn_vpn_series();
                 }
             }
             BgEvent::CoreStarted { id, core } => {

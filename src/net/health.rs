@@ -18,6 +18,45 @@ pub async fn check(socks_port: u16, limit: Duration) -> Result<Duration, String>
     check_host(socks_port, HEALTH_HOST, HEALTH_PATH, limit).await
 }
 
+/// Requests per latency series through the live tunnel. The first one is "cold" (the far side
+/// is dialled, caches are empty) and is thrown away, the median of the others is shown.
+pub const SERIES_REQUESTS: usize = 4;
+/// The whole series, however slow the single requests are.
+pub const SERIES_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// The median of a series without its first (cold) sample, and how many samples it is made of.
+/// `None` when nothing is left after dropping the cold one.
+pub fn median_without_cold(samples: &[Duration]) -> Option<(Duration, usize)> {
+    let mut rest: Vec<Duration> = samples.iter().skip(1).copied().collect();
+    if rest.is_empty() {
+        return None;
+    }
+    rest.sort();
+    let n = rest.len();
+    let median = if n % 2 == 1 {
+        rest[n / 2]
+    } else {
+        (rest[n / 2 - 1] + rest[n / 2]) / 2
+    };
+    Some((median, n))
+}
+
+/// Several requests through the already working tunnel (the running core's socks inbound, not a
+/// temporary core): the median of all but the cold first one, and the number of samples used.
+pub async fn latency_series(socks_port: u16, each: Duration) -> Option<(Duration, usize)> {
+    let run = async {
+        let mut samples = Vec::new();
+        for _ in 0..SERIES_REQUESTS {
+            if let Ok(d) = check(socks_port, each).await {
+                samples.push(d);
+            }
+        }
+        samples
+    };
+    let samples = timeout(SERIES_TIMEOUT, run).await.ok()?;
+    median_without_cold(&samples)
+}
+
 pub async fn check_host(
     socks_port: u16,
     host: &str,
@@ -101,6 +140,27 @@ async fn request(socks_port: u16, host: &str, path: &str) -> Result<Duration, St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_median_drops_the_cold_first_sample() {
+        let ms = |v: &[u64]| {
+            v.iter()
+                .map(|m| Duration::from_millis(*m))
+                .collect::<Vec<_>>()
+        };
+        // A slow first request must not pull the number up.
+        assert_eq!(
+            median_without_cold(&ms(&[900, 100, 110, 105])),
+            Some((Duration::from_millis(105), 3))
+        );
+        // Even count: the middle pair is averaged; one outlier among the rest is ignored.
+        assert_eq!(
+            median_without_cold(&ms(&[500, 100, 900, 110, 120])),
+            Some((Duration::from_millis(115), 4))
+        );
+        assert_eq!(median_without_cold(&ms(&[500])), None);
+        assert_eq!(median_without_cold(&[]), None);
+    }
     use tokio::net::TcpListener;
 
     /// A pocket SOCKS5 server that "reaches the internet" and answers with `status`.
