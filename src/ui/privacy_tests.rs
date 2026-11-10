@@ -249,3 +249,76 @@ fn a_link_is_typed_like_a_password_but_arrives_whole() {
         "the real link is sent"
     );
 }
+
+#[test]
+fn a_json_subscription_chain_shows_no_host_zone_and_no_home_directory() {
+    use crate::model::fullconfig::tests::chain_dialer;
+    let (tx, _rx) = unbounded_channel();
+    let mut a = AppState::new(tx);
+    let link = format!("xrayjson:{}", chain_dialer());
+    let mut v = view_with(&[&link]);
+    v.config.ui.privacy_mode = true;
+    v.groups[0].name = "EtherVPN".into();
+    v.groups[0].is_remote = true;
+    a.apply_view(v);
+    a.link = LinkState::Up;
+    a.selected = 1;
+    for text in [
+        "Reading config: &{Name:/home/z3n/.local/state/elf-gate/run/xray.json Format:json}",
+        "[Info] proxy/vless/outbound: failed to dial hop.example.com:8443 > dial tcp 203.0.113.9:8443: i/o timeout",
+        "[Error] app/dns: lookup exit.example.com on 192.168.1.1:53: no such host",
+        "xray: /home/z3n/bin/xray, ассеты: /home/z3n/bin (geoip.dat: есть)",
+    ] {
+        a.on_link(LinkEvent::Update(Update::Log(LogLine {
+            time: "00:00:00".into(),
+            level: Level::Info,
+            text: text.into(),
+        })));
+    }
+    a.config.tun.xray_path = "/home/z3n/bin/xray".into();
+    let forbidden = [
+        ".com",
+        ".net",
+        ".org",
+        ".app",
+        "example",
+        "/home/",
+        "z3n",
+        "203.0.113.9",
+        "192.168.1.1",
+        UUID,
+        PBK,
+        "ab12",
+        "www.example",
+    ];
+    let mut frames = Vec::new();
+    for screen in [Screen::Main, Screen::LogsFull, Screen::Settings] {
+        a.screen = screen;
+        let frame = draw(120, 34, &mut a);
+        for s in forbidden {
+            assert!(
+                !frame.contains(s),
+                "{screen:?}: `{s}` is on the screen:\n{frame}"
+            );
+        }
+        assert!(frame.contains("PRIVACY"));
+        frames.push(frame);
+    }
+    // The chain's first hop is shown as hidden, its port and the chain size stay.
+    a.screen = Screen::Main;
+    let main = draw(120, 34, &mut a);
+    assert!(
+        main.contains("Цепочка:") && main.contains("Первый узел: ***:8443"),
+        "{main}"
+    );
+    // And the home directory is a tilde.
+    a.screen = Screen::LogsFull;
+    let logs = draw(120, 34, &mut a);
+    assert!(
+        logs.contains("~/.local/state/elf-gate/run/xray.json") && logs.contains("xray: ~/bin/xray"),
+        "{logs}"
+    );
+    insta::assert_snapshot!("privacy_json_chain_main", frames[0]);
+    insta::assert_snapshot!("privacy_json_chain_logs", frames[1]);
+    insta::assert_snapshot!("privacy_json_chain_settings", frames[2]);
+}

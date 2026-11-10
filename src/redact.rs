@@ -8,7 +8,7 @@
 //!   to what is drawn while privacy mode is on.
 //!
 //! Style (the same everywhere): an IPv4 address becomes `*.*.*.*`, an IPv6 one `*:*:*:*`, a
-//! domain `***.tld` (only the last label stays, so nothing can be reconstructed), links and URLs
+//! domain `***` (the whole name, zone included), a home directory `~`, links and URLs
 //! `scheme://***`, ids and keys `***`. Ports are kept: they are not secrets and they make
 //! debugging possible.
 
@@ -25,7 +25,7 @@ pub enum Mode {
 const FILE_EXTENSIONS: &[&str] = &[
     "dat", "json", "log", "exe", "dll", "toml", "sh", "bat", "so", "txt", "conf", "desktop",
     "sock", "tmp", "rs", "md", "zip", "gz", "pid", "lock", "ini", "yml", "yaml", "xml", "html",
-    "js", "css", "py", "service", "tar", "xz", "bin", "cfg",
+    "js", "css", "py", "service", "tar", "xz", "bin", "cfg", "go",
 ];
 
 pub const IPV4_MASK: &str = "*.*.*.*";
@@ -81,7 +81,8 @@ fn is_domain(s: &str) -> bool {
     }
     let tld = labels[labels.len() - 1];
     tld.len() >= 2
-        && tld.chars().all(|c| c.is_ascii_alphabetic())
+        // A real zone is lower case; `streamSettings.sockopt.dialerProxy` is an option name.
+        && tld.chars().all(|c| c.is_ascii_lowercase())
         && !FILE_EXTENSIONS.contains(&tld.to_ascii_lowercase().as_str())
         && labels.iter().all(|l| {
             !l.is_empty()
@@ -109,8 +110,8 @@ fn piece(p: &str, mode: Mode) -> String {
         } else if is_hex_id(t, 8) {
             Some("***".into())
         } else if is_domain(t) {
-            let tld = t.rsplit('.').next().unwrap_or("");
-            Some(format!("***.{tld}"))
+            // The whole name, zone included: even `***.app` says which provider it is.
+            Some("***".into())
         } else {
             None
         }
@@ -161,8 +162,71 @@ fn path_part(rest: &str, mode: Mode) -> String {
         .join("/")
 }
 
+/// Home directories (`/home/<user>`, `/Users/<user>`, `C:\Users\<user>`, `/root`) become `~`:
+/// they carry the account name.
+pub fn strip_home(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        // The earliest home-looking prefix in what is left.
+        let candidates = ["/home/", "/Users/", "\\Users\\", "/root"];
+        let hit = candidates
+            .iter()
+            .filter_map(|p| rest.find(p).map(|i| (i, *p)))
+            .min_by_key(|(i, _)| *i);
+        let Some((i, pat)) = hit else {
+            out.push_str(rest);
+            break;
+        };
+        let mut start = i;
+        // A drive letter in front (`C:`) belongs to the home path.
+        if pat.starts_with('\\') || pat == "/Users/" {
+            let before = &rest[..i];
+            if before.len() >= 2
+                && before.as_bytes()[before.len() - 1] == b':'
+                && before.as_bytes()[before.len() - 2].is_ascii_alphabetic()
+            {
+                start = i - 2;
+            }
+        }
+        if pat == "/root" {
+            let after = &rest[i + pat.len()..];
+            let boundary = after
+                .chars()
+                .next()
+                .is_none_or(|c| c == '/' || !c.is_alphanumeric());
+            if !boundary {
+                out.push_str(&rest[..i + pat.len()]);
+                rest = &rest[i + pat.len()..];
+                continue;
+            }
+            out.push_str(&rest[..start]);
+            out.push('~');
+            rest = after;
+            continue;
+        }
+        let after = &rest[i + pat.len()..];
+        let end = after
+            .find(|c: char| {
+                c == '/' || c == '\\' || c.is_whitespace() || "\"'<>()[]{},;|".contains(c)
+            })
+            .unwrap_or(after.len());
+        out.push_str(&rest[..start]);
+        out.push('~');
+        rest = &after[end..];
+    }
+    out
+}
+
 /// Hides what must not show in `text`, line by line (tags, ports and plain words stay).
 pub fn text(text: &str, mode: Mode) -> String {
+    let home_free;
+    let text = if mode == Mode::Full {
+        home_free = strip_home(text);
+        home_free.as_str()
+    } else {
+        text
+    };
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while !rest.is_empty() {
@@ -194,7 +258,7 @@ pub fn secrets(s: &str) -> String {
     text(s, Mode::Secrets)
 }
 
-/// A host name or address for display: `*.*.*.*`, `*:*:*:*` or `***.tld`.
+/// A host name or address for display: `*.*.*.*`, `*:*:*:*` or `***`.
 pub fn host(h: &str) -> String {
     if h.is_empty() {
         return String::new();
@@ -205,12 +269,8 @@ pub fn host(h: &str) -> String {
     if h.parse::<Ipv6Addr>().is_ok() || h.contains(':') {
         return IPV6_MASK.into();
     }
-    match h.rsplit_once('.') {
-        Some((_, tld)) if tld.chars().all(|c| c.is_ascii_alphabetic()) && !tld.is_empty() => {
-            format!("***.{tld}")
-        }
-        _ => "***".into(),
-    }
+    // A name is hidden whole, zone included.
+    "***".into()
 }
 
 /// A subscription URL or a share link: only the scheme remains.
