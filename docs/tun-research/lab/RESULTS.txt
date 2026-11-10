@@ -1,0 +1,85 @@
+Результаты прогонов лаборатории (этап 5.1). Xray 26.11.9, sing-box 1.14.4, Linux 7.3.1-1-cachyos, ядро в user namespace без root.
+Воспроизведение: docs/tun-research/lab/README.md. Метки peer=: 10.0.0.1 напрямую, 203.0.113.80 через VPN.
+
+################ 01-tun-all, 03-loop-protection, 04-reality-udp
+legend: peer=10.0.0.1 => direct, peer=203.0.113.80 => through the VPN server, FAIL => no connectivity
+--- after start:
+xray0            UNKNOWN        10.255.0.1/24 fe80::5a62:bd80:73d:c844/64 
+default dev xray0 metric 1 
+default via 10.0.0.2 dev vA metric 100 
+10.0.0.0/24 dev vA proto kernel scope link src 10.0.0.1 
+10.255.0.0/24 dev xray0 proto kernel scope link src 10.255.0.1 
+TCP : peer=203.0.113.80
+UDP : udp size=100 sent=30 lost=0 peer=203.0.113.80:38322 rtt_ms p50=0.28 max=0.69
+UDP : udp size=1200 sent=30 lost=0 peer=203.0.113.80:59340 rtt_ms p50=0.49 max=0.77
+UDP : udp size=1400 sent=30 lost=0 peer=203.0.113.80:45423 rtt_ms p50=0.50 max=0.81
+UDP flows are separate VLESS connections (server access log):
+  accepted UDP flows: 3
+--- kill -9 the client; what is left?
+/home/z3n/myprojects/elf-gate/docs/tun-research/lab/scenarios/01-tun-all.sh: line 11:    43 Killed                     $XR run -c "$L/$1.json" > "$L/$1.out" 2>&1
+Device "xray0" does not exist.
+default via 10.0.0.2 dev vA metric 100 
+10.0.0.0/24 dev vA proto kernel scope link src 10.0.0.1 
+legend: peer=10.0.0.1 => direct, peer=203.0.113.80 => through the VPN server, FAIL => no connectivity
+[1] VPS by IP, autoOutboundsInterface=auto:            peer=203.0.113.80
+[2] VPS by IP, manual routes, no protection:           FAIL
+[3] same + static route to the VPS via the NIC:        peer=203.0.113.80
+[4] VPS by DOMAIN, auto, system resolver:              FAIL
+    resolver asked by: 
+[5] VPS by DOMAIN, auto, explicit dns.servers:         FAIL
+    resolver asked by: 
+[6] VPS by DOMAIN found in /etc/hosts:                 peer=203.0.113.80
+legend: peer=10.0.0.1 => direct, peer=203.0.113.80 => through the VPN server, FAIL => no connectivity
+===== Reality, client flow variant: vision =====
+  TCP            : peer=203.0.113.80
+  UDP port 5000  : udp size=300 sent=20 lost=0 peer=203.0.113.80:36645 rtt_ms p50=0.54 max=2.07
+  UDP port 443   : udp size=300 sent=6 lost=6 
+===== Reality, client flow variant: vision_udp443 =====
+  TCP            : peer=203.0.113.80
+  UDP port 5000  : udp size=300 sent=20 lost=0 peer=203.0.113.80:44098 rtt_ms p50=0.33 max=2.27
+  UDP port 443   : udp size=300 sent=6 lost=0 peer=203.0.113.80:41468 rtt_ms p50=0.47 max=2.11
+===== Reality, client flow variant: noflow =====
+  TCP            : FAIL
+  UDP port 5000  : udp size=300 sent=20 lost=0 peer=203.0.113.80:41926 rtt_ms p50=1.19 max=2.53
+  UDP port 443   : udp size=300 sent=6 lost=0 peer=203.0.113.80:60261 rtt_ms p50=0.72 max=4.87
+
+################ 02-process-routing
+legend: peer=10.0.0.1 => direct, peer=203.0.113.80 => through the VPN server, FAIL => no connectivity
+curl=curl socat=socat1 python=python3.14
+
+===== mode: include =====
+curl   TCP : peer=203.0.113.80
+python TCP : peer=10.0.0.1
+socat  UDP : peer=203.0.113.80:59978|hello
+python UDP : udp size=60 sent=3 lost=0 peer=10.0.0.1:36546 rtt_ms p50=0.19 max=0.68
+
+===== mode: exclude =====
+curl   TCP : peer=203.0.113.80
+python TCP : peer=10.0.0.1
+socat  UDP : peer=203.0.113.80:47319|hello
+python UDP : udp size=60 sent=3 lost=0 peer=10.0.0.1:51209 rtt_ms p50=0.25 max=1.04
+
+################ 05-singbox-chain
+legend: peer=10.0.0.1 => direct, peer=203.0.113.80 => through the VPN server, FAIL => no connectivity
+curl=curl socat=socat1 python=python3.14
+
+===== sing-box config: sb_include =====
+ip rule: 9000:	from all to 172.19.0.0/30 lookup 2022;9001:	from all lookup 2022 suppress_prefixlength 0;9002:	from all iif sb0 goto 9010;
+curl   TCP : peer=203.0.113.80
+python TCP : peer=10.0.0.1
+socat  UDP : peer=203.0.113.80:40016|hello
+python UDP : udp size=100 sent=3 lost=0 peer=10.0.0.1:42033 rtt_ms p50=0.29 max=1.03
+
+===== sing-box config: sb_exclude =====
+ip rule: 9000:	from all to 172.19.0.0/30 lookup 2022;9001:	from all lookup 2022 suppress_prefixlength 0;9002:	from all iif sb0 goto 9010;
+curl   TCP : peer=203.0.113.80
+python TCP : peer=10.0.0.1
+socat  UDP : peer=203.0.113.80:34466|hello
+python UDP : udp size=100 sent=3 lost=0 peer=10.0.0.1:34056 rtt_ms p50=0.21 max=0.80
+
+===== sing-box config: sb_exclude_noguard =====
+ip rule: 9000:	from all to 172.19.0.0/30 lookup 2022;9001:	from all lookup 2022 suppress_prefixlength 0;9002:	from all iif sb0 goto 9010;
+curl   TCP : FAIL
+python TCP : peer=10.0.0.1
+socat  UDP : 
+python UDP : udp size=100 sent=3 lost=0 peer=10.0.0.1:44263 rtt_ms p50=6.48 max=8.64
