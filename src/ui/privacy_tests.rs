@@ -165,13 +165,15 @@ fn no_screen_shows_a_secret_in_privacy_mode() {
 fn what_is_not_a_secret_stays_visible() {
     let (mut a, _rx) = app();
     a.conn = Conn::Connected(1);
-    a.subs[0].servers[0].ping = crate::model::server::Ping::Ms(42);
+    a.subs[0].servers[0].tcp = crate::model::server::Ping::Ms(42);
+    a.subs[0].servers[0].vpn = crate::model::server::Ping::Ms(97);
     a.subs[0].servers[0].ping_at = Some(crate::model::subscription::unix_now());
     let frame = draw(110, 32, &mut a);
     for keep in [
         "EtherVPN-FI",
         "Backup",
-        "42 ms",
+        "42 tcp",
+        "97 vpn",
         "PROXY",
         "Подключено",
         ":443",
@@ -308,7 +310,7 @@ fn a_json_subscription_chain_shows_no_host_zone_and_no_home_directory() {
     a.screen = Screen::Main;
     let main = draw(120, 34, &mut a);
     assert!(
-        main.contains("Цепочка:") && main.contains("Первый узел: ***:8443"),
+        main.contains("Цепочка:") && main.contains("Первый узел:") && main.contains("***:8443"),
         "{main}"
     );
     // And the home directory is a tilde.

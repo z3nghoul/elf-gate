@@ -32,8 +32,9 @@ pub enum Transport {
     Ws,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Ping {
+    #[default]
     Unknown,
     Pending,
     Ms(u32),
@@ -109,6 +110,16 @@ pub struct Server {
     /// What the number measures.
     #[serde(default)]
     pub ping_kind: PingKind,
+    /// The last TCP measurement (the way to the server only), kept for every server. For the
+    /// connected server it is shown next to `vpn`, so the two never replace each other.
+    #[serde(default)]
+    pub tcp: Ping,
+    /// The median request time through the live tunnel (connected server only).
+    #[serde(default)]
+    pub vpn: Ping,
+    /// How many requests the `vpn` median was taken from (the cold first one is not counted).
+    #[serde(default)]
+    pub vpn_samples: u8,
     /// The server is a complete provider config (a chain of outbounds), not a share link.
     #[serde(default)]
     pub full: Option<super::fullconfig::FullConfig>,
@@ -160,6 +171,9 @@ impl Server {
             ping: Ping::Unknown,
             ping_at: None,
             ping_kind: PingKind::Tcp,
+            tcp: Ping::Unknown,
+            vpn: Ping::Unknown,
+            vpn_samples: 0,
             full: None,
             info_only: false,
             hidden: false,
@@ -257,6 +271,58 @@ impl PingKind {
         match self {
             PingKind::Tcp => crate::t!("pingkind.tcp"),
             PingKind::Tunnel => crate::t!("pingkind.tunnel"),
+        }
+    }
+}
+
+impl Server {
+    /// A finished measurement. The connected server's TCP number goes to `tcp` only: its main
+    /// number is the one through the tunnel, and the two never take each other's place.
+    pub fn apply_ping(&mut self, result: Ping, kind: PingKind, active: bool, now: i64) {
+        if kind == PingKind::Tcp {
+            self.tcp = result;
+        }
+        if active {
+            // A temporary-core measurement never replaces the live tunnel's number.
+            if kind == PingKind::Tcp && !matches!(self.vpn, Ping::Ms(_)) {
+                self.ping = result;
+                self.ping_kind = kind;
+                self.ping_at = Some(now);
+            }
+            return;
+        }
+        self.ping = result;
+        self.ping_kind = kind;
+        self.ping_at = Some(now);
+    }
+
+    /// The result of a series through the live tunnel. A series that got nothing through keeps
+    /// the previous number: no blink to a dash.
+    pub fn apply_vpn(&mut self, ms: Option<u32>, samples: u8, now: i64) {
+        match ms {
+            Some(ms) => {
+                self.vpn = Ping::Ms(ms);
+                self.vpn_samples = samples;
+                self.ping = Ping::Ms(ms);
+                self.ping_kind = PingKind::Tunnel;
+                self.ping_at = Some(now);
+            }
+            None if self.vpn == Ping::Unknown => self.vpn = Ping::Timeout,
+            None => {}
+        }
+    }
+
+    /// The server is not the connected one (any more): the tunnel's number is gone and the list
+    /// shows its TCP number again.
+    pub fn drop_vpn(&mut self) {
+        if self.vpn == Ping::Unknown {
+            return;
+        }
+        self.vpn = Ping::Unknown;
+        self.vpn_samples = 0;
+        if self.ping_kind == PingKind::Tunnel && self.tcp != Ping::Unknown {
+            self.ping = self.tcp;
+            self.ping_kind = PingKind::Tcp;
         }
     }
 }

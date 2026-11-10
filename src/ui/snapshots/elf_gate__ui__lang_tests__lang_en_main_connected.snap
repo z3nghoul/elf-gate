@@ -3,18 +3,18 @@ source: src/ui/lang_tests.rs
 expression: frame
 ---
 ┌ Servers ───────────────────────────────────────────┐┌ Details ───────────────────────────────────────────────────────┐
-│  ▼ manual (1)                                      ││Name:        R1                                                 │
-│> ● R1                           -                  ││Protocol:    VLESS+Reality                                      │
-│                                                    ││Transport:   tcp                                                │
-│                                                    ││Address:     h.example.com:443                                  │
-│                                                    ││SNI:         x.org                                              │
-│                                                    ││Fingerprint: chrome (f - change)                                │
-│                                                    ││Fragment:    off (z - turn on)                                  │
-│                                                    ││Role:        none (b - assign primary / backup)                 │
-│                                                    ││Ping:        -                                                  │
-│                                                    ││                                                                │
-│                                                    ││                                                                │
-│                                                    ││                                                                │
+│  ▼ manual (1)                                      ││Name:          R1                                               │
+│> ● R1                     - tcp · - vpn            ││Protocol:      VLESS+Reality                                    │
+│                                                    ││Transport:     tcp                                              │
+│                                                    ││Address:       h.example.com:443                                │
+│                                                    ││SNI:           x.org                                            │
+│                                                    ││Fingerprint:   chrome (f - change)                              │
+│                                                    ││Fragment:      off (z - turn on)                                │
+│                                                    ││Role:          none (b - assign primary / backup)               │
+│                                                    ││Network (tcp): -                                                │
+│                                                    ││Via tunnel:    -                                                │
+│                                                    ││Different metrics: tcp is the way to the server only; the tunnel│
+│                                                    ││number is a real request there and back.                        │
 │                                                    ││                                                                │
 └────────────────────────────────────────────────────┘└────────────────────────────────────────────────────────────────┘
 ┌ Log ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐

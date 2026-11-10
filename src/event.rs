@@ -44,7 +44,9 @@ pub enum BgEvent {
     /// Latency of the live connection (the connection check through the tunnel).
     ActiveLatency {
         id: u64,
-        ms: u32,
+        /// The median of the series, or `None` when no request of the series got through.
+        ms: Option<u32>,
+        samples: u8,
     },
     /// Cumulative traffic counters of the running core.
     Stats(crate::xray::stats::Counters),
