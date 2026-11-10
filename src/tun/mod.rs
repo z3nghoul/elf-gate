@@ -272,7 +272,17 @@ pub fn mark_down(store: &StateStore) {
 pub fn cleanup_stale(host: &dyn TunHost, store: &StateStore) -> Option<String> {
     let state = store.load().ok()?;
     let tun = state.tun?;
-    let killed = host.kill_stale(tun.pid, &["xray", "xray.exe", "elf-gate", "elf-gate.exe"]);
+    let killed = host.kill_stale(
+        tun.pid,
+        &[
+            "xray",
+            "xray.exe",
+            "elf-gate",
+            "elf-gate.exe",
+            "elf-gated",
+            "elf-gated.exe",
+        ],
+    );
     mark_down(store);
     let left = host.interface_exists(&tun.interface);
     Some(match (killed, left) {

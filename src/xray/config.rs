@@ -458,12 +458,34 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
         }));
     }
 
+    // Traffic statistics for the interface (`xray api statsquery`); 0 turns them off
+    // (temporary probe cores have no use for them and must not take the port).
+    if core.api_port != 0 {
+        inbounds.push(json!({
+            "tag": "api",
+            "listen": "127.0.0.1",
+            "port": core.api_port,
+            "protocol": "dokodemo-door",
+            "settings": { "address": "127.0.0.1" },
+        }));
+        rules.insert(
+            0,
+            json!({ "type": "field", "inboundTag": ["api"], "outboundTag": "api" }),
+        );
+    }
     let mut config = json!({
         "log": { "loglevel": core.log_level },
         "inbounds": inbounds,
         "outbounds": outbounds,
         "routing": { "domainStrategy": "IPIfNonMatch", "rules": rules },
     });
+    if core.api_port != 0 {
+        config["stats"] = json!({});
+        config["api"] = json!({ "tag": "api", "services": ["StatsService"] });
+        config["policy"] = json!({
+            "system": { "statsOutboundUplink": true, "statsOutboundDownlink": true }
+        });
+    }
     if let Some(f) = &plan.failover {
         config["routing"]["balancers"] = json!(balancers);
         config["observatory"] = json!({
@@ -960,7 +982,7 @@ mod tests {
             .unwrap()
             .iter()
             .any(|o| o["tag"] == "dns-out"));
-        assert_eq!(cfg["routing"]["rules"][0]["outboundTag"], "dns-out");
+        assert_eq!(cfg["routing"]["rules"][1]["outboundTag"], "dns-out");
 
         let cfg = with(
             RoutingMode::Exclude,

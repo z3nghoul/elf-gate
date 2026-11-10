@@ -5,12 +5,12 @@
 use super::config;
 use super::process::{Core, CoreError};
 use super::validate::Verdict;
-use crate::action::Action;
-use crate::app::{AppState, Conn};
-use crate::event::{BgEvent, Event};
+use crate::engine::Engine;
+use crate::event::BgEvent;
 use crate::parser::parse_link;
 use crate::parser::vless::plain_vless_blocked_for_ip;
 use crate::platform::mock::{MockProxy, SharedMock};
+use crate::proto::{Cmd, Conn};
 use crate::storage::CoreConfig;
 use crate::storage::{Config, ProxyConfig, StateStore};
 use crate::sysproxy::{ProxyController, ProxyHandle};
@@ -528,7 +528,8 @@ async fn busy_port_blocks_start_before_spawning() {
 // ---------------------------------------------------------------------------
 
 struct Rig {
-    app: AppState,
+    app: Engine,
+    id: u64,
     rx: UnboundedReceiver<BgEvent>,
     desktop: Arc<MockProxy>,
     controller: Arc<ProxyController>,
@@ -567,18 +568,19 @@ fn rig(xray: &Path, tag: &str, set_system_proxy: bool) -> Rig {
         StateStore::new(tmp.path().join("state")),
     ));
     let (tx, rx) = unbounded_channel();
-    let mut app = AppState::with_config(tx.clone(), config, None)
+    let mut app = Engine::build(tx.clone(), config, None, false)
         .with_run_dir(tmp.path().join("run"))
         .with_proxy(ProxyHandle::spawn(controller.clone(), tx));
     let vps = StdListener::bind("127.0.0.1:0").unwrap();
     let vps_port = vps.local_addr().unwrap().port();
-    app.submit_input(format!(
+    app.add_link(format!(
         "vless://{UUID}@127.0.0.1:{vps_port}?security=none#local"
     ));
-    assert!(app.popup.is_none(), "{:?}", app.popup);
-    app.selected = app.rows().len() - 1; // the manual server
+    assert!(app.alerts().is_empty(), "{:?}", app.alerts());
+    let id = app.subs.last().unwrap().servers[0].id; // the manual server
     Rig {
         app,
+        id,
         rx,
         desktop,
         controller,
@@ -590,28 +592,28 @@ fn rig(xray: &Path, tag: &str, set_system_proxy: bool) -> Rig {
 
 /// Feeds background events (and ticks while idle) into the app until `done` holds.
 async fn pump(
-    app: &mut AppState,
+    app: &mut Engine,
     rx: &mut UnboundedReceiver<BgEvent>,
-    done: impl Fn(&AppState) -> bool,
+    done: impl Fn(&Engine) -> bool,
 ) {
     let deadline = Instant::now() + Duration::from_secs(20);
     while !done(app) {
         assert!(
             Instant::now() < deadline,
-            "timed out; conn={:?} popup={:?} status={:?}",
+            "timed out; conn={:?} alerts={:?} status={:?}",
             app.conn,
-            app.popup,
-            app.status
+            app.alerts(),
+            app.last_status()
         );
         match timeout(Duration::from_millis(250), rx.recv()).await {
-            Ok(Some(ev)) => app.handle_event(Event::Bg(ev)),
+            Ok(Some(ev)) => app.on_bg(ev),
             Ok(None) => panic!("event channel closed"),
-            Err(_) => app.handle_event(Event::Tick),
+            Err(_) => app.on_tick(),
         }
     }
 }
 
-fn connected(app: &AppState) -> bool {
+fn connected(app: &Engine) -> bool {
     matches!(app.conn, Conn::Connected(_))
 }
 
@@ -621,7 +623,7 @@ async fn system_proxy_follows_the_connection_and_restores_users_settings() {
     let mut r = rig(&xray, "sysproxy", true);
     let before = r.desktop.snapshot();
 
-    r.app.handle_action(Action::Enter); // connect
+    r.app.handle_cmd(Cmd::Connect(r.id)); // connect
     pump(&mut r.app, &mut r.rx, |a| connected(a) && a.proxy_active).await;
     let during = r.desktop.snapshot();
     assert_eq!(
@@ -630,7 +632,7 @@ async fn system_proxy_follows_the_connection_and_restores_users_settings() {
     );
     assert!(r.controller.is_active());
 
-    r.app.handle_action(Action::Disconnect);
+    r.app.handle_cmd(Cmd::Disconnect);
     pump(&mut r.app, &mut r.rx, |a| !a.proxy_active).await;
     assert_eq!(
         r.desktop.snapshot(),
@@ -638,7 +640,7 @@ async fn system_proxy_follows_the_connection_and_restores_users_settings() {
         "the user's own proxy must be back"
     );
     assert!(!r.controller.is_active());
-    assert!(r.app.popup.is_none(), "{:?}", r.app.popup);
+    assert!(r.app.alerts().is_empty(), "{:?}", r.app.alerts());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -647,7 +649,7 @@ async fn quitting_restores_the_system_proxy() {
     let mut r = rig(&xray, "sysproxy-quit", true);
     let before = r.desktop.snapshot();
 
-    r.app.handle_action(Action::Enter);
+    r.app.handle_cmd(Cmd::Connect(r.id));
     pump(&mut r.app, &mut r.rx, |a| connected(a) && a.proxy_active).await;
     assert_ne!(r.desktop.snapshot(), before);
 
@@ -663,12 +665,11 @@ async fn quitting_restores_the_system_proxy() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn crashed_core_does_not_leave_a_dead_system_proxy() {
-    use crate::app::Popup;
     let xray = require_xray!();
     let mut r = rig(&xray, "sysproxy-crash", true);
     let before = r.desktop.snapshot();
 
-    r.app.handle_action(Action::Enter);
+    r.app.handle_cmd(Cmd::Connect(r.id));
     pump(&mut r.app, &mut r.rx, |a| connected(a) && a.proxy_active).await;
     let pid = r.app.core_pid().expect("core pid");
     // Only the exact process this test started.
@@ -688,7 +689,7 @@ async fn crashed_core_does_not_leave_a_dead_system_proxy() {
         "a dead core must not keep the proxy on"
     );
     assert!(
-        matches!(r.app.popup, Some(Popup::Error(_))),
+        matches!(r.app.alerts().last(), Some(crate::proto::Alert::Error(_))),
         "the user must see the failure"
     );
 }
@@ -702,9 +703,9 @@ async fn unsupported_desktop_gets_a_manual_hint_and_is_left_alone() {
         .store(true, std::sync::atomic::Ordering::SeqCst);
     let before = r.desktop.snapshot();
 
-    r.app.handle_action(Action::Enter);
+    r.app.handle_cmd(Cmd::Connect(r.id));
     pump(&mut r.app, &mut r.rx, connected).await;
-    let hint = r.app.status.clone().expect("a hint must be shown");
+    let hint = r.app.last_status().expect("a hint must be shown");
     assert!(
         hint.contains(&format!("127.0.0.1:{}", r.core_cfg.socks_port)),
         "{hint}"
@@ -725,7 +726,7 @@ async fn set_system_proxy_false_never_touches_the_system() {
     let mut r = rig(&xray, "sysproxy-off", false);
     let before = r.desktop.snapshot();
 
-    r.app.handle_action(Action::Enter);
+    r.app.handle_cmd(Cmd::Connect(r.id));
     pump(&mut r.app, &mut r.rx, connected).await;
     sleep(Duration::from_millis(500)).await; // give a wrongly queued command time to run
     assert_eq!(r.desktop.snapshot(), before);
@@ -1019,5 +1020,58 @@ async fn traffic_moves_to_the_backup_when_the_primary_dies_and_returns_after_cle
     let back = back.expect("traffic never returned to the primary");
     eprintln!("return took {back:?}");
     drop(primary_proc);
+    core.stop().await;
+}
+
+/// Traffic through the core shows up in `xray api statsquery` under the `proxy` outbound.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn statsquery_counts_traffic_through_the_proxy_outbound() {
+    use super::stats;
+    let xray = require_xray!();
+    let tmp = TempDir::new("stats");
+    let server_port = free_port();
+    let _server = spawn_server(
+        &xray,
+        &local_vless_server_config(server_port, &tmp.path().join("s.log")),
+        tmp.path(),
+    );
+    assert!(wait_port(server_port, true, 10).await);
+    let http = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let http_port = http.local_addr().unwrap().port();
+    tokio::spawn(serve_http(http));
+
+    let server = parse_link(&format!(
+        "vless://{UUID}@127.0.0.1:{server_port}?security=none&type=tcp#local"
+    ))
+    .unwrap();
+    let core_cfg = CoreConfig {
+        xray_path: xray.display().to_string(),
+        socks_port: free_port(),
+        http_port: free_port(),
+        api_port: free_port(),
+        ..CoreConfig::default()
+    };
+    let mut cfg = config::build(&server, &core_cfg).unwrap();
+    // Keep only the api rule: the loopback target must go through the VLESS chain.
+    cfg["routing"]["rules"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|r| r.get("inboundTag").is_some());
+    let (tx, _rx) = unbounded_channel();
+    let core = Core::start(&core_cfg, &cfg, &tmp.path().join("run"), tx)
+        .await
+        .unwrap();
+    let body = timeout(
+        Duration::from_secs(10),
+        socks_get(core_cfg.socks_port, http_port),
+    )
+    .await
+    .unwrap();
+    assert!(body.contains("elf-gate-chain-ok"));
+    let c = stats::query(&xray, core_cfg.api_port)
+        .await
+        .expect("statsquery output");
+    // (The uplink counter of a short request can still read 0 when it is queried.)
+    assert!(c.proxy_down > 0 && c.direct_down == 0, "{c:?}");
     core.stop().await;
 }

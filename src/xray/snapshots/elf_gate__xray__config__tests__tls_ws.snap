@@ -3,6 +3,12 @@ source: src/xray/config.rs
 expression: "config_for(&format!(\"vless://{UUID}@fi.example.com:8443?security=tls&sni=fi.example.com&alpn=h2%2Chttp%2F1.1&fp=chrome&type=ws&path=%2Fws&host=fi.example.com#FI-1\"))"
 ---
 {
+  "api": {
+    "services": [
+      "StatsService"
+    ],
+    "tag": "api"
+  },
   "inbounds": [
     {
       "listen": "127.0.0.1",
@@ -37,6 +43,15 @@ expression: "config_for(&format!(\"vless://{UUID}@fi.example.com:8443?security=t
         "enabled": true
       },
       "tag": "http-in"
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1"
+      },
+      "tag": "api"
     }
   ],
   "log": {
@@ -86,9 +101,22 @@ expression: "config_for(&format!(\"vless://{UUID}@fi.example.com:8443?security=t
       "tag": "block"
     }
   ],
+  "policy": {
+    "system": {
+      "statsOutboundDownlink": true,
+      "statsOutboundUplink": true
+    }
+  },
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
+      {
+        "inboundTag": [
+          "api"
+        ],
+        "outboundTag": "api",
+        "type": "field"
+      },
       {
         "domain": [
           "full:connectivitycheck.gstatic.com"
@@ -107,5 +135,6 @@ expression: "config_for(&format!(\"vless://{UUID}@fi.example.com:8443?security=t
         "type": "field"
       }
     ]
-  }
+  },
+  "stats": {}
 }

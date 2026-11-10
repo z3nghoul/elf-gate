@@ -3,6 +3,12 @@ source: src/xray/config.rs
 expression: "config_for(&format!(\"vless://{UUID}@nl.example.com:443?security=reality&sni=example.org&fp=firefox&pbk=4GObrWHDR0TyD84iQ06z24v4YBxQ69vxeG1MCqOyFlI&sid=0123abcd&type=xhttp&path=%2Fxh&host=cdn.example.org&mode=packet-up#NL-2\"))"
 ---
 {
+  "api": {
+    "services": [
+      "StatsService"
+    ],
+    "tag": "api"
+  },
   "inbounds": [
     {
       "listen": "127.0.0.1",
@@ -37,6 +43,15 @@ expression: "config_for(&format!(\"vless://{UUID}@nl.example.com:443?security=re
         "enabled": true
       },
       "tag": "http-in"
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1"
+      },
+      "tag": "api"
     }
   ],
   "log": {
@@ -85,9 +100,22 @@ expression: "config_for(&format!(\"vless://{UUID}@nl.example.com:443?security=re
       "tag": "block"
     }
   ],
+  "policy": {
+    "system": {
+      "statsOutboundDownlink": true,
+      "statsOutboundUplink": true
+    }
+  },
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
+      {
+        "inboundTag": [
+          "api"
+        ],
+        "outboundTag": "api",
+        "type": "field"
+      },
       {
         "domain": [
           "full:connectivitycheck.gstatic.com"
@@ -106,5 +134,6 @@ expression: "config_for(&format!(\"vless://{UUID}@nl.example.com:443?security=re
         "type": "field"
       }
     ]
-  }
+  },
+  "stats": {}
 }

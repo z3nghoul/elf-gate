@@ -351,8 +351,17 @@ impl Core {
             if timeout(grace, self.child.wait()).await.is_err() {
                 if let Some(pid) = self.child.id() {
                     // Takes the supervisor and the core together (same process group).
-                    platform::tun_host()
-                        .kill_stale(pid, &["xray", "xray.exe", "elf-gate", "elf-gate.exe"]);
+                    platform::tun_host().kill_stale(
+                        pid,
+                        &[
+                            "xray",
+                            "xray.exe",
+                            "elf-gate",
+                            "elf-gate.exe",
+                            "elf-gated",
+                            "elf-gated.exe",
+                        ],
+                    );
                 }
                 let _ = self.child.kill().await;
             }

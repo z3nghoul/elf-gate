@@ -3,6 +3,12 @@ source: src/xray/config.rs
 expression: "config_for(&format!(\"vless://{UUID}@g.example.com:443?security=tls&sni=g.example.com&type=grpc&serviceName=svc#G\"))"
 ---
 {
+  "api": {
+    "services": [
+      "StatsService"
+    ],
+    "tag": "api"
+  },
   "inbounds": [
     {
       "listen": "127.0.0.1",
@@ -37,6 +43,15 @@ expression: "config_for(&format!(\"vless://{UUID}@g.example.com:443?security=tls
         "enabled": true
       },
       "tag": "http-in"
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1"
+      },
+      "tag": "api"
     }
   ],
   "log": {
@@ -80,9 +95,22 @@ expression: "config_for(&format!(\"vless://{UUID}@g.example.com:443?security=tls
       "tag": "block"
     }
   ],
+  "policy": {
+    "system": {
+      "statsOutboundDownlink": true,
+      "statsOutboundUplink": true
+    }
+  },
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
+      {
+        "inboundTag": [
+          "api"
+        ],
+        "outboundTag": "api",
+        "type": "field"
+      },
       {
         "domain": [
           "full:connectivitycheck.gstatic.com"
@@ -101,5 +129,6 @@ expression: "config_for(&format!(\"vless://{UUID}@g.example.com:443?security=tls
         "type": "field"
       }
     ]
-  }
+  },
+  "stats": {}
 }

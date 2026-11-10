@@ -2,18 +2,19 @@ use crate::model::server::Ping;
 use crate::xray::process::Core;
 use crossterm::event::{Event as TermEvent, EventStream, KeyEvent, KeyEventKind};
 use futures_util::StreamExt;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Interval, MissedTickBehavior};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Level {
     Info,
     Warning,
     Error,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogLine {
     pub time: String,
     pub level: Level,
@@ -39,6 +40,13 @@ pub enum BgEvent {
         id: u64,
         result: Ping,
     },
+    /// Latency of the live connection (the connection check through the tunnel).
+    ActiveLatency {
+        id: u64,
+        ms: u32,
+    },
+    /// Cumulative traffic counters of the running core.
+    Stats(crate::xray::stats::Counters),
     /// A URL ping failed although the server answers over TCP: another fingerprint may help.
     FpSuspect {
         id: u64,
@@ -107,32 +115,44 @@ pub struct SubUpdate {
     pub title: Option<String>,
 }
 
+/// What the link to the background process reports to the interface.
+#[derive(Debug)]
+pub enum LinkEvent {
+    /// Connected (again): a view and the log follow.
+    Up,
+    /// The background process cannot be reached; the link keeps retrying.
+    Down(String),
+    Update(crate::proto::Update),
+}
+
 #[derive(Debug)]
 pub enum Event {
     Key(KeyEvent),
     Resize,
     Tick,
-    Bg(BgEvent),
+    Link(LinkEvent),
 }
 
+/// Results of the engine's background tasks.
 pub type BgTx = mpsc::UnboundedSender<BgEvent>;
+pub type LinkTx = mpsc::UnboundedSender<LinkEvent>;
 
 pub struct EventLoop {
     terminal: EventStream,
     tick: Interval,
-    bg_rx: mpsc::UnboundedReceiver<BgEvent>,
+    link_rx: mpsc::UnboundedReceiver<LinkEvent>,
 }
 
 impl EventLoop {
-    pub fn new() -> (Self, BgTx) {
-        let (tx, bg_rx) = mpsc::unbounded_channel();
+    pub fn new() -> (Self, LinkTx) {
+        let (tx, link_rx) = mpsc::unbounded_channel();
         let mut tick = interval(Duration::from_millis(250));
         tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         (
             Self {
                 terminal: EventStream::new(),
                 tick,
-                bg_rx,
+                link_rx,
             },
             tx,
         )
@@ -151,7 +171,7 @@ impl EventLoop {
                     _ => {}
                 },
                 _ = self.tick.tick() => return Some(Event::Tick),
-                Some(bg) = self.bg_rx.recv() => return Some(Event::Bg(bg)),
+                Some(l) = self.link_rx.recv() => return Some(Event::Link(l)),
             }
         }
     }

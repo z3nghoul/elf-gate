@@ -4,6 +4,12 @@
 /// `cfg!` (not `#[cfg]`) keeps the code compiled and linted in every build.
 pub const SHOW_MOCK_DATA: bool = cfg!(debug_assertions);
 
+/// Demo servers and fake numbers: only in a debug build started with `ELF_GATE_DEMO=1`.
+/// (The background process is the one that owns data, so the demo data live there.)
+pub fn demo_data() -> bool {
+    SHOW_MOCK_DATA && std::env::var_os("ELF_GATE_DEMO").is_some()
+}
+
 /// The real TUN mode exists (stage 5.2).
 pub const TUN_AVAILABLE: bool = true;
 
