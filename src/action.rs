@@ -24,6 +24,8 @@ pub enum Action {
     Logs,
     Filter,
     Fingerprint,
+    /// Show or hide the servers the user removed from the selected subscription.
+    ShowHidden,
     /// Choose the server's role in the primary + backup scheme.
     Role,
     /// Split the TLS ClientHello of the selected server.
@@ -213,6 +215,13 @@ pub const BINDINGS: &[Binding] = &[
         desc: "сменить TLS fingerprint выбранного сервера",
         action: Action::Fingerprint,
         keys: &[(KeyCode::Char('f'), N)],
+        hidden: false,
+    },
+    Binding {
+        label: "h",
+        desc: "подписка: показать скрытые серверы (вернуть: x на скрытом)",
+        action: Action::ShowHidden,
+        keys: &[(KeyCode::Char('h'), N)],
         hidden: false,
     },
     Binding {

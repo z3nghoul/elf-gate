@@ -56,6 +56,12 @@ impl Engine {
                     Err(e) => load_errors.push(format!("{}: {e}", sc.name)),
                 }
             }
+            for s in &mut servers {
+                s.hidden = config
+                    .hidden
+                    .iter()
+                    .any(|h| h.group == sc.name && h.key == hide_key(s));
+            }
             groups.push(Subscription {
                 name: sc.name.clone(),
                 servers,
@@ -218,6 +224,11 @@ impl Engine {
                 }
             }
             apply_overrides(&self.config, name, &mut s);
+            s.hidden = self
+                .config
+                .hidden
+                .iter()
+                .any(|h| h.group == name && h.key == hide_key(&s));
             servers.push(s);
         }
         let count = servers.len();
@@ -553,6 +564,133 @@ mod tests {
         let (tx, _rx) = unbounded_channel();
         let b = Engine::build(tx, saved, Some(storage), false);
         assert_eq!(b.config.device.hwid, first, "the same on the next run");
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    // ---- deleting from subscriptions (bug report) ----
+
+    fn reload(d: &std::path::Path) -> Engine {
+        let storage = Storage::new(d);
+        let (tx, _rx) = unbounded_channel();
+        Engine::build(tx, storage.load().unwrap(), Some(storage), false)
+    }
+
+    fn visible(e: &Engine, group: &str) -> Vec<String> {
+        e.subs
+            .iter()
+            .find(|g| g.name == group)
+            .map(|g| {
+                g.servers
+                    .iter()
+                    .filter(|s| !s.hidden)
+                    .map(|s| s.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn a_deleted_subscription_server_stays_gone_after_a_restart_and_an_update() {
+        let d = dir("hide");
+        let mut a = app_in(&d);
+        a.on_sub_added(
+            "https://x.example/s".into(),
+            "ua".into(),
+            Ok(update(&[A, B])),
+        );
+        let name = a.subs[0].name.clone();
+        let id_a = a.subs[0].servers[0].id;
+        a.handle_cmd(Cmd::DeleteServer(id_a));
+        assert_eq!(visible(&a, &name), ["B"]);
+
+        // The daemon restarts: still hidden (it was saved, not just dropped from memory).
+        let mut b = reload(&d);
+        assert_eq!(visible(&b, &name), ["B"], "hidden after a restart");
+        // The provider still lists it: the update must not bring it back.
+        b.on_sub_fetched(name.clone(), Ok(update(&[A, B, C])));
+        assert_eq!(visible(&b, &name), ["B", "C"]);
+        // It can be restored from the subscription's menu.
+        let id_a = b.subs[0].servers.iter().find(|s| s.name == "A").unwrap().id;
+        b.handle_cmd(Cmd::UnhideServer(id_a));
+        assert_eq!(visible(&b, &name), ["A", "B", "C"]);
+        let c = reload(&d);
+        assert_eq!(visible(&c, &name), ["A", "B", "C"], "and that is saved too");
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[tokio::test]
+    async fn a_manual_server_is_really_deleted() {
+        let d = dir("manual");
+        let mut a = app_in(&d);
+        a.add_link(A.into());
+        let id = a.subs[0].servers[0].id;
+        a.handle_cmd(Cmd::DeleteServer(id));
+        assert!(a.subs.is_empty());
+        assert!(reload(&d).subs.is_empty());
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[tokio::test]
+    async fn a_subscription_can_be_deleted_in_any_state() {
+        for state in ["empty", "all hidden", "only placeholders", "failed update"] {
+            let d = dir(&format!("del-{}", state.replace(' ', "-")));
+            let mut a = app_in(&d);
+            a.on_sub_added("https://x.example/s".into(), "ua".into(), Ok(update(&[A])));
+            let name = a.subs[0].name.clone();
+            match state {
+                "empty" => {
+                    a.subs[0].servers.clear();
+                }
+                "all hidden" => {
+                    let id = a.subs[0].servers[0].id;
+                    a.handle_cmd(Cmd::DeleteServer(id));
+                    assert!(visible(&a, &name).is_empty());
+                }
+                "only placeholders" => {
+                    let stub = parser::parse_link(
+                        "vless://00000000-0000-0000-0000-000000000000@0.0.0.0:1?security=none#Stub",
+                    )
+                    .unwrap();
+                    a.subs[0].servers = vec![stub];
+                }
+                _ => {
+                    a.updating.insert(name.clone());
+                    a.on_sub_fetched(name.clone(), Err("нет сети".into()));
+                }
+            }
+            a.handle_cmd(Cmd::DeleteGroup(name.clone()));
+            assert!(a.subs.is_empty(), "{state}");
+            assert!(a.config.subscriptions.is_empty(), "{state}");
+            assert!(
+                a.config.hidden.is_empty(),
+                "{state}: its hidden keys go too"
+            );
+            let b = reload(&d);
+            assert!(
+                b.subs.is_empty() && b.config.subscriptions.is_empty(),
+                "{state}: gone after a restart"
+            );
+            assert!(
+                Storage::new(&d).load_subscriptions().is_empty(),
+                "{state}: cache entry gone"
+            );
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    #[tokio::test]
+    async fn deleting_the_connected_server_disconnects_first() {
+        let d = dir("conn");
+        let mut a = app_in(&d);
+        a.on_sub_added(
+            "https://x.example/s".into(),
+            "ua".into(),
+            Ok(update(&[A, B])),
+        );
+        let id = a.subs[0].servers[0].id;
+        a.conn = Conn::Connected(id);
+        a.handle_cmd(Cmd::DeleteServer(id));
+        assert_eq!(a.conn, Conn::Disconnected);
         let _ = std::fs::remove_dir_all(d);
     }
 }

@@ -37,7 +37,15 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                 let sub = &app.subs[i];
                 let arrow = if sub.collapsed { "▶" } else { "▼" };
                 ListItem::new(Line::from(Span::styled(
-                    format!("{arrow} {} ({})", sub.name, sub.servers.len()),
+                    {
+                        let hidden = sub.servers.iter().filter(|s| s.hidden).count();
+                        let shown = sub.servers.len() - hidden;
+                        if hidden > 0 {
+                            format!("{arrow} {} ({shown}, скрыто {hidden})", sub.name)
+                        } else {
+                            format!("{arrow} {} ({shown})", sub.name)
+                        }
+                    },
                     th.title(),
                 )))
             }
@@ -54,6 +62,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                     Ping::Timeout | Ping::Error => th.bad(),
                     _ => th.muted(),
                 };
+                if s.hidden {
+                    return ListItem::new(Line::from(vec![
+                        Span::styled("  ", th.muted()),
+                        Span::styled(format!("{} (скрыт)", s.name), th.muted()),
+                    ]));
+                }
                 if s.info_only {
                     // A title or a notice from the provider: shown, never selectable as a server.
                     return ListItem::new(Line::from(vec![

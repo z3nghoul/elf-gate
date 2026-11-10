@@ -510,3 +510,47 @@ async fn the_kind_of_a_ping_is_shown_next_to_the_value() {
         "{out}"
     );
 }
+
+// ---------------- hiding subscription servers ----------------
+
+#[tokio::test]
+async fn x_on_a_subscription_server_hides_it_and_h_shows_it_for_restoring() {
+    let (mut a, mut rx) = app_with(&[REALITY, "vless://u@h2.example.com:443?security=tls#Two"]);
+    a.subs[0].is_remote = true;
+    a.conn = Conn::Connected(1);
+    a.handle_action(Action::Delete);
+    let Some(Popup::Confirm { text, .. }) = &a.popup else {
+        panic!("{:?}", a.popup)
+    };
+    assert!(
+        text.contains("Скрыть") && text.contains("подключение будет остановлено"),
+        "{text}"
+    );
+    press(&mut a, KeyCode::Char('y'));
+    assert_eq!(sent(&mut rx), vec![Cmd::DeleteServer(1)]);
+
+    // The daemon answers with the server hidden: it is gone from the list...
+    a.subs[0].servers[0].hidden = true;
+    assert_eq!(a.rows().len(), 2, "group + the one visible server");
+    // ...until h on the subscription shows it greyed; x then offers to restore it.
+    a.selected = 0;
+    a.handle_action(Action::ShowHidden);
+    assert_eq!(a.rows().len(), 3);
+    a.selected = 1;
+    a.handle_action(Action::Delete);
+    assert!(matches!(&a.popup, Some(Popup::Confirm { text, .. }) if text.contains("Вернуть")));
+    press(&mut a, KeyCode::Char('y'));
+    assert_eq!(sent(&mut rx), vec![Cmd::UnhideServer(1)]);
+}
+
+#[tokio::test]
+async fn an_empty_subscription_can_be_selected_and_deleted() {
+    let (mut a, mut rx) = app_with(&[REALITY]);
+    a.subs[0].is_remote = true;
+    a.subs[0].servers.clear();
+    a.selected = 0;
+    assert_eq!(a.rows(), vec![Row::Group(0)]);
+    a.handle_action(Action::Delete);
+    press(&mut a, KeyCode::Char('y'));
+    assert_eq!(sent(&mut rx), vec![Cmd::DeleteGroup(MANUAL_GROUP.into())]);
+}

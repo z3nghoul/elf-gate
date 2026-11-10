@@ -709,6 +709,7 @@ impl Engine {
             Cmd::AddLink(text) => self.add_link(text),
             Cmd::DeleteServer(id) => self.delete_server(id),
             Cmd::DeleteGroup(name) => self.delete_group(&name),
+            Cmd::UnhideServer(id) => self.unhide_server(id),
             Cmd::SetFingerprint { id, fp } => self.set_fingerprint(id, fp),
             Cmd::SetRole { id, role } => self.set_role(id, role),
             Cmd::SetFragment { id, on } => self.set_fragment(id, on),
@@ -930,44 +931,101 @@ impl Engine {
         self.save_config();
     }
 
+    /// A manual server is deleted. A subscription server is hidden instead: its key is kept in
+    /// `[[hidden]]`, so an update does not bring it back, and it can be restored later.
+    /// If it is the live connection, the connection is stopped first.
     pub(crate) fn delete_server(&mut self, id: u64) {
         self.drop_connection_if(|c| c == id);
-        let mut removed_links = Vec::new();
-        for sub in &mut self.subs {
-            if sub.name == MANUAL_GROUP {
-                removed_links.extend(
-                    sub.servers
-                        .iter()
-                        .filter(|s| s.id == id)
-                        .map(|s| s.link.clone()),
-                );
+        let Some(gi) = self
+            .subs
+            .iter()
+            .position(|g| g.servers.iter().any(|s| s.id == id))
+        else {
+            return;
+        };
+        if self.subs[gi].is_remote {
+            let group = self.subs[gi].name.clone();
+            let Some(s) = self.subs[gi].servers.iter_mut().find(|s| s.id == id) else {
+                return;
+            };
+            s.hidden = true;
+            let key = hide_key(s);
+            let name = s.name.clone();
+            if !self
+                .config
+                .hidden
+                .iter()
+                .any(|h| h.group == group && h.key == key)
+            {
+                self.config
+                    .hidden
+                    .push(crate::storage::HiddenServer { group, key });
             }
-            sub.servers.retain(|s| s.id != id);
-        }
-        self.subs.retain(|s| !s.servers.is_empty() || s.is_remote);
-        if !removed_links.is_empty() {
-            self.config
-                .servers
-                .retain(|e| !removed_links.contains(&e.link));
+            self.log(
+                Level::Info,
+                format!("сервер «{name}» скрыт (вернуть: h на подписке)"),
+            );
             self.save_config();
+            return;
         }
+        // Manual group.
+        let link = self.subs[gi]
+            .servers
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| s.link.clone())
+            .unwrap_or_default();
+        self.subs[gi].servers.retain(|s| s.id != id);
+        if self.subs[gi].servers.is_empty() {
+            self.subs.remove(gi);
+        }
+        self.config.servers.retain(|e| e.link != link);
+        self.save_config();
     }
 
+    pub(crate) fn unhide_server(&mut self, id: u64) {
+        let mut found = None;
+        for g in &mut self.subs {
+            if let Some(s) = g.servers.iter_mut().find(|s| s.id == id && s.hidden) {
+                s.hidden = false;
+                found = Some((g.name.clone(), hide_key(s), s.name.clone()));
+            }
+        }
+        let Some((group, key, name)) = found else {
+            return;
+        };
+        self.config
+            .hidden
+            .retain(|h| !(h.group == group && h.key == key));
+        self.log(Level::Info, format!("сервер «{name}» возвращён в подписку"));
+        self.save_config();
+    }
+
+    /// A subscription (or the manual group) goes with everything that belongs to it: servers,
+    /// the saved list, hidden keys and per-server settings. It works in any state: empty, only
+    /// placeholders, a failed update, everything hidden.
     pub(crate) fn delete_group(&mut self, name: &str) {
         let Some(i) = self.subs.iter().position(|s| s.name == name) else {
             return;
         };
         let ids: Vec<u64> = self.subs[i].servers.iter().map(|s| s.id).collect();
         self.drop_connection_if(|c| ids.contains(&c));
-        let was_manual = name == MANUAL_GROUP;
         let was_remote = self.subs[i].is_remote;
         self.subs.remove(i);
-        if was_manual {
+        self.updating.remove(name);
+        self.failed_at.remove(name);
+        self.config.hidden.retain(|h| h.group != name);
+        let prefix = format!("{name}/");
+        self.config
+            .overrides
+            .retain(|o| !o.server.starts_with(&prefix));
+        if name == MANUAL_GROUP {
             self.config.servers.clear();
-            self.save_config();
-        } else if was_remote {
+        } else {
             self.config.subscriptions.retain(|s| s.name != name);
-            self.save_config();
+        }
+        self.save_config();
+        if was_remote {
             self.save_subscription_cache();
         }
     }
@@ -1055,7 +1113,7 @@ impl Engine {
             .subs
             .iter()
             .flat_map(|s| s.servers.iter())
-            .filter(|s| !s.link.is_empty() && s.is_supported())
+            .filter(|s| !s.link.is_empty() && s.is_supported() && !s.hidden)
             .cloned()
             .collect();
         self.spawn_checks(servers);
@@ -1261,6 +1319,22 @@ fn is_process_noise(text: &str) -> bool {
 
 fn short(text: &str) -> String {
     text.chars().take(160).collect()
+}
+
+/// What identifies a subscription server for "hidden": name, address, port and a hash of its id
+/// (the provider may reorder or rename nothing else without it coming back).
+pub fn hide_key(s: &Server) -> String {
+    let id = match &s.full {
+        Some(_) => String::new(),
+        None => s.uuid.clone(),
+    };
+    format!(
+        "{}|{}:{}|{:08x}",
+        s.name,
+        s.address,
+        s.port,
+        crate::xray::checkcache::fnv1a(id.as_bytes()) as u32
+    )
 }
 
 /// Stable identity of a server for per-server overrides: `"<group>/<name>|<host>:<port>"`.

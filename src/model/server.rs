@@ -115,6 +115,9 @@ pub struct Server {
     /// A row that only informs (a section title, a notice, a placeholder): not a server.
     #[serde(default)]
     pub info_only: bool,
+    /// The user removed it from its subscription (see `[[hidden]]`).
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 impl Server {
@@ -159,6 +162,7 @@ impl Server {
             ping_kind: PingKind::Tcp,
             full: None,
             info_only: false,
+            hidden: false,
         }
     }
 

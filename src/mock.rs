@@ -58,6 +58,7 @@ pub fn make_server(id: u64, name: &str, host: &str, sec: Security, tr: Transport
         ping_kind: crate::model::server::PingKind::Tcp,
         full: None,
         info_only: false,
+        hidden: false,
     }
 }
 

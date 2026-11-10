@@ -73,7 +73,7 @@ pub fn model_from_view(v: &View) -> TrayModel {
             .groups
             .iter()
             .flat_map(|g| g.servers.iter())
-            .filter(|s| s.is_supported())
+            .filter(|s| s.is_supported() && !s.hidden)
             .map(|s| (s.id, s.name.clone()))
             .collect(),
         active,

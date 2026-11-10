@@ -134,6 +134,7 @@ pub fn parse(link: &str) -> Result<Server, ParseError> {
         ping_kind: crate::model::server::PingKind::Tcp,
         full: None,
         info_only: false,
+        hidden: false,
     })
 }
 
