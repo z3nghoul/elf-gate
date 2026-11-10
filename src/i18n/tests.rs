@@ -209,15 +209,3 @@ fn every_string_is_filled_in_and_the_macro_substitutes() {
     assert_eq!(s, "7 servers");
     set(Lang::Ru);
 }
-
-#[test]
-fn a_file_beside_the_program_overrides_single_strings() {
-    let dir = std::env::temp_dir().join(format!("elf-gate-loc-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("ru.toml"), "[tray]\nopen = \"OPEN-X\"\n").unwrap();
-    let extra = super::external_in(&dir, Lang::Ru).unwrap();
-    assert_eq!(extra.get("tray.open").map(String::as_str), Some("OPEN-X"));
-    assert_eq!(extra.len(), 1);
-    assert!(super::external_in(&dir, Lang::Uk).is_none());
-    let _ = std::fs::remove_dir_all(dir);
-}

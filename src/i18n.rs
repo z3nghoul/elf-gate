@@ -96,35 +96,7 @@ pub fn table(lang: Lang) -> &'static Table {
         Lang::Ru => (1, RU),
         Lang::Uk => (2, UK),
     };
-    TABLES[idx].get_or_init(|| {
-        let mut table = parse(text);
-        // A file next to the program overrides single strings: a fix or a new wording needs
-        // no rebuild. Unit tests always use the embedded texts.
-        if !cfg!(test) {
-            if let Some(extra) = external(lang) {
-                table.extend(extra);
-            }
-        }
-        table
-    })
-}
-
-/// `<dir>/<code>.toml`, where `dir` is `$ELF_GATE_LOCALES` or `locales/` beside the executable.
-fn external(lang: Lang) -> Option<Table> {
-    let dir = std::env::var_os("ELF_GATE_LOCALES")
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            std::env::current_exe()
-                .ok()?
-                .parent()
-                .map(|p| p.join("locales"))
-        })?;
-    external_in(&dir, lang)
-}
-
-fn external_in(dir: &std::path::Path, lang: Lang) -> Option<Table> {
-    let text = std::fs::read_to_string(dir.join(format!("{}.toml", lang.code()))).ok()?;
-    Some(parse(&text))
+    TABLES[idx].get_or_init(|| parse(text))
 }
 
 fn lookup(lang: Lang, key: &str) -> Option<&'static str> {
