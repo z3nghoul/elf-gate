@@ -21,9 +21,32 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # Real Xray for the integration tests (Linux only for now). The pinned hash
+      # makes a changed or tampered download fail the build instead of being trusted.
+      - name: Install Xray (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          XRAY_VERSION: v26.11.9
+          XRAY_SHA256: b651f7e1d9966ee2c1b1ee1bf8b52c72771824d3065dce96bbc8bcc19ed95f82
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/xray.zip" \
+            "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip"
+          echo "${XRAY_SHA256}  $RUNNER_TEMP/xray.zip" | sha256sum -c -
+          mkdir -p bin
+          unzip -q -o "$RUNNER_TEMP/xray.zip" xray geoip.dat geosite.dat -d bin
+          chmod +x bin/xray
+          bin/xray version | head -1
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+      # With Xray installed the integration tests must really run, not print SKIPPED.
+      - name: Xray integration tests (must not be skipped)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cargo test xray::integration_tests -- --nocapture 2>&1 | tee xray-tests.log
+          if grep -q SKIPPED xray-tests.log; then echo "Xray tests were skipped"; exit 1; fi
       - run: cargo build --release
       - uses: actions/upload-artifact@v4
         with:

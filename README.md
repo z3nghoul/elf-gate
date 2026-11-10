@@ -32,6 +32,10 @@ XRAY_PATH=/path/to/xray cargo test xray::integration_tests -- --nocapture
 
 Предупреждения Xray про deprecated тесты печатают, но не считают ошибкой.
 
+В CI на ubuntu Xray v26.11.9 скачивается автоматически, SHA256 архива сверяется с хешем,
+зашитым в `.github/workflows/ci.yml`; там же проверяется, что xray-тесты не были пропущены.
+При смене версии обновите версию и хеш вместе.
+
 ### Кросс-сборка под Windows с Linux
 
 Официальная проверка Windows-сборки - CI на `windows-latest`. Локально достаточно
