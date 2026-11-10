@@ -857,3 +857,167 @@ async fn url_ping_runs_a_temporary_core_and_cleans_up() {
         .unwrap_or_default();
     assert!(leftovers.is_empty(), "{leftovers:?}");
 }
+
+// ---------------------------------------------------------------------------
+// Primary + backup: Xray's own observatory drives the switch.
+// ---------------------------------------------------------------------------
+
+fn local_vless_server_config(port: u16, access_log: &Path) -> Value {
+    json!({
+        "log": { "loglevel": "warning", "access": access_log },
+        "inbounds": [{
+            "listen": "127.0.0.1", "port": port, "protocol": "vless",
+            "settings": { "clients": [{ "id": UUID }], "decryption": "none" },
+            "streamSettings": { "network": "tcp", "security": "none" }
+        }],
+        "outbounds": [{
+            "protocol": "freedom",
+            "settings": { "finalRules": [{ "action": "allow" }] }
+        }]
+    })
+}
+
+fn accepted_count(log: &Path, port: u16) -> usize {
+    let needle = format!("accepted tcp:127.0.0.1:{port}");
+    std::fs::read_to_string(log)
+        .map(|t| t.matches(&needle).count())
+        .unwrap_or(0)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn traffic_moves_to_the_backup_when_the_primary_dies_and_returns_after_clean_probes() {
+    use super::config::{Failover, Plan};
+    use crate::model::rule::EffectiveRules;
+    let xray = require_xray!();
+    let tmp = TempDir::new("failover");
+
+    let (p_port, b_port) = (free_port(), free_port());
+    let (p_log, b_log) = (tmp.path().join("p.log"), tmp.path().join("b.log"));
+    let (p_dir, b_dir) = (tmp.path().join("p"), tmp.path().join("b"));
+    std::fs::create_dir_all(&p_dir).unwrap();
+    std::fs::create_dir_all(&b_dir).unwrap();
+    let mut primary_proc = Some(spawn_server(
+        &xray,
+        &local_vless_server_config(p_port, &p_log),
+        &p_dir,
+    ));
+    let _backup_proc = spawn_server(&xray, &local_vless_server_config(b_port, &b_log), &b_dir);
+    assert!(wait_port(p_port, true, 10).await && wait_port(b_port, true, 10).await);
+
+    // `probe_port` is what the observatory fetches; `user_port` is what the test requests, so
+    // the two kinds of traffic can be told apart in the servers' logs.
+    let probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let probe_port = probe.local_addr().unwrap().port();
+    tokio::spawn(serve_http(probe));
+    let user = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let user_port = user.local_addr().unwrap().port();
+    tokio::spawn(serve_http(user));
+
+    let link = |port: u16, name: &str| {
+        parse_link(&format!(
+            "vless://{UUID}@127.0.0.1:{port}?security=none&type=tcp#{name}"
+        ))
+        .unwrap()
+    };
+    let core_cfg = CoreConfig {
+        xray_path: xray.display().to_string(),
+        socks_port: free_port(),
+        http_port: free_port(),
+        ..CoreConfig::default()
+    };
+    let mut failover = Failover::new(
+        link(b_port, "backup"),
+        None,
+        format!("http://127.0.0.1:{probe_port}/generate_204"),
+    );
+    failover.interval_secs = 1;
+    let plan = Plan {
+        failover: Some(failover),
+        rules: EffectiveRules::default(),
+        ..Plan::proxy_default()
+    };
+    let mut cfg = config::build_with(&link(p_port, "primary"), &core_cfg, &plan).unwrap();
+    // The targets are on loopback: drop the "private networks go direct" rule.
+    cfg["routing"]["rules"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|r| r.get("ip").is_none());
+    let (ok, text) = xray_test(&xray, &cfg, tmp.path(), "client");
+    assert!(ok, "Xray rejects the failover config: {text}");
+
+    let (tx, _rx) = unbounded_channel();
+    let core = Core::start(&core_cfg, &cfg, &tmp.path().join("run"), tx)
+        .await
+        .expect("client core");
+
+    // Which server saw the next user request?
+    let who = |before: (usize, usize)| {
+        let now = (
+            accepted_count(&p_log, user_port),
+            accepted_count(&b_log, user_port),
+        );
+        (now.0 > before.0, now.1 > before.1)
+    };
+    let counts = || {
+        (
+            accepted_count(&p_log, user_port),
+            accepted_count(&b_log, user_port),
+        )
+    };
+    let request = || async {
+        let _ = timeout(
+            Duration::from_secs(5),
+            socks_get(core_cfg.socks_port, user_port),
+        )
+        .await;
+    };
+
+    // 1. Everything alive: the primary carries the traffic.
+    sleep(Duration::from_secs(3)).await;
+    let before = counts();
+    request().await;
+    sleep(Duration::from_millis(300)).await;
+    assert_eq!(who(before), (true, false), "primary first");
+
+    // 2. The primary dies: the backup takes over within a few probes.
+    drop(primary_proc.take());
+    assert!(wait_port(p_port, false, 5).await);
+    let started = Instant::now();
+    let mut switched = None;
+    while started.elapsed() < Duration::from_secs(20) {
+        let before = counts();
+        request().await;
+        sleep(Duration::from_millis(300)).await;
+        if who(before) == (false, true) {
+            switched = Some(started.elapsed());
+            break;
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
+    let switched = switched.expect("the backup never took over");
+    eprintln!("failover took {switched:?}");
+
+    // 3. The primary returns: traffic goes back, but not at the very first clean probe.
+    primary_proc = Some(spawn_server(
+        &xray,
+        &local_vless_server_config(p_port, &p_log),
+        &p_dir,
+    ));
+    assert!(wait_port(p_port, true, 10).await);
+    let started = Instant::now();
+    let mut back = None;
+    while started.elapsed() < Duration::from_secs(40) {
+        let before = counts();
+        request().await;
+        sleep(Duration::from_millis(300)).await;
+        if who(before) == (true, false) {
+            back = Some(started.elapsed());
+            break;
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
+    let back = back.expect("traffic never returned to the primary");
+    eprintln!("return took {back:?}");
+    drop(primary_proc);
+    core.stop().await;
+}

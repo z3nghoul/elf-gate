@@ -9,7 +9,6 @@ pub enum ServerRole {
 }
 
 impl ServerRole {
-    #[allow(dead_code)] // used by the details pane once roles are shown (next commit)
     pub fn label(self) -> &'static str {
         match self {
             ServerRole::Primary => "основной",

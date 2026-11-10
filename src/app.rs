@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 
 mod ping;
 mod rules;
+mod server_opts;
 mod session;
 mod subs;
 
@@ -91,6 +92,8 @@ pub enum HealthState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectKind {
     Fingerprint(u64),
+    /// Role of the server in the primary + backup scheme.
+    Role(u64),
     /// Which kind of rule to add.
     NewRuleKind,
     /// Pick a running program for a process rule.
@@ -704,7 +707,7 @@ impl AppState {
         let on_rules = self.screen == Screen::Rules;
         let main_only = matches!(
             action,
-            Enter | Filter | PingAll | SortPing | UpdateSubs | Fingerprint
+            Enter | Filter | PingAll | SortPing | UpdateSubs | Fingerprint | Role | Fragment
         ) || (matches!(action, Delete | Add) && !on_rules);
         if main_only && self.screen != Screen::Main {
             return;
@@ -757,6 +760,8 @@ impl AppState {
             Help => self.toggle_screen(Screen::Help),
             Filter => self.filtering = true,
             Fingerprint => self.open_fingerprint_menu(),
+            Role => self.open_role_menu(),
+            Fragment => self.toggle_fragment(),
             Back => self.back(),
             FocusNext => self.cycle_focus(true),
             FocusPrev => self.cycle_focus(false),
@@ -1053,6 +1058,7 @@ impl AppState {
                     .map(|f| f.to_string());
                 self.set_fingerprint(id, fp);
             }
+            SelectKind::Role(id) => self.set_role(id, index),
             SelectKind::NewRuleKind => self.rules_kind_chosen(index),
             SelectKind::RuleProcess => self.rules_process_chosen(index, option),
         }

@@ -22,6 +22,10 @@ pub enum Action {
     Logs,
     Filter,
     Fingerprint,
+    /// Choose the server's role in the primary + backup scheme.
+    Role,
+    /// Split the TLS ClientHello of the selected server.
+    Fragment,
     /// Rules screen: enable or disable the selected rule or preset.
     Toggle,
     /// Rules screen: switch between `exclude` and `include`.
@@ -200,6 +204,20 @@ pub const BINDINGS: &[Binding] = &[
         desc: "сменить TLS fingerprint выбранного сервера",
         action: Action::Fingerprint,
         keys: &[(KeyCode::Char('f'), N)],
+        hidden: false,
+    },
+    Binding {
+        label: "b",
+        desc: "роль сервера: основной / запасной (автопереключение)",
+        action: Action::Role,
+        keys: &[(KeyCode::Char('b'), N)],
+        hidden: false,
+    },
+    Binding {
+        label: "z",
+        desc: "фрагментация TLS ClientHello выбранного сервера",
+        action: Action::Fragment,
+        keys: &[(KeyCode::Char('z'), N)],
         hidden: false,
     },
     Binding {

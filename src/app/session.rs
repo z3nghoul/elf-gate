@@ -5,7 +5,7 @@ use crate::net::health;
 use crate::platform;
 use crate::storage::{CoreConfig, PresetsConfig};
 use crate::tun::{self, Problem};
-use crate::xray::config::build_with;
+use crate::xray::config::{build_with, Failover};
 use crate::xray::geodata::{drop_missing, Geo};
 use crate::xray::process::{resolve_binary, StartOptions};
 use std::path::Path;
@@ -25,6 +25,14 @@ impl From<String> for Failure {
     }
 }
 
+fn log_warning(tx: &BgTx, text: String) {
+    let _ = tx.send(BgEvent::Log(LogLine {
+        time: now_hms(),
+        level: Level::Warning,
+        text,
+    }));
+}
+
 /// Everything that happens between "connect" and "the core is listening", off the UI thread.
 #[allow(clippy::too_many_arguments)]
 async fn start_core(
@@ -38,6 +46,7 @@ async fn start_core(
     tx: &BgTx,
     store: Option<&StateStore>,
     checker: &Checker,
+    backup: Option<Server>,
 ) -> Result<Core, Failure> {
     // The server must answer over TCP before anything else: afterwards, with the tunnel up,
     // this machine's own connections would go through the tunnel. The address is resolved
@@ -61,6 +70,27 @@ async fn start_core(
         None => resolve_binary(&core_cfg.xray_path).map_err(|e| e.to_string())?,
     };
     let mut plan = tun::build_plan(config, host, mode, (mode == Mode::Tun).then_some(ip));
+    if let Some(backup) = backup {
+        // In TUN mode the backup's address must be resolved now too (never through the tunnel).
+        let backup_ip = if mode == Mode::Tun {
+            match tun::resolve_server(&backup.address, backup.port).await {
+                Ok(ip) => Some(ip.to_string()),
+                Err(e) => {
+                    log_warning(tx, format!("запасной сервер {} пропущен: {e}", backup.name));
+                    None
+                }
+            }
+        } else {
+            Some(String::new())
+        };
+        if let Some(ip) = backup_ip {
+            plan.failover = Some(Failover::new(
+                backup,
+                (!ip.is_empty()).then_some(ip),
+                config.ping.url.clone(),
+            ));
+        }
+    }
     if let Some(geo) = binary.parent().and_then(Geo::load) {
         for warning in drop_missing(&mut plan.rules, &geo) {
             let _ = tx.send(BgEvent::Log(LogLine {
@@ -155,6 +185,13 @@ impl AppState {
         let store = self.state_store.clone();
         let run_dir = self.run_dir.clone();
         let checker = self.checker.clone();
+        let backup = self.backup_for(id);
+        if let Some(b) = &backup {
+            self.log(
+                Level::Info,
+                format!("запасной сервер: {} (автопереключение)", b.name),
+            );
+        }
         tokio::spawn(async move {
             if let Some(old) = old {
                 old.stop().await;
@@ -173,6 +210,7 @@ impl AppState {
                 &tx,
                 store.as_ref(),
                 &checker,
+                backup,
             )
             .await;
             checker.flush();

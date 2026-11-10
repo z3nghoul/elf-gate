@@ -76,6 +76,12 @@ fn stream_settings(s: &Server, fallback: Option<&str>) -> Value {
         }
     }
 
+    if fragments(s) {
+        // The TCP connection to the server is opened through a `freedom` outbound that cuts
+        // the TLS ClientHello into pieces (a DPI workaround, see `FRAGMENT_TAG`).
+        stream.insert("sockopt".into(), json!({ "dialerProxy": FRAGMENT_TAG }));
+    }
+
     let path_or_root = if s.params.path.is_empty() {
         "/"
     } else {
@@ -111,13 +117,31 @@ fn stream_settings(s: &Server, fallback: Option<&str>) -> Value {
     Value::Object(stream)
 }
 
+/// Outbound that sends the ClientHello of a TLS or Reality connection in pieces.
+pub const FRAGMENT_TAG: &str = "fragment";
+
+/// ClientHello fragmentation applies to TLS and Reality only.
+fn fragments(s: &Server) -> bool {
+    s.fragment && matches!(s.security, Security::Tls | Security::Reality)
+}
+
+fn fragment_outbound() -> Value {
+    json!({
+        "tag": FRAGMENT_TAG,
+        "protocol": "freedom",
+        "settings": {
+            "fragment": { "packets": "tlshello", "length": "100-200", "interval": "10-20" }
+        },
+    })
+}
+
 fn is_ip(addr: &str) -> bool {
     addr.parse::<std::net::IpAddr>().is_ok()
 }
 
 /// `address_override`: a pre-resolved IP of the server (TUN mode resolves it before the
 /// tunnel exists, so Xray never has to resolve it through the tunnel).
-fn proxy_outbound(s: &Server, address_override: Option<&str>) -> Value {
+fn proxy_outbound(s: &Server, address_override: Option<&str>, tag: &str) -> Value {
     let mut user = Map::new();
     user.insert("id".into(), json!(s.uuid));
     let encryption = if s.encryption.is_empty() {
@@ -129,7 +153,7 @@ fn proxy_outbound(s: &Server, address_override: Option<&str>) -> Value {
     put(&mut user, "flow", &s.flow);
     let fallback = (address_override.is_some() && !is_ip(&s.address)).then_some(s.address.as_str());
     json!({
-        "tag": "proxy",
+        "tag": tag,
         "protocol": "vless",
         "settings": {
             "vnext": [{
@@ -158,6 +182,35 @@ pub struct TunPlan {
     pub local_dns: Vec<String>,
 }
 
+/// Tags used when a backup server exists (the "primary + backup" scheme).
+pub const PRIMARY_TAG: &str = "proxy-primary";
+pub const BACKUP_TAG: &str = "proxy-backup";
+
+/// The backup half of the "primary + backup" scheme. Xray's own observatory probes both
+/// servers; a balancer with a fallback sends traffic to the backup while the primary fails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failover {
+    pub backup: Server,
+    /// Pre-resolved IP of the backup (TUN mode), like `Plan::vps_ip` for the primary.
+    pub backup_ip: Option<String>,
+    pub probe_url: String,
+    /// Seconds between probes. Xray's observatory has no hysteresis of its own, so this
+    /// interval is the damping: the primary is dropped after one failed probe and taken back
+    /// after the next good one, never faster than one probe apart.
+    pub interval_secs: u32,
+}
+
+impl Failover {
+    pub fn new(backup: Server, backup_ip: Option<String>, probe_url: String) -> Self {
+        Self {
+            backup,
+            backup_ip,
+            probe_url,
+            interval_secs: 10,
+        }
+    }
+}
+
 /// Everything beyond server and core settings that shapes the config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
@@ -166,6 +219,7 @@ pub struct Plan {
     pub rules: EffectiveRules,
     pub tun: Option<TunPlan>,
     pub vps_ip: Option<String>,
+    pub failover: Option<Failover>,
 }
 
 impl Plan {
@@ -180,6 +234,7 @@ impl Plan {
             },
             tun: None,
             vps_ip: None,
+            failover: None,
         }
     }
 
@@ -297,11 +352,33 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
         inbounds.push(tun_inbound(t, &sniffing));
     }
 
+    let primary_tag = if plan.failover.is_some() {
+        PRIMARY_TAG
+    } else {
+        "proxy"
+    };
     let mut outbounds = vec![
-        proxy_outbound(server, plan.vps_ip.as_deref()),
+        proxy_outbound(server, plan.vps_ip.as_deref(), primary_tag),
         json!({ "tag": "direct", "protocol": "freedom" }),
         json!({ "tag": "block", "protocol": "blackhole" }),
     ];
+    if let Some(f) = &plan.failover {
+        if let Some(reason) = &f.backup.unsupported {
+            return Err(ConfigError::Unsupported(
+                f.backup.name.clone(),
+                reason.clone(),
+            ));
+        }
+        outbounds.insert(
+            1,
+            proxy_outbound(&f.backup, f.backup_ip.as_deref(), BACKUP_TAG),
+        );
+    }
+
+    let backup_fragments = plan.failover.as_ref().is_some_and(|f| fragments(&f.backup));
+    if fragments(server) || backup_fragments {
+        outbounds.push(fragment_outbound());
+    }
 
     let mut rules: Vec<Value> = Vec::new();
     let mut dns = None;
@@ -356,12 +433,46 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
         rules.push(json!({ "type": "field", "network": "tcp,udp", "outboundTag": "direct" }));
     }
 
+    let mut balancers = Vec::new();
+    if plan.failover.is_some() {
+        // Everything that used the "proxy" outbound now goes through the balancer of the same
+        // name: the primary while the observatory says it is alive, else the backup.
+        for rule in &mut rules {
+            if rule["outboundTag"] == "proxy" {
+                if let Some(obj) = rule.as_object_mut() {
+                    obj.remove("outboundTag");
+                    obj.insert("balancerTag".into(), json!("proxy"));
+                }
+            }
+        }
+        if plan.routing == RoutingMode::Exclude {
+            // Without a rule the default (first) outbound would be used, which is the primary
+            // only: unmatched traffic must see the balancer too.
+            rules.push(json!({ "type": "field", "network": "tcp,udp", "balancerTag": "proxy" }));
+        }
+        balancers.push(json!({
+            "tag": "proxy",
+            "selector": [PRIMARY_TAG],
+            "fallbackTag": BACKUP_TAG,
+            "strategy": { "type": "leastPing" },
+        }));
+    }
+
     let mut config = json!({
         "log": { "loglevel": core.log_level },
         "inbounds": inbounds,
         "outbounds": outbounds,
         "routing": { "domainStrategy": "IPIfNonMatch", "rules": rules },
     });
+    if let Some(f) = &plan.failover {
+        config["routing"]["balancers"] = json!(balancers);
+        config["observatory"] = json!({
+            "subjectSelector": ["proxy-"],
+            "probeUrl": f.probe_url,
+            "probeInterval": format!("{}s", f.interval_secs),
+            "enableConcurrency": true,
+        });
+    }
     if let Some(dns) = dns {
         config["dns"] = dns;
     }
@@ -412,6 +523,95 @@ mod tests {
         insta::assert_json_snapshot!(config_for(&format!(
             "vless://{UUID}@g.example.com:443?security=tls&sni=g.example.com&type=grpc&serviceName=svc&authority=cdn.example.com&mode=multi#G"
         )));
+    }
+
+    const REALITY_LINK: &str = "vless://b831381d-6324-4d53-ad4f-8cda48b30811@de.example.com:443?flow=xtls-rprx-vision&security=reality&sni=www.microsoft.com&fp=chrome&pbk=4GObrWHDR0TyD84iQ06z24v4YBxQ69vxeG1MCqOyFlI&sid=ab12cd34&type=tcp#DE-1";
+
+    #[test]
+    fn fragmentation_is_added_only_when_switched_on_and_only_for_tls() {
+        let mut s = parse_link(REALITY_LINK).unwrap();
+        let off = build(&s, &CoreConfig::default()).unwrap();
+        assert!(off["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|o| o["tag"] != "fragment"));
+        assert!(off["outbounds"][0]["streamSettings"]
+            .get("sockopt")
+            .is_none());
+
+        s.fragment = true;
+        let on = build(&s, &CoreConfig::default()).unwrap();
+        insta::assert_json_snapshot!("reality_fragment", on);
+        assert_eq!(
+            on["outbounds"][0]["streamSettings"]["sockopt"]["dialerProxy"],
+            "fragment"
+        );
+
+        // Plain (no TLS) connections have no ClientHello to cut.
+        let mut plain = parse_link("vless://u@10.0.0.5:443?security=none#p").unwrap();
+        plain.fragment = true;
+        let cfg = build(&plain, &CoreConfig::default()).unwrap();
+        assert!(cfg["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|o| o["tag"] != "fragment"));
+    }
+
+    fn failover_plan(routing: RoutingMode) -> Plan {
+        let backup = parse_link(
+            "vless://b831381d-6324-4d53-ad4f-8cda48b30811@ru.example.com:443?security=reality&sni=ya.ru&fp=chrome&pbk=4GObrWHDR0TyD84iQ06z24v4YBxQ69vxeG1MCqOyFlI&sid=ab&type=tcp#RU-entry",
+        )
+        .unwrap();
+        Plan {
+            routing,
+            failover: Some(Failover::new(
+                backup,
+                None,
+                "https://www.gstatic.com/generate_204".into(),
+            )),
+            ..Plan::proxy_default()
+        }
+    }
+
+    #[test]
+    fn failover_snapshots_for_both_routing_modes() {
+        let s = parse_link(REALITY_LINK).unwrap();
+        for (name, mode) in [
+            ("exclude", RoutingMode::Exclude),
+            ("include", RoutingMode::Include),
+        ] {
+            let cfg = build_with(&s, &CoreConfig::default(), &failover_plan(mode)).unwrap();
+            insta::assert_json_snapshot!(format!("failover_{name}"), cfg);
+        }
+    }
+
+    #[test]
+    fn failover_has_no_plain_proxy_tag_left_in_rules() {
+        let s = parse_link(REALITY_LINK).unwrap();
+        let cfg = build_with(
+            &s,
+            &CoreConfig::default(),
+            &failover_plan(RoutingMode::Exclude),
+        )
+        .unwrap();
+        let tags: Vec<&str> = cfg["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|o| o["tag"].as_str().unwrap())
+            .collect();
+        assert!(tags.contains(&"proxy-primary") && tags.contains(&"proxy-backup"));
+        assert!(!tags.contains(&"proxy"), "the balancer owns that name");
+        for r in cfg["routing"]["rules"].as_array().unwrap() {
+            assert_ne!(r["outboundTag"], "proxy", "{r}");
+        }
+        assert_eq!(
+            cfg["routing"]["balancers"][0]["fallbackTag"],
+            "proxy-backup"
+        );
+        assert_eq!(cfg["observatory"]["probeInterval"], "10s");
     }
 
     #[test]
@@ -527,6 +727,7 @@ mod tests {
             rules: effective,
             tun: tun.then(|| tun_plan(false, true)),
             vps_ip: None,
+            failover: None,
         }
     }
 

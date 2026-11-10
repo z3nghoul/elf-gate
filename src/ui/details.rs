@@ -23,6 +23,9 @@ fn fingerprint_label(s: &Server) -> String {
         s.tls.fingerprint.clone()
     };
     match &s.fp_override {
+        Some(o) if s.fp_auto => {
+            format!("{o} (подобран автоматически; в ссылке: {from_link}; f - сменить)")
+        }
         Some(o) => format!("{o} (выбран; в ссылке: {from_link}; f - сменить)"),
         None if s.tls.fingerprint.is_empty() && s.security == Security::Reality => {
             "chrome (по умолчанию; f - сменить)".to_string()
@@ -65,6 +68,17 @@ fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
     if matches!(s.security, Security::Tls | Security::Reality) {
         lines.push(field("Fingerprint:", fingerprint_label(s), th));
     }
+    if matches!(s.security, Security::Tls | Security::Reality) {
+        lines.push(field(
+            "Фрагмент:",
+            if s.fragment {
+                "включена (z - выключить)".into()
+            } else {
+                "выключена (z - включить)".into()
+            },
+            th,
+        ));
+    }
     opt(&mut lines, "ALPN:", &s.tls.alpn.join(","), th);
     opt(&mut lines, "PublicKey:", &s.tls.public_key, th);
     opt(&mut lines, "ShortId:", &s.tls.short_id, th);
@@ -76,6 +90,14 @@ fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
     opt(&mut lines, "Host:", &s.params.host, th);
     opt(&mut lines, "Mode:", &s.params.mode, th);
     opt(&mut lines, "Service:", &s.params.service_name, th);
+    lines.push(field(
+        "Роль:",
+        match s.role {
+            Some(r) => format!("{} (b - сменить)", r.label()),
+            None => "нет (b - назначить основной / запасной)".into(),
+        },
+        th,
+    ));
     lines.push(field("Пинг:", s.ping.label(), th));
     lines
 }

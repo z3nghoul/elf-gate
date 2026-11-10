@@ -209,6 +209,7 @@ pub fn build_plan(
         rules,
         tun,
         vps_ip: vps_ip.map(|ip| ip.to_string()),
+        failover: None,
     }
 }
 
