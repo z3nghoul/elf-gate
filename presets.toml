@@ -11,7 +11,8 @@
 #   Discord   VERIFIED: the Flatpak client (com.discordapp.Discord) runs /app/discord/Discord.
 #   steam, steamwebhelper   VERIFIED: ~/.local/share/Steam/ubuntu12_32/steam; /usr/bin/steam is only
 #             a launcher script and never shows up as the process name.
-#   vesktop   NOT RIGHT for every package: the Arch package vesktop-bin runs under the system Electron
+#   vesktop   UNRELIABLE BY PROCESS NAME: for discord-only rely on the domain list of the preset, not on this name.
+#             NOT RIGHT for every package: the Arch package vesktop-bin runs under the system Electron
 #             (the process is called `electron44`). The AppImage and Flatpak builds are expected to use
 #             `vesktop`, but that is unverified. On Arch pick the process on the rules screen (`a`).
 #   DiscordPTB, DiscordCanary   UNVERIFIED: names follow Discord's own naming; the Arch package
