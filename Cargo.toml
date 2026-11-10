@@ -2,6 +2,8 @@
 name = "elf-gate"
 version = "0.1.0"
 edition = "2021"
+license = "AGPL-3.0-only"
+repository = "https://github.com/z3nghoul/elf-gate"
 
 [dependencies]
 anyhow = "1.0.104"
