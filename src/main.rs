@@ -63,7 +63,11 @@ async fn run(terminal: &mut Term, tun_from_cli: bool) -> Result<()> {
     if tun_from_cli {
         let _ = cmd_tx.send(Cmd::ConnectLastInTun);
     }
-    tokio::spawn(ipc::run_link(link_tx, cmd_rx, Spawn::default_for_current_exe()));
+    tokio::spawn(ipc::run_link(
+        link_tx,
+        cmd_rx,
+        Spawn::default_for_current_exe(),
+    ));
 
     while !app.should_quit {
         terminal.draw(|f| ui::render(f, &mut app))?;

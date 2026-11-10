@@ -87,7 +87,7 @@ mod tests {
     #[tokio::test]
     async fn main_screen_renders_all_panels() {
         let (tx, _rx) = unbounded_channel();
-        let mut app = AppState::new(tx);
+        let mut app = AppState::with_demo(tx);
         let out = draw(100, 30, &mut app);
         println!("{out}");
         for needle in [
@@ -106,7 +106,7 @@ mod tests {
     #[tokio::test]
     async fn too_small_window_shows_message() {
         let (tx, _rx) = unbounded_channel();
-        let mut app = AppState::new(tx);
+        let mut app = AppState::with_demo(tx);
         let out = draw(70, 20, &mut app);
         assert!(out.contains("Увеличьте окно"));
         assert!(!out.contains("Серверы"));
@@ -115,7 +115,7 @@ mod tests {
     #[tokio::test]
     async fn every_screen_renders_at_minimum_size() {
         let (tx, _rx) = unbounded_channel();
-        let mut app = AppState::new(tx);
+        let mut app = AppState::with_demo(tx);
         for s in [
             Screen::Main,
             Screen::Rules,
@@ -131,7 +131,7 @@ mod tests {
     #[tokio::test]
     async fn deprecated_and_rejected_servers_are_tagged() {
         let (tx, _rx) = unbounded_channel();
-        let mut app = AppState::new(tx);
+        let mut app = AppState::with_demo(tx);
         // Mock list: FI-1 uses ws, Финляндия-3 uses grpc.
         let out = draw(MIN_WIDTH, MIN_HEIGHT, &mut app);
         println!("{out}");
@@ -143,14 +143,10 @@ mod tests {
         assert!(out.contains("Устаревший транспорт ws"), "{out}");
 
         // A server refused by Xray is greyed out and shows Xray's text.
-        app.submit_input("vless://u@example.com:443?security=none#Dom".into());
-        let id = app.subs.last().unwrap().servers[0].id;
-        app.handle_event(crate::event::Event::Bg(
-            crate::event::BgEvent::ServerRejected {
-                id,
-                reason: "vless without TLS or other encryption is prohibited".into(),
-            },
-        ));
+        let mut v = crate::app::tests::view_with(&["vless://u@example.com:443?security=none#Dom"]);
+        v.groups[0].servers[0].unsupported =
+            Some("Xray отверг конфиг: vless without TLS or other encryption is prohibited".into());
+        app.apply_view(v);
         app.selected = app.rows().len() - 1;
         let out = draw(100, 30, &mut app);
         println!("{out}");
@@ -160,54 +156,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn details_show_fingerprint_origin_and_hint() {
+    async fn details_show_fingerprint_origin() {
         let (tx, _rx) = unbounded_channel();
         let mut app = AppState::new(tx);
-        app.submit_input(
-            "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R1"
-                .into(),
-        );
-        app.selected = app.rows().len() - 1;
+        let mut v = crate::app::tests::view_with(&[
+            "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R1",
+        ]);
+        app.apply_view(v.clone());
+        app.selected = 1;
         let out = draw(110, 30, &mut app);
         assert!(
             out.contains("Fingerprint:") && out.contains("chrome (f - сменить)"),
             "{out}"
         );
-
-        let id = app.selected_server().unwrap().id;
-        app.handle_event(crate::event::Event::Key(crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Char('f'),
-            crossterm::event::KeyModifiers::NONE,
-        )));
-        let out = draw(110, 30, &mut app);
-        println!("{out}");
-        assert!(
-            out.contains("как в ссылке (chrome)") && out.contains("firefox"),
-            "{out}"
-        );
-
-        for code in [
-            crossterm::event::KeyCode::Down,
-            crossterm::event::KeyCode::Down,
-            crossterm::event::KeyCode::Enter,
-        ] {
-            app.handle_event(crate::event::Event::Key(crossterm::event::KeyEvent::new(
-                code,
-                crossterm::event::KeyModifiers::NONE,
-            )));
-        }
+        v.groups[0].servers[0].fp_override = Some("firefox".into());
+        app.apply_view(v);
         let out = draw(110, 30, &mut app);
         assert!(out.contains("firefox (выбран; в ссылке: chrome"), "{out}");
-        assert_eq!(
-            app.server_by_id(id).unwrap().fp_override.as_deref(),
-            Some("firefox")
-        );
     }
 
     #[tokio::test]
     async fn empty_list_shows_the_add_hint_and_hides_demo_numbers() {
         let (tx, _rx) = unbounded_channel();
-        let mut app = AppState::build(tx, crate::storage::Config::default(), None, false);
+        let mut app = AppState::new(tx);
+        app.link = crate::app::LinkState::Up;
         let out = draw(MIN_WIDTH, MIN_HEIGHT, &mut app);
         println!("{out}");
         assert!(out.contains("Нажмите a, чтобы добавить сервер"), "{out}");

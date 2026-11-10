@@ -4,8 +4,8 @@
 pub mod action;
 pub mod app;
 pub mod build_info;
-pub mod engine;
 pub mod daemon;
+pub mod engine;
 pub mod event;
 pub mod ipc;
 pub mod mock;

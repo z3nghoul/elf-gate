@@ -17,6 +17,7 @@ impl Lcg {
             .unwrap_or(1);
         Lcg(n | 1)
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> u64 {
         self.0 = self
             .0

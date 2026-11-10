@@ -221,6 +221,10 @@ mod tests {
         let (mut a, _) = app_with(&["vless://u@10.0.0.5:443?security=none#Plain"]);
         let id = a.subs[0].servers[0].id;
         a.set_fragment(id, true);
-        assert!(a.last_status().unwrap().as_str().contains("TLS или Reality"));
+        assert!(a
+            .last_status()
+            .unwrap()
+            .as_str()
+            .contains("TLS или Reality"));
     }
 }

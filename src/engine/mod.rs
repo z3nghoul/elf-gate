@@ -145,12 +145,7 @@ impl Engine {
     }
 
     pub fn with_config(tx: BgTx, config: Config, storage: Option<Storage>) -> Self {
-        Self::build(
-            tx,
-            config,
-            storage,
-            crate::build_info::demo_data(),
-        )
+        Self::build(tx, config, storage, crate::build_info::demo_data())
     }
 
     /// `mock`: demo servers, fake pings and traffic (debug builds only, see `build_info`).

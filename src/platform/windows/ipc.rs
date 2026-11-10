@@ -50,7 +50,10 @@ fn create(name: &str, first: bool) -> std::io::Result<NamedPipeServer> {
         ServerOptions::new()
             .first_pipe_instance(first)
             .reject_remote_clients(true)
-            .create_with_security_attributes_raw(name, (&mut attrs as *mut SECURITY_ATTRIBUTES).cast())
+            .create_with_security_attributes_raw(
+                name,
+                (&mut attrs as *mut SECURITY_ATTRIBUTES).cast(),
+            )
     };
     // SAFETY: the descriptor was allocated by the conversion call above and is freed once.
     unsafe {
@@ -74,7 +77,9 @@ pub fn bind() -> Result<Box<dyn IpcListener>, IpcBindError> {
     let name = pipe_name();
     match create(&name, true) {
         Ok(next) => Ok(Box::new(Listener { name, next })),
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Err(IpcBindError::AlreadyRunning),
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            Err(IpcBindError::AlreadyRunning)
+        }
         Err(e) => Err(IpcBindError::Other(e.to_string())),
     }
 }

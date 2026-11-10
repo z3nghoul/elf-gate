@@ -465,9 +465,7 @@ impl Engine {
         });
         match found {
             Some(id) => self.connect(id),
-            None => {
-                self.status("Нет сервера для автоподключения: выберите сервер и нажмите Enter")
-            }
+            None => self.status("Нет сервера для автоподключения: выберите сервер и нажмите Enter"),
         }
     }
 }
@@ -501,8 +499,7 @@ mod tests {
         let mut a = Engine::build(tx, config, None, false).with_tun_host(Arc::new(host));
         a.add_link("vless://u@10.0.0.5:443?security=none#Real".into());
         a.mode = Mode::Tun;
-        a.selected = a.rows().len() - 1;
-        let id = a.selected_server().unwrap().id;
+        let id = a.subs.last().unwrap().servers[0].id;
         (a, id)
     }
 
@@ -532,7 +529,10 @@ mod tests {
         // instead of spawning anything.
         let (mut a, id) = tun_app(MockTunHost::healthy(), false, &dir);
         assert_eq!(a.config.mode.routing, RoutingMode::Exclude);
-        a.handle_cmd(Cmd::Answer { ask: Ask::PresetOffer(id), yes: true });
+        a.handle_cmd(Cmd::Answer {
+            ask: Ask::PresetOffer(id),
+            yes: true,
+        });
         assert_eq!(a.config.mode.routing, RoutingMode::Include);
         assert!(a
             .config
@@ -557,7 +557,10 @@ mod tests {
     async fn declining_the_offer_keeps_everything_through_the_vpn() {
         let dir = temp_dir("decline");
         let (mut a, id) = tun_app(MockTunHost::healthy(), false, &dir);
-        a.handle_cmd(Cmd::Answer { ask: Ask::PresetOffer(id), yes: false });
+        a.handle_cmd(Cmd::Answer {
+            ask: Ask::PresetOffer(id),
+            yes: false,
+        });
         assert_eq!(a.config.mode.routing, RoutingMode::Exclude);
         assert_eq!(a.config.presets.enabled, ["local-direct"]);
         assert!(
@@ -672,7 +675,10 @@ mod tests {
     async fn declining_elevation_explains_that_tun_needs_it() {
         let (tx, _rx) = unbounded_channel();
         let mut a = Engine::build(tx, Config::default(), None, false);
-        a.handle_cmd(Cmd::Answer { ask: Ask::RelaunchElevated, yes: false });
+        a.handle_cmd(Cmd::Answer {
+            ask: Ask::RelaunchElevated,
+            yes: false,
+        });
         assert!(a.last_status().unwrap().contains("администратора"));
     }
 
@@ -691,7 +697,7 @@ mod tests {
         assert!(matches!(a.conn, Conn::Error(_)));
         assert!(!a.alerts().is_empty());
         // An ordinary failure shows the error text itself.
-                a.conn = Conn::Connecting(id);
+        a.conn = Conn::Connecting(id);
         a.on_core_failed(
             id,
             "порт 10808 (socks) уже занят другой программой".into(),
@@ -723,63 +729,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connection_check_results_are_shown_and_drive_the_fp_hint() {
+    async fn connection_check_results_are_stored_and_late_ones_ignored() {
         let (tx, _rx) = unbounded_channel();
         let mut a = Engine::build(tx, Config::default(), None, false);
-        a.add_link(
-            "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R"
-                .into(),
-        );
+        a.add_link("vless://u@h.example.com:443?security=none#R".into());
         let id = a.subs[0].servers[0].id;
         a.conn = Conn::Connected(id);
-
         a.on_health(id, Ok(Duration::from_millis(80)));
         assert_eq!(a.health, HealthState::Ok(Duration::from_millis(80)));
-        assert_eq!(a.fp_hint(), None);
-
         a.on_health(id, Err("нет ответа за 8 с".into()));
         assert!(matches!(a.health, HealthState::Failed(_)));
-        assert!(a.fp_hint().unwrap().contains("fp=firefox"));
-
-        // With firefox already chosen the hint is generic, not a repeat of the same advice.
-        a.set_fingerprint(id, Some("firefox".into()));
-        a.conn = Conn::Connected(id);
-        a.health = HealthState::Failed("нет ответа".into());
-        let hint = a.fp_hint().unwrap();
-        assert!(
-            !hint.contains("fp=firefox") && hint.contains("ключ"),
-            "{hint}"
-        );
-
-        // Results for a connection that no longer exists are ignored.
         a.conn = Conn::Disconnected;
         a.health = HealthState::Unknown;
         a.on_health(id, Err("late".into()));
         assert_eq!(a.health, HealthState::Unknown);
-    }
-
-    #[tokio::test]
-    async fn core_log_noise_never_produces_a_hint() {
-        let (tx, _rx) = unbounded_channel();
-        let mut a = Engine::build(tx, Config::default(), None, false);
-        a.add_link(
-            "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R"
-                .into(),
-        );
-        let id = a.subs[0].servers[0].id;
-        a.conn = Conn::Connected(id);
-        for _ in 0..10 {
-            a.on_bg(BgEvent::Log(LogLine {
-                time: "00:00:00".into(),
-                level: Level::Warning,
-                text: "[xray] [Warning] proxy/vless/outbound: connection ends > EOF".into(),
-            }));
-        }
-        assert_eq!(
-            a.fp_hint(),
-            None,
-            "the hint comes from the connection check, not from log text"
-        );
     }
 
     #[tokio::test]
@@ -831,7 +794,7 @@ mod tests {
             Conn::Disconnected,
             "off by default: nothing happens"
         );
-        assert!(a.popup.is_none());
+        assert!(a.alerts().is_empty());
 
         a.config.ui.auto_connect = true;
         a.auto_connect();
@@ -857,7 +820,7 @@ mod tests {
         assert!(note.contains("остановлен"), "{note}");
         assert_eq!(host.killed.lock().unwrap().as_slice(), &[777]);
         assert!(store.load().unwrap().tun.is_none());
-        assert!(a.logs.iter().any(|l| l.text.contains("TUN:")));
+        assert!(a.logged("TUN:"));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

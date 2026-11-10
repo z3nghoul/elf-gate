@@ -4,7 +4,7 @@
 
 use crate::action::{map_key, Action};
 use crate::event::{now_hms, Event, Level, LinkEvent, LogLine};
-use crate::model::rule::{builtin_presets, validate, Rule, RuleKind, RoutingMode};
+use crate::model::rule::{builtin_presets, validate, RoutingMode, Rule, RuleKind};
 use crate::model::server::{Security, Server, ServerRole, FINGERPRINTS};
 use crate::model::subscription::Subscription;
 use crate::platform::{self, TunHost};
@@ -14,6 +14,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 use std::collections::VecDeque;
 use std::sync::Arc;
+#[cfg(test)]
+use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 
 pub use crate::engine::{mode_name, MANUAL_GROUP};
@@ -1052,4 +1054,4 @@ impl AppState {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

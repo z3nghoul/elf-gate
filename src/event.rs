@@ -1,8 +1,8 @@
 use crate::model::server::Ping;
 use crate::xray::process::Core;
-use serde::{Deserialize, Serialize};
 use crossterm::event::{Event as TermEvent, EventStream, KeyEvent, KeyEventKind};
 use futures_util::StreamExt;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Interval, MissedTickBehavior};

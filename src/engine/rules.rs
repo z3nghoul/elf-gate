@@ -92,11 +92,23 @@ mod tests {
     async fn presets_and_rules_toggle_and_persist() {
         let mut a = engine("toggle");
         a.rules_toggle(RuleRef::Preset("discord-only".into()));
-        assert!(a.config.presets.enabled.contains(&"discord-only".to_string()));
+        assert!(a
+            .config
+            .presets
+            .enabled
+            .contains(&"discord-only".to_string()));
         a.rules_toggle(RuleRef::Preset("discord-only".into()));
-        assert!(!a.config.presets.enabled.contains(&"discord-only".to_string()));
+        assert!(!a
+            .config
+            .presets
+            .enabled
+            .contains(&"discord-only".to_string()));
         a.rules_toggle(RuleRef::Preset("no-such-preset".into()));
-        assert!(!a.config.presets.enabled.contains(&"no-such-preset".to_string()));
+        assert!(!a
+            .config
+            .presets
+            .enabled
+            .contains(&"no-such-preset".to_string()));
 
         a.submit_rule(RuleKind::Domain, " Example.COM ".into());
         assert_eq!(a.config.rules[0].value, "example.com");
@@ -131,7 +143,9 @@ mod tests {
     #[tokio::test]
     async fn direct_rules_extend_the_proxy_bypass_list() {
         let mut a = engine("bypass");
-        a.config.rules.push(Rule::new(RuleKind::Domain, "example.com"));
+        a.config
+            .rules
+            .push(Rule::new(RuleKind::Domain, "example.com"));
         a.config.presets.enabled.push("games-direct".into());
         let bypass = a.proxy_bypass();
         assert!(bypass.contains(&"localhost".to_string()));

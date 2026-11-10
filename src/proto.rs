@@ -58,8 +58,14 @@ pub enum Setting {
     Autostart(bool),
     Theme(String),
     /// `[[subscriptions]]` entry by name.
-    SubscriptionUserAgent { name: String, value: String },
-    SubscriptionHours { name: String, hours: u32 },
+    SubscriptionUserAgent {
+        name: String,
+        value: String,
+    },
+    SubscriptionHours {
+        name: String,
+        hours: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -206,7 +212,11 @@ mod tests {
             Cmd::AddLink("vless://x@y:1#z\nignored".into()),
         ] {
             let line = encode(&cmd);
-            assert_eq!(line.matches('\n').count(), 1, "newlines must be escaped: {line:?}");
+            assert_eq!(
+                line.matches('\n').count(),
+                1,
+                "newlines must be escaped: {line:?}"
+            );
             assert_eq!(decode::<Cmd>(&line).unwrap(), cmd);
         }
     }
@@ -222,11 +232,13 @@ mod tests {
         config.servers.push(crate::storage::ServerEntry {
             link: server.link.clone(),
         });
-        config.subscriptions.push(crate::storage::SubscriptionConfig {
-            name: "p".into(),
-            url: "https://prov.example/sub/TOKEN".into(),
-            ..Default::default()
-        });
+        config
+            .subscriptions
+            .push(crate::storage::SubscriptionConfig {
+                name: "p".into(),
+                url: "https://prov.example/sub/TOKEN".into(),
+                ..Default::default()
+            });
         let view = View {
             groups: vec![Subscription {
                 name: "g".into(),
@@ -260,6 +272,9 @@ mod tests {
             assert!(!wire.contains(secret), "{secret} leaked: {wire}");
         }
         assert!(wire.contains("h.example.com"), "addresses are shown");
-        assert_eq!(decode::<Update>(&wire).unwrap(), Update::View(Box::new(view)));
+        assert_eq!(
+            decode::<Update>(&wire).unwrap(),
+            Update::View(Box::new(view))
+        );
     }
 }

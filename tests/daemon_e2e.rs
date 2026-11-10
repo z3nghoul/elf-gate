@@ -119,20 +119,32 @@ async fn hello_view_single_instance_and_private_socket() {
     env.config("");
     let _d = Guard(env.daemon());
     let stream = wait_socket(&env.socket()).await;
-    let mode = std::fs::metadata(env.socket()).unwrap().permissions().mode() & 0o777;
+    let mode = std::fs::metadata(env.socket())
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
     assert_eq!(mode, 0o600, "only the owner may connect");
 
     let mut c = Client::new(stream);
     let first = c.lines.next_line().await.unwrap().unwrap();
-    assert!(matches!(decode::<Update>(&first), Ok(Update::Hello { .. })), "{first}");
+    assert!(
+        matches!(decode::<Update>(&first), Ok(Update::Hello { .. })),
+        "{first}"
+    );
     c.until("a view", |_| true).await;
 
     // A second background process refuses to start and exits at once; the first keeps serving.
     let mut second = env.daemon();
-    let status = tokio::task::spawn_blocking(move || second.wait().unwrap()).await.unwrap();
+    let status = tokio::task::spawn_blocking(move || second.wait().unwrap())
+        .await
+        .unwrap();
     assert!(status.success());
     c.send(Cmd::ToggleMode).await;
-    c.until("mode TUN", |v| v.mode == elf_gate::model::rule::TrafficMode::Tun).await;
+    c.until("mode TUN", |v| {
+        v.mode == elf_gate::model::rule::TrafficMode::Tun
+    })
+    .await;
 }
 
 fn xray() -> Option<PathBuf> {
@@ -144,8 +156,14 @@ fn xray() -> Option<PathBuf> {
 }
 
 fn pgrep_count(pattern: &str) -> usize {
-    let out = Command::new("pgrep").args(["-fc", pattern]).output().unwrap();
-    String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(0)
+    let out = Command::new("pgrep")
+        .args(["-fc", pattern])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0)
 }
 
 #[tokio::test]
@@ -195,22 +213,33 @@ async fn vpn_outlives_the_interface_and_dies_with_the_daemon() {
     .await;
     let v = c.until("the server", |v| !v.groups.is_empty()).await;
     let id = v.groups[0].servers[0].id;
-    assert!(v.groups[0].servers[0].link.is_empty(), "links never cross the link");
+    assert!(
+        v.groups[0].servers[0].link.is_empty(),
+        "links never cross the link"
+    );
     c.send(Cmd::Connect(id)).await;
-    c.until("connected", |v| v.conn == Conn::Connected(id)).await;
+    c.until("connected", |v| v.conn == Conn::Connected(id))
+        .await;
     assert!(std::net::TcpStream::connect(("127.0.0.1", socks)).is_ok());
 
     // The interface goes away: the VPN stays.
     drop(c);
     tokio::time::sleep(Duration::from_millis(800)).await;
-    assert!(std::net::TcpStream::connect(("127.0.0.1", socks)).is_ok(), "core must survive");
+    assert!(
+        std::net::TcpStream::connect(("127.0.0.1", socks)).is_ok(),
+        "core must survive"
+    );
 
     // A new interface sees the live connection.
     let mut c2 = Client::new(UnixStream::connect(env.socket()).await.unwrap());
-    c2.until("still connected", |v| v.conn == Conn::Connected(id)).await;
+    c2.until("still connected", |v| v.conn == Conn::Connected(id))
+        .await;
 
     // kill -9 on the daemon: the core must not be left behind.
-    let before = pgrep_count(&format!("xray run -c {}", env.dir.join("state/elf-gate/run/xray.json").display()));
+    let before = pgrep_count(&format!(
+        "xray run -c {}",
+        env.dir.join("state/elf-gate/run/xray.json").display()
+    ));
     assert!(before >= 1, "the core is running");
     daemon.kill().unwrap();
     daemon.wait().unwrap();
