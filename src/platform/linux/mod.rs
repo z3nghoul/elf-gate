@@ -1,3 +1,4 @@
+pub mod autostart;
 pub mod child;
 pub mod privileges;
 pub mod proxy;

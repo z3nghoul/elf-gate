@@ -37,13 +37,20 @@ fn failed(what: &str, e: impl std::fmt::Display) -> PlatformError {
 }
 
 /// An open `Internet Settings` key, closed on drop.
-struct Key(HKEY);
+pub(super) struct Key(HKEY);
 
 impl Key {
     fn open(
         access: windows::Win32::System::Registry::REG_SAM_FLAGS,
     ) -> Result<Self, PlatformError> {
-        let sub = wide(SUBKEY);
+        Self::open_sub(SUBKEY, access)
+    }
+
+    pub(super) fn open_sub(
+        subkey: &str,
+        access: windows::Win32::System::Registry::REG_SAM_FLAGS,
+    ) -> Result<Self, PlatformError> {
+        let sub = wide(subkey);
         let mut hkey = HKEY::default();
         // SAFETY: `sub` is a NUL-terminated UTF-16 string that outlives the call and
         // `hkey` is a valid out pointer.
@@ -61,7 +68,7 @@ impl Key {
     }
 
     /// `None` if the value does not exist. DWORDs are returned as decimal strings.
-    fn get(&self, name: &str) -> Result<Option<String>, PlatformError> {
+    pub(super) fn get(&self, name: &str) -> Result<Option<String>, PlatformError> {
         let name_w = wide(name);
         let mut kind = REG_VALUE_TYPE::default();
         let mut len: u32 = 0;
@@ -125,7 +132,7 @@ impl Key {
         .map_err(|e| failed("RegSetValueExW", e))
     }
 
-    fn set_string(&self, name: &str, value: &str) -> Result<(), PlatformError> {
+    pub(super) fn set_string(&self, name: &str, value: &str) -> Result<(), PlatformError> {
         let name_w = wide(name);
         let bytes: Vec<u8> = wide(value).iter().flat_map(|u| u.to_le_bytes()).collect();
         // SAFETY: valid NUL-terminated name; the payload is NUL-terminated UTF-16 bytes.
@@ -134,7 +141,7 @@ impl Key {
             .map_err(|e| failed("RegSetValueExW", e))
     }
 
-    fn delete(&self, name: &str) -> Result<(), PlatformError> {
+    pub(super) fn delete(&self, name: &str) -> Result<(), PlatformError> {
         let name_w = wide(name);
         // SAFETY: valid NUL-terminated name.
         let status = unsafe { RegDeleteValueW(self.0, PCWSTR(name_w.as_ptr())) };

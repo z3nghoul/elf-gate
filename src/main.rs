@@ -97,6 +97,8 @@ async fn run(
     app.start_background_checks();
     if tun_from_cli {
         app.start_tun_from_cli();
+    } else {
+        app.auto_connect();
     }
 
     while !app.should_quit {

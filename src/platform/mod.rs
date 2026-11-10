@@ -162,6 +162,45 @@ pub trait TunHost: Send + Sync {
     fn needs_supervisor(&self) -> bool;
 }
 
+/// "Start with the system": a desktop autostart entry (Linux) or a `Run` value (Windows).
+pub trait Autostart: Send + Sync {
+    fn is_enabled(&self) -> bool;
+    /// `command[0]` is the program, the rest its arguments.
+    fn enable(&self, command: &[String]) -> Result<(), PlatformError>;
+    fn disable(&self) -> Result<(), PlatformError>;
+}
+
+/// One command line in the Windows convention: arguments with spaces or quotes are quoted.
+pub fn quote_command(command: &[String]) -> String {
+    command
+        .iter()
+        .map(|a| {
+            if a.is_empty() || a.contains([' ', '\t', '"']) {
+                format!("\"{}\"", a.replace('"', "\\\""))
+            } else {
+                a.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(test)]
+mod command_tests {
+    use super::quote_command;
+
+    #[test]
+    fn arguments_with_spaces_are_quoted() {
+        let c = |v: &[&str]| quote_command(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(c(&["elf-gated.exe"]), "elf-gated.exe");
+        assert_eq!(
+            c(&["C:\\Program Files\\elf-gate\\elf-gated.exe", "--background"]),
+            "\"C:\\Program Files\\elf-gate\\elf-gated.exe\" --background"
+        );
+        assert_eq!(c(&["a", "b \"c\""]), "a \"b \\\"c\\\"\"");
+    }
+}
+
 pub trait ShutdownSignals: Send + Sync {
     fn install(&self, on_shutdown: Box<dyn Fn() + Send + Sync>) -> Result<(), PlatformError>;
 }
@@ -195,6 +234,10 @@ pub fn run_supervisor(args: &[String]) -> i32 {
         eprintln!("--supervise is not used on Windows (a Job Object ties the core to elf-gate)");
         2
     }
+}
+
+pub fn autostart() -> Box<dyn Autostart> {
+    Box::new(imp::autostart::Entry::detect())
 }
 
 pub fn tun_host() -> Box<dyn TunHost> {

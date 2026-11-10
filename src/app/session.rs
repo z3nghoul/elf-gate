@@ -456,11 +456,29 @@ impl AppState {
         }
         self.mode = Mode::Tun;
         self.config.mode.traffic = Mode::Tun;
+        self.connect_last_server();
+    }
+
+    /// `[ui].auto_connect`: connect to the last server in the last traffic mode.
+    pub fn auto_connect(&mut self) {
+        if !self.config.ui.auto_connect {
+            return;
+        }
+        self.mode = self.config.mode.traffic;
+        self.log(
+            Level::Info,
+            "auto_connect: подключаюсь к последнему серверу",
+        );
+        self.connect_last_server();
+    }
+
+    fn connect_last_server(&mut self) {
         let wanted = self.config.ui.last_server.clone();
         let found = self.subs.iter().find_map(|sub| {
             sub.servers
                 .iter()
                 .find(|s| wanted.as_deref() == Some(&format!("{}/{}", sub.name, s.name)))
+                .filter(|s| s.is_supported())
                 .map(|s| s.id)
         });
         match found {
@@ -814,6 +832,33 @@ mod tests {
         assert_eq!(a.mode, Mode::Tun);
         // The core is missing in this fixture: the start stops at the problem popup.
         assert!(matches!(a.popup, Some(Popup::Error(_))));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn auto_connect_is_off_by_default_and_uses_the_last_mode_when_on() {
+        let dir = temp_dir("auto");
+        let (mut a, id) = tun_app(MockTunHost::healthy(), false, &dir);
+        a.mode = Mode::Proxy;
+        a.config.mode.traffic = Mode::Tun;
+        a.config.ui.last_server = Some("manual/Real".into());
+        a.config.ui.tun_intro_done = true;
+
+        a.auto_connect();
+        assert_eq!(
+            a.conn,
+            Conn::Disconnected,
+            "off by default: nothing happens"
+        );
+        assert!(a.popup.is_none());
+
+        a.config.ui.auto_connect = true;
+        a.auto_connect();
+        assert_eq!(a.mode, Mode::Tun, "the last traffic mode is restored");
+        // The TUN core is missing in this fixture, so the start stops at the problem popup:
+        // proof that the connection was attempted for the remembered server.
+        assert!(matches!(a.popup, Some(Popup::Error(_))));
+        assert_eq!(a.server_by_id(id).unwrap().name, "Real");
         let _ = std::fs::remove_dir_all(dir);
     }
 
