@@ -107,7 +107,15 @@ fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
     ));
     lines.push(field(
         "Пинг:",
-        ping_label_with_age(s.ping, s.ping_at, unix_now()),
+        if s.ping_at.is_some() {
+            format!(
+                "{} ({})",
+                ping_label_with_age(s.ping, s.ping_at, unix_now()),
+                s.ping_kind.long()
+            )
+        } else {
+            s.ping.label()
+        },
         th,
     ));
     lines

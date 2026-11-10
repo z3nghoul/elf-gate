@@ -479,3 +479,23 @@ async fn the_light_theme_and_the_settings_screen_render() {
         "{out}"
     );
 }
+
+#[tokio::test]
+async fn the_kind_of_a_ping_is_shown_next_to_the_value() {
+    use crate::model::server::{Ping, PingKind};
+    let (mut a, _rx) = app_with(&[REALITY]);
+    a.subs[0].servers[0].ping = Ping::Ms(42);
+    a.subs[0].servers[0].ping_at = Some(crate::model::subscription::unix_now() - 30);
+    let out = crate::ui::tests_support::draw(110, 30, &mut a);
+    assert!(out.contains("42 ms tcp"), "{out}");
+    assert!(
+        out.contains("TCP до сервера") && out.contains("с назад"),
+        "{out}"
+    );
+    a.subs[0].servers[0].ping_kind = PingKind::Tunnel;
+    let out = crate::ui::tests_support::draw(110, 30, &mut a);
+    assert!(
+        out.contains("42 ms vpn") && out.contains("через туннель"),
+        "{out}"
+    );
+}

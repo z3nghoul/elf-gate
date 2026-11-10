@@ -39,6 +39,7 @@ pub enum BgEvent {
     Ping {
         id: u64,
         result: Ping,
+        kind: crate::model::server::PingKind,
     },
     /// Latency of the live connection (the connection check through the tunnel).
     ActiveLatency {

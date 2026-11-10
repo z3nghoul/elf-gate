@@ -25,14 +25,56 @@ static PROBE_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub const FP_SEARCH_ORDER: [&str; 7] =
     ["firefox", "chrome", "safari", "ios", "edge", "random", "qq"];
 
-/// Time to open a TCP connection to `host:port`.
-pub async fn tcp_ping(host: &str, port: u16, limit: Duration) -> Ping {
-    let _permit = TCP_PERMITS.acquire().await.ok();
+/// Measured attempts per ping; the median is shown (one slow outlier does not jump the value).
+pub const SAMPLES: usize = 3;
+
+/// The median of the samples (the mean of the two middle ones for an even count).
+pub fn median(mut samples: Vec<Duration>) -> Option<Duration> {
+    if samples.is_empty() {
+        return None;
+    }
+    samples.sort();
+    let n = samples.len();
+    Some(if n % 2 == 1 {
+        samples[n / 2]
+    } else {
+        (samples[n / 2 - 1] + samples[n / 2]) / 2
+    })
+}
+
+fn millis(d: Duration) -> u32 {
+    d.as_millis().min(u128::from(u32::MAX)) as u32
+}
+
+async fn connect_once(host: &str, port: u16, limit: Duration) -> Result<Duration, Ping> {
     let started = Instant::now();
     match tokio::time::timeout(limit, TcpStream::connect((host, port))).await {
-        Ok(Ok(_)) => Ping::Ms(started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32),
-        Ok(Err(_)) => Ping::Error,
-        Err(_) => Ping::Timeout,
+        Ok(Ok(_)) => Ok(started.elapsed()),
+        Ok(Err(_)) => Err(Ping::Error),
+        Err(_) => Err(Ping::Timeout),
+    }
+}
+
+/// Time to open a TCP connection to `host:port`: one warm-up connect (name lookup, ARP and
+/// the first packets are slow and say nothing about the path) that is thrown away, then
+/// `SAMPLES` measured ones; the median is the result.
+pub async fn tcp_ping(host: &str, port: u16, limit: Duration) -> Ping {
+    let _permit = TCP_PERMITS.acquire().await.ok();
+    let warmup = connect_once(host, port, limit).await;
+    let mut samples = Vec::new();
+    let mut failure = warmup.err();
+    for i in 0..SAMPLES {
+        if i > 0 {
+            tokio::time::sleep(Duration::from_millis(80)).await;
+        }
+        match connect_once(host, port, limit).await {
+            Ok(d) => samples.push(d),
+            Err(f) => failure = Some(f),
+        }
+    }
+    match median(samples) {
+        Some(d) => Ping::Ms(millis(d)),
+        None => failure.unwrap_or(Ping::Error),
     }
 }
 
@@ -93,19 +135,30 @@ async fn request_through(socks_port: u16, url: &str, limit: Duration) -> Result<
         .user_agent("elf-gate")
         .build()
         .map_err(|e| e.to_string())?;
-    let started = Instant::now();
-    let resp = client.get(url).send().await.map_err(|e| {
-        if e.is_timeout() {
-            "timeout".to_string()
+    // One request that is not timed opens the connection through the tunnel (the way to the
+    // server, its handshake, the target's TLS). The timed ones reuse it, so they measure the
+    // request through the tunnel and not the set-up.
+    let get = || async {
+        let started = Instant::now();
+        let resp = client.get(url).send().await.map_err(|e| {
+            if e.is_timeout() {
+                "timeout".to_string()
+            } else {
+                e.to_string()
+            }
+        })?;
+        if resp.status().is_success() {
+            Ok(started.elapsed())
         } else {
-            e.to_string()
+            Err(format!("ответ {}", resp.status()))
         }
-    })?;
-    if resp.status().is_success() {
-        Ok(started.elapsed())
-    } else {
-        Err(format!("ответ {}", resp.status()))
+    };
+    get().await?;
+    let mut samples = Vec::new();
+    for _ in 0..SAMPLES {
+        samples.push(get().await?);
     }
+    median(samples).ok_or_else(|| "нет замеров".to_string())
 }
 
 /// Maps a probe outcome to the label shown in the server list.
@@ -200,6 +253,15 @@ mod tests {
         // surface as a timeout there; either way it is not a measurement.
         let bad = tcp_ping("127.0.0.1", closed, Duration::from_secs(1)).await;
         assert!(matches!(bad, Ping::Error | Ping::Timeout), "{bad:?}");
+    }
+
+    #[test]
+    fn the_median_ignores_one_outlier() {
+        let ms = |v: &[u64]| median(v.iter().map(|m| Duration::from_millis(*m)).collect());
+        assert_eq!(ms(&[40, 200, 41]), Some(Duration::from_millis(41)));
+        assert_eq!(ms(&[40, 60]), Some(Duration::from_millis(50)));
+        assert_eq!(ms(&[7]), Some(Duration::from_millis(7)));
+        assert_eq!(ms(&[]), None);
     }
 
     #[test]
