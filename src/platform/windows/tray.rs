@@ -121,7 +121,7 @@ pub async fn start(model: watch::Receiver<TrayModel>, on_action: OnAction) -> Re
 /// Windows Terminal if present, else the default console host.
 pub fn open_interface(program: &Path) -> Result<(), PlatformError> {
     let exe = program.display().to_string();
-    if super::ipc::spawn_detached(Path::new("wt.exe"), &[exe.clone()]).is_ok() {
+    if super::ipc::spawn_detached(Path::new("wt.exe"), std::slice::from_ref(&exe)).is_ok() {
         return Ok(());
     }
     super::ipc::spawn_detached(
