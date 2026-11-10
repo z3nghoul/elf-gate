@@ -40,6 +40,11 @@ pub enum BgEvent {
         id: u64,
         result: Ping,
     },
+    /// Latency of the live connection (the connection check through the tunnel).
+    ActiveLatency {
+        id: u64,
+        ms: u32,
+    },
     /// Cumulative traffic counters of the running core.
     Stats(crate::xray::stats::Counters),
     /// A URL ping failed although the server answers over TCP: another fingerprint may help.

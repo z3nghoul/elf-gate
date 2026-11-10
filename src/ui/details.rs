@@ -1,6 +1,6 @@
 use crate::app::{AppState, Focus, Row, Screen};
-use crate::model::server::{Security, Server};
-use crate::model::subscription::{format_date, format_datetime};
+use crate::model::server::{ping_label_with_age, Security, Server};
+use crate::model::subscription::{format_date, format_datetime, unix_now};
 use crate::ui::statusbar::format_bytes;
 use crate::ui::theme::Theme;
 use ratatui::layout::Rect;
@@ -105,7 +105,11 @@ fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
         },
         th,
     ));
-    lines.push(field("Пинг:", s.ping.label(), th));
+    lines.push(field(
+        "Пинг:",
+        ping_label_with_age(s.ping, s.ping_at, unix_now()),
+        th,
+    ));
     lines
 }
 

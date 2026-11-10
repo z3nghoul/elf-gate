@@ -130,6 +130,7 @@ pub fn parse(link: &str) -> Result<Server, ParseError> {
         role: None,
         unsupported,
         ping: Ping::Unknown,
+        ping_at: None,
     })
 }
 

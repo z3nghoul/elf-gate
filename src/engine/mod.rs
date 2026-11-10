@@ -70,6 +70,11 @@ impl Hub {
         }
     }
 
+    /// Interfaces currently watching the view (the tray is not one of them).
+    pub fn view_receivers(&self) -> usize {
+        self.view_tx.receiver_count()
+    }
+
     fn push_log(&self, line: LogLine) {
         let mut logs = self.logs.lock().unwrap();
         if logs.len() == LOG_CAPACITY {
@@ -125,6 +130,7 @@ pub struct Engine {
     /// Servers whose fingerprint search is running.
     fp_searching: HashSet<u64>,
     last_auto_check: Option<Instant>,
+    last_auto_ping: Option<Instant>,
     /// When a subscription's update last failed (not retried for ten minutes).
     failed_at: HashMap<String, Instant>,
     autostart_on: bool,
@@ -239,6 +245,7 @@ impl Engine {
             updating: HashSet::new(),
             fp_searching: HashSet::new(),
             last_auto_check: None,
+            last_auto_ping: None,
             failed_at: HashMap::new(),
             autostart_on: false,
             stats_task: None,
@@ -516,6 +523,7 @@ impl Engine {
     pub fn on_tick(&mut self) {
         self.poll_core();
         self.auto_update_tick();
+        self.auto_ping_tick();
         if self.mock && matches!(self.conn, Conn::Connected(_)) {
             self.traffic.proxy_up += self.rng.next() % 2_000;
             self.traffic.proxy_down += self.rng.next() % 20_000;
@@ -534,6 +542,18 @@ impl Engine {
                     .find(|s| s.id == id)
                 {
                     s.ping = result;
+                    s.ping_at = Some(crate::model::subscription::unix_now());
+                }
+            }
+            BgEvent::ActiveLatency { id, ms } => {
+                if let Some(s) = self
+                    .subs
+                    .iter_mut()
+                    .flat_map(|s| s.servers.iter_mut())
+                    .find(|s| s.id == id)
+                {
+                    s.ping = Ping::Ms(ms);
+                    s.ping_at = Some(crate::model::subscription::unix_now());
                 }
             }
             BgEvent::Connected(id) => {

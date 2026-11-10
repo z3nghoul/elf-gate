@@ -8,6 +8,50 @@ use crate::xray::process::resolve_binary;
 
 impl Engine {
     pub(super) fn ping_all(&mut self) {
+        self.last_auto_ping = Some(Instant::now());
+        self.ping_servers(true);
+    }
+
+    /// The background refresh: TCP pings without the "..." flicker, every
+    /// `[ping].auto_interval_secs` (stretched while no interface is open). For the live
+    /// connection the latency through the tunnel is measured instead.
+    pub(super) fn auto_ping_tick(&mut self) {
+        let base = self.config.ping.auto_interval_secs;
+        if base == 0 || self.subs.is_empty() {
+            return;
+        }
+        // Nobody is looking: five times slower, at most every five minutes.
+        let watched = self.hub.view_receivers() > usize::from(self.tray);
+        let every = if watched {
+            base
+        } else {
+            (base * 5).min(300).max(base)
+        };
+        if self
+            .last_auto_ping
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(every))
+        {
+            return;
+        }
+        self.last_auto_ping = Some(Instant::now());
+        self.ping_servers(false);
+        if let Conn::Connected(id) = self.conn {
+            let (tx, port) = (self.tx.clone(), self.config.core.socks_port);
+            tokio::spawn(async move {
+                if let Ok(d) =
+                    crate::net::health::check(port, crate::net::health::HEALTH_TIMEOUT).await
+                {
+                    let _ = tx.send(BgEvent::ActiveLatency {
+                        id,
+                        ms: d.as_millis().min(u128::from(u32::MAX)) as u32,
+                    });
+                }
+            });
+        }
+    }
+
+    /// `manual`: marks servers as pending and also drives the demo pings.
+    fn ping_servers(&mut self, manual: bool) {
         let real: Vec<Server> = self
             .subs
             .iter()
@@ -15,7 +59,7 @@ impl Engine {
             .filter(|s| s.is_supported() && !s.link.is_empty())
             .cloned()
             .collect();
-        if self.mock {
+        if self.mock && manual {
             for sub in &mut self.subs {
                 for s in sub
                     .servers
@@ -54,7 +98,9 @@ impl Engine {
         };
         let limit = Duration::from_millis(self.config.ping.timeout_ms.max(500));
         for server in real {
-            self.set_ping(server.id, Ping::Pending);
+            if manual {
+                self.set_ping(server.id, Ping::Pending);
+            }
             let tx = self.tx.clone();
             let core = self.config.core.clone();
             let cfg = self.config.ping.clone();
@@ -331,5 +377,47 @@ mod tests {
             a.on_bg(ev);
         }
         assert!(matches!(a.server_by_id(id).unwrap().ping, Ping::Ms(_)));
+    }
+
+    #[tokio::test]
+    async fn the_background_refresh_respects_the_interval_and_can_be_switched_off() {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            loop {
+                let _ = l.accept().await;
+            }
+        });
+        let (tx, mut rx) = unbounded_channel();
+        let mut a = Engine::build(tx, Config::default(), None, false);
+        a.add_link(format!("vless://u@127.0.0.1:{port}?security=none#L"));
+        let id = a.subs[0].servers[0].id;
+
+        a.config.ping.auto_interval_secs = 0;
+        a.auto_ping_tick();
+        assert_eq!(
+            a.server_by_id(id).unwrap().ping,
+            Ping::Unknown,
+            "off means off"
+        );
+
+        a.config.ping.auto_interval_secs = 60;
+        a.auto_ping_tick();
+        assert_eq!(
+            a.server_by_id(id).unwrap().ping,
+            Ping::Unknown,
+            "the refresh does not flash the pending marker"
+        );
+        while a.server_by_id(id).unwrap().ping_at.is_none() {
+            let ev = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            a.on_bg(ev);
+        }
+        assert!(matches!(a.server_by_id(id).unwrap().ping, Ping::Ms(_)));
+        let again = a.last_auto_ping;
+        a.auto_ping_tick();
+        assert_eq!(a.last_auto_ping, again, "not due yet");
     }
 }

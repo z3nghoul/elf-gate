@@ -259,3 +259,25 @@ async fn vpn_outlives_the_interface_and_dies_with_the_daemon() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
+
+#[tokio::test]
+async fn autostart_is_written_into_the_isolated_config_and_removed_again() {
+    let env = Env::new("autostart");
+    env.config("");
+    let _d = Guard(env.daemon());
+    let mut c = Client::new(wait_socket(&env.socket()).await);
+    c.until("a view", |_| true).await;
+    let entry = env.dir.join("config/autostart/elf-gate.desktop");
+    c.send(Cmd::Set(elf_gate::proto::Setting::Autostart(true)))
+        .await;
+    c.until("autostart on", |v| v.autostart).await;
+    let text = std::fs::read_to_string(&entry).unwrap();
+    assert!(
+        text.contains("Exec=") && text.contains("elf-gated"),
+        "{text}"
+    );
+    c.send(Cmd::Set(elf_gate::proto::Setting::Autostart(false)))
+        .await;
+    c.until("autostart off", |v| !v.autostart).await;
+    assert!(!entry.exists());
+}

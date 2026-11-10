@@ -54,6 +54,7 @@ pub fn make_server(id: u64, name: &str, host: &str, sec: Security, tr: Transport
         role: None,
         unsupported: None,
         ping: Ping::Unknown,
+        ping_at: None,
     }
 }
 
