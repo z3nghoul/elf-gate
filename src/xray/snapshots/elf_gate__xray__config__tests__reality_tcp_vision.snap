@@ -1,6 +1,6 @@
 ---
 source: src/xray/config.rs
-expression: "config_for(&format!(\"vless://{UUID}@de.example.com:443?flow=xtls-rprx-vision&security=reality&sni=www.microsoft.com&fp=chrome&pbk=PUBKEY&sid=ab12&spx=%2F&type=tcp#DE-1\"))"
+expression: "config_for(&format!(\"vless://{UUID}@de.example.com:443?flow=xtls-rprx-vision&security=reality&sni=www.microsoft.com&fp=chrome&pbk=4GObrWHDR0TyD84iQ06z24v4YBxQ69vxeG1MCqOyFlI&sid=ab12cd34&spx=%2F&type=tcp#DE-1\"))"
 ---
 {
   "inbounds": [
@@ -64,9 +64,9 @@ expression: "config_for(&format!(\"vless://{UUID}@de.example.com:443?flow=xtls-r
         "network": "tcp",
         "realitySettings": {
           "fingerprint": "chrome",
-          "publicKey": "PUBKEY",
+          "publicKey": "4GObrWHDR0TyD84iQ06z24v4YBxQ69vxeG1MCqOyFlI",
           "serverName": "www.microsoft.com",
-          "shortId": "ab12",
+          "shortId": "ab12cd34",
           "spiderX": "/"
         },
         "security": "reality"

@@ -1,6 +1,6 @@
 ---
 source: src/xray/config.rs
-expression: "config_for(&format!(\"vless://{UUID}@[2001:db8::1]:2053?type=tcp#v6\"))"
+expression: "config_for(&format!(\"vless://{UUID}@[fd00::1]:2053?type=tcp#v6\"))"
 ---
 {
   "inbounds": [
@@ -48,7 +48,7 @@ expression: "config_for(&format!(\"vless://{UUID}@[2001:db8::1]:2053?type=tcp#v6
       "settings": {
         "vnext": [
           {
-            "address": "2001:db8::1",
+            "address": "fd00::1",
             "port": 2053,
             "users": [
               {

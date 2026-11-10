@@ -73,9 +73,8 @@ fn stream_settings(s: &Server) -> Value {
         Transport::Ws => {
             let mut ws = Map::new();
             ws.insert("path".into(), json!(path_or_root));
-            if !s.params.host.is_empty() {
-                ws.insert("headers".into(), json!({ "Host": s.params.host }));
-            }
+            // `headers.Host` is deprecated in Xray 26.x in favour of `host`.
+            put(&mut ws, "host", &s.params.host);
             stream.insert("wsSettings".into(), Value::Object(ws));
         }
         Transport::Grpc => {
@@ -174,14 +173,14 @@ mod tests {
     #[test]
     fn reality_tcp_vision() {
         insta::assert_json_snapshot!(config_for(&format!(
-            "vless://{UUID}@de.example.com:443?flow=xtls-rprx-vision&security=reality&sni=www.microsoft.com&fp=chrome&pbk=PUBKEY&sid=ab12&spx=%2F&type=tcp#DE-1"
+            "vless://{UUID}@de.example.com:443?flow=xtls-rprx-vision&security=reality&sni=www.microsoft.com&fp=chrome&pbk=4GObrWHDR0TyD84iQ06z24v4YBxQ69vxeG1MCqOyFlI&sid=ab12cd34&spx=%2F&type=tcp#DE-1"
         )));
     }
 
     #[test]
     fn reality_xhttp() {
         insta::assert_json_snapshot!(config_for(&format!(
-            "vless://{UUID}@nl.example.com:443?security=reality&sni=example.org&fp=firefox&pbk=PUBKEY&sid=1&type=xhttp&path=%2Fxh&host=cdn.example.org&mode=packet-up#NL-2"
+            "vless://{UUID}@nl.example.com:443?security=reality&sni=example.org&fp=firefox&pbk=4GObrWHDR0TyD84iQ06z24v4YBxQ69vxeG1MCqOyFlI&sid=0123abcd&type=xhttp&path=%2Fxh&host=cdn.example.org&mode=packet-up#NL-2"
         )));
     }
 
@@ -200,9 +199,10 @@ mod tests {
     }
 
     #[test]
-    fn plain_tcp_ipv6() {
+    fn plain_tcp_private_ipv6() {
+        // Xray refuses unencrypted VLESS to public IPs, so use a private address.
         insta::assert_json_snapshot!(config_for(&format!(
-            "vless://{UUID}@[2001:db8::1]:2053?type=tcp#v6"
+            "vless://{UUID}@[fd00::1]:2053?type=tcp#v6"
         )));
     }
 
@@ -229,5 +229,45 @@ mod tests {
             build(&server, &CoreConfig::default()),
             Err(ConfigError::Unsupported(..))
         ));
+    }
+
+    /// Runs every fixture through a real Xray (`xray run -test`).
+    /// Skipped unless `ELF_GATE_XRAY` points to the binary; the `.dat` files
+    /// are looked up next to it.
+    #[test]
+    fn generated_configs_pass_xray_test() {
+        let Ok(xray) = std::env::var("ELF_GATE_XRAY") else {
+            eprintln!("ELF_GATE_XRAY not set, skipping");
+            return;
+        };
+        let xray = std::path::PathBuf::from(xray);
+        let asset_dir = xray.parent().unwrap().to_path_buf();
+        let key = "4GObrWHDR0TyD84iQ06z24v4YBxQ69vxeG1MCqOyFlI";
+        let links = [
+            format!("vless://{UUID}@de.example.com:443?flow=xtls-rprx-vision&security=reality&sni=www.microsoft.com&fp=chrome&pbk={key}&sid=ab12cd34&type=tcp#a"),
+            format!("vless://{UUID}@nl.example.com:443?security=reality&sni=example.org&pbk={key}&sid=0123abcd&type=xhttp&path=%2Fxh&host=cdn.example.org&mode=packet-up#b"),
+            format!("vless://{UUID}@fi.example.com:8443?security=tls&sni=fi.example.com&alpn=h2%2Chttp%2F1.1&type=ws&path=%2Fws&host=fi.example.com#c"),
+            format!("vless://{UUID}@g.example.com:443?security=tls&sni=g.example.com&type=grpc&serviceName=svc#d"),
+            format!("vless://{UUID}@[fd00::1]:2053?type=tcp#e"),
+        ];
+        for (i, link) in links.iter().enumerate() {
+            let path = std::env::temp_dir().join(format!(
+                "elf-gate-xray-test-{}-{i}.json",
+                std::process::id()
+            ));
+            std::fs::write(&path, serde_json::to_vec_pretty(&config_for(link)).unwrap()).unwrap();
+            let out = std::process::Command::new(&xray)
+                .args(["run", "-test", "-c"])
+                .arg(&path)
+                .env("XRAY_LOCATION_ASSET", &asset_dir)
+                .output()
+                .unwrap();
+            let _ = std::fs::remove_file(&path);
+            let text = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success() && text.contains("Configuration OK"),
+                "{link}\n{text}"
+            );
+        }
     }
 }

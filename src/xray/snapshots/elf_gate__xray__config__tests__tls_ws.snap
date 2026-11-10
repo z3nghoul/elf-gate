@@ -71,9 +71,7 @@ expression: "config_for(&format!(\"vless://{UUID}@fi.example.com:8443?security=t
           "serverName": "fi.example.com"
         },
         "wsSettings": {
-          "headers": {
-            "Host": "fi.example.com"
-          },
+          "host": "fi.example.com",
           "path": "/ws"
         }
       },

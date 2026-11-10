@@ -1,6 +1,6 @@
 ---
 source: src/xray/config.rs
-expression: "config_for(&format!(\"vless://{UUID}@nl.example.com:443?security=reality&sni=example.org&fp=firefox&pbk=PUBKEY&sid=1&type=xhttp&path=%2Fxh&host=cdn.example.org&mode=packet-up#NL-2\"))"
+expression: "config_for(&format!(\"vless://{UUID}@nl.example.com:443?security=reality&sni=example.org&fp=firefox&pbk=4GObrWHDR0TyD84iQ06z24v4YBxQ69vxeG1MCqOyFlI&sid=0123abcd&type=xhttp&path=%2Fxh&host=cdn.example.org&mode=packet-up#NL-2\"))"
 ---
 {
   "inbounds": [
@@ -63,9 +63,9 @@ expression: "config_for(&format!(\"vless://{UUID}@nl.example.com:443?security=re
         "network": "xhttp",
         "realitySettings": {
           "fingerprint": "firefox",
-          "publicKey": "PUBKEY",
+          "publicKey": "4GObrWHDR0TyD84iQ06z24v4YBxQ69vxeG1MCqOyFlI",
           "serverName": "example.org",
-          "shortId": "1"
+          "shortId": "0123abcd"
         },
         "security": "reality",
         "xhttpSettings": {
