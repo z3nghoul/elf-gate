@@ -188,7 +188,7 @@ fn every_screen_and_state_has_a_key_bar_and_matches_its_snapshot() {
                 "{name}: a dialog needs its own keys, got `{last}`"
             );
         }
-        insta::assert_snapshot!(name, frame);
+        snap!(name, frame);
     }
 }
 
@@ -329,7 +329,7 @@ fn the_bar_snapshots_at_80_120_and_150_columns() {
             let n = super::hints::rows(&a, width as usize - 2).len();
             let lines: Vec<&str> = frame.lines().collect();
             let bar = lines[lines.len() - 1 - n..lines.len() - 1].join("\n");
-            insta::assert_snapshot!(format!("bar_{name}_{width}"), bar);
+            snap!(format!("bar_{name}_{width}"), bar);
         }
     }
 }
@@ -464,7 +464,7 @@ fn names_with_emoji_keep_the_list_and_the_frame_aligned() {
         cols.len() >= 4 && cols.windows(2).all(|w| w[0] == w[1]),
         "{cols:?}\n{frame}"
     );
-    insta::assert_snapshot!("emoji_names_list", frame);
+    snap!("emoji_names_list", frame);
 }
 
 #[test]
@@ -514,6 +514,6 @@ fn the_name_column_takes_the_room_up_to_the_latency_and_a_dagger_marks_a_depreca
             !frame.contains("[depr.]") && !frame.contains("[\u{443}\u{441}\u{442}\u{430}\u{440}"),
             "{frame}"
         );
-        insta::assert_snapshot!(format!("name_column_{width}"), frame);
+        snap!(format!("name_column_{width}"), frame);
     }
 }

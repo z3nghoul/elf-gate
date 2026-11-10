@@ -25,7 +25,7 @@ fn main_screens_match_their_snapshot_in_every_language() {
                 continue;
             }
             let frame = draw(120, h, &mut a);
-            insta::assert_snapshot!(format!("lang_{}_{name}", lang.code()), frame);
+            snap!(format!("lang_{}_{name}", lang.code()), frame);
         }
     }
     i18n::set(Lang::Ru);
