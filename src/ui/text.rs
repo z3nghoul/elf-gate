@@ -84,16 +84,16 @@ pub fn display_name_or(raw: &str, fallback: impl FnOnce() -> String) -> String {
     }
 }
 
-/// The text cut to `cols` columns by grapheme (an `…` marks the cut) and padded with blanks
-/// to exactly `cols` columns.
-pub fn fit(text: &str, cols: usize) -> String {
+/// The text cut to `cols` columns by grapheme; an `\u{2026}` marks the cut (the end of the name
+/// goes, never the beginning).
+pub fn cut(text: &str, cols: usize) -> String {
     if cols == 0 {
         return String::new();
     }
-    let mut out = String::new();
-    let mut used = 0usize;
     let total = text.width();
     let limit = if total > cols { cols - 1 } else { cols };
+    let mut out = String::new();
+    let mut used = 0usize;
     for g in text.graphemes(true) {
         let w = g.width();
         if used + w > limit {
@@ -104,10 +104,20 @@ pub fn fit(text: &str, cols: usize) -> String {
     }
     if total > cols {
         out.push('\u{2026}');
-        used += 1;
     }
-    out.extend(std::iter::repeat_n(' ', cols.saturating_sub(used)));
     out
+}
+
+/// The text padded with blanks to exactly `cols` columns (never cut).
+pub fn pad(text: &str, cols: usize) -> String {
+    let mut out = text.to_string();
+    out.extend(std::iter::repeat_n(' ', cols.saturating_sub(text.width())));
+    out
+}
+
+/// [`cut`] and [`pad`]: exactly `cols` columns.
+pub fn fit(text: &str, cols: usize) -> String {
+    pad(&cut(text, cols), cols)
 }
 
 #[cfg(test)]

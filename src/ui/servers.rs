@@ -110,46 +110,52 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                 } else {
                     (th.muted(), "n/a".to_string(), th.muted())
                 };
-                // Separate from incompatibility: the server works, but its transport is deprecated.
-                let tag = if s.deprecated_transport().is_some() {
-                    crate::t!("tag.deprecated")
-                } else {
-                    String::new()
-                };
+                // The name takes all the room up to the latency column; a deprecated transport is
+                // marked by a dagger right after the name (the details say what it means).
                 let title = app.server_title(s);
+                let deprecated = s.deprecated_transport().is_some();
+                let content_w = (area.width as usize).saturating_sub(4); // frame and "> "
+                let right_w = 16usize.min(content_w.saturating_sub(2 + 8));
+                let name_w = content_w.saturating_sub(2 + right_w + 1).max(4);
+                let shown = crate::ui::text::cut(&title, name_w - usize::from(deprecated));
+                let name_span = Span::styled(
+                    crate::ui::text::pad(
+                        &format!("{shown}{}", if deprecated { "\u{2020}" } else { "" }),
+                        name_w,
+                    ),
+                    name_style,
+                );
+                let gap = Span::raw(" ");
                 if matches!(app.conn, Conn::Connected(id) if id == s.id) && s.is_supported() {
                     // The connected server always shows the same two numbers, in the same
                     // format: the way to it (tcp) and through the tunnel (vpn). They never swap.
-                    let room = (area.width as usize).saturating_sub(2 + 2 + 2 + 14 + 8 + 1);
                     let style = match s.vpn {
                         Ping::Ms(ms) if ms < 300 => th.good(),
                         Ping::Ms(_) => th.warn(),
                         Ping::Timeout | Ping::Error => th.bad(),
                         _ => th.muted(),
                     };
+                    let text = active_ping_text(s, right_w);
                     return ListItem::new(Line::from(vec![
                         Span::styled(marker, th.good()),
-                        Span::styled(crate::ui::text::fit(&title, 14), name_style),
-                        Span::styled(format!("{tag:<8}"), th.warn()),
-                        Span::styled(format!(" {}", active_ping_text(s, room)), style),
+                        name_span,
+                        gap,
+                        Span::styled(format!("{text:>right_w$}", right_w = right_w), style),
                     ]));
                 }
+                // The kind always takes four columns, so the latency column is straight.
+                let kind = if s.is_supported() && s.ping_at.is_some() {
+                    s.ping_kind.short()
+                } else {
+                    ""
+                };
                 ListItem::new(Line::from(vec![
                     Span::styled(marker, th.good()),
-                    Span::styled(crate::ui::text::fit(&title, 14), name_style),
-                    Span::styled(format!("{tag:<8}"), th.warn()),
+                    name_span,
+                    gap,
+                    Span::raw(" ".repeat(right_w.saturating_sub(12))),
                     Span::styled(format!("{ping_text:>8}"), ping_style),
-                    Span::styled(
-                        format!(
-                            " {}",
-                            if s.is_supported() && s.ping_at.is_some() {
-                                s.ping_kind.short()
-                            } else {
-                                ""
-                            }
-                        ),
-                        th.muted(),
-                    ),
+                    Span::styled(format!(" {kind:<3}"), th.muted()),
                 ]))
             }
         })

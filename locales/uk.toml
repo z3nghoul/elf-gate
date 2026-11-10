@@ -494,9 +494,6 @@ sort_original = "Початковий порядок серверів"
 sort_ping = "Сортування за пінгом (o - повернути порядок)"
 traffic = "↑{up}/s ↓{down}/s | VPN {pu}↑ {pd}↓ | напряму {du}↑ {dd}↓"
 
-[tag]
-deprecated = "[застар.]"
-
 [tray]
 connect = "Підключитися"
 connected = "elf-gate: підключено, {name}"

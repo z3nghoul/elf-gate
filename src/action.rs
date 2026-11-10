@@ -396,14 +396,84 @@ pub const BINDINGS: &[Binding] = &[
     },
 ];
 
-/// Maps a key press to an action. SHIFT is ignored (it is already encoded in
-/// the character, and BackTab always carries it).
-pub fn map_key(key: KeyEvent) -> Option<Action> {
-    let mods = key.modifiers - KeyModifiers::SHIFT;
+/// Physical keys of the Russian and the Ukrainian layouts: `(QWERTY, Russian, Ukrainian)`, all
+/// in lower case. A hotkey typed with a Cyrillic layout on is the binding of the QWERTY key at the
+/// same place. The bindings themselves stay in [`BINDINGS`] only; this is just the layouts.
+/// The Cyrillic characters are written as escapes (the sources keep no Cyrillic).
+pub const LAYOUT_KEYS: &[(char, char, char)] = &[
+    ('q', '\u{439}', '\u{439}'), // ru/uk: Y-short
+    ('w', '\u{446}', '\u{446}'),
+    ('e', '\u{443}', '\u{443}'),
+    ('r', '\u{43a}', '\u{43a}'),
+    ('t', '\u{435}', '\u{435}'),
+    ('y', '\u{43d}', '\u{43d}'),
+    ('u', '\u{433}', '\u{433}'),
+    ('i', '\u{448}', '\u{448}'),
+    ('o', '\u{449}', '\u{449}'),
+    ('p', '\u{437}', '\u{437}'),
+    ('[', '\u{445}', '\u{445}'),
+    (']', '\u{44a}', '\u{457}'), // ru hard sign / uk yi
+    ('a', '\u{444}', '\u{444}'),
+    ('s', '\u{44b}', '\u{456}'), // ru yery / uk i
+    ('d', '\u{432}', '\u{432}'),
+    ('f', '\u{430}', '\u{430}'),
+    ('g', '\u{43f}', '\u{43f}'),
+    ('h', '\u{440}', '\u{440}'),
+    ('j', '\u{43e}', '\u{43e}'),
+    ('k', '\u{43b}', '\u{43b}'),
+    ('l', '\u{434}', '\u{434}'),
+    (';', '\u{436}', '\u{436}'),
+    ('\'', '\u{44d}', '\u{454}'), // ru e-reverse / uk ye
+    ('z', '\u{44f}', '\u{44f}'),
+    ('x', '\u{447}', '\u{447}'),
+    ('c', '\u{441}', '\u{441}'),
+    ('v', '\u{43c}', '\u{43c}'),
+    ('b', '\u{438}', '\u{438}'),
+    ('n', '\u{442}', '\u{442}'),
+    ('m', '\u{44c}', '\u{44c}'),
+    (',', '\u{431}', '\u{431}'),
+    ('.', '\u{44e}', '\u{44e}'),
+];
+
+/// The QWERTY character on the physical key where `c` sits in the Russian or Ukrainian layout;
+/// the case is kept (capital Y-short is `Q`). Anything else is returned as it is.
+pub fn qwerty(c: char) -> char {
+    let lower = c.to_lowercase().next().unwrap_or(c);
+    let upper = lower != c;
+    match LAYOUT_KEYS
+        .iter()
+        .find(|(_, ru, uk)| *ru == lower || *uk == lower)
+    {
+        Some((q, _, _)) if upper => q.to_ascii_uppercase(),
+        Some((q, _, _)) => *q,
+        None => c,
+    }
+}
+
+fn lookup(code: KeyCode, mods: KeyModifiers) -> Option<Action> {
     BINDINGS
         .iter()
-        .find(|b| b.keys.iter().any(|(c, m)| *c == key.code && *m == mods))
+        .find(|b| b.keys.iter().any(|(c, m)| *c == code && *m == mods))
         .map(|b| b.action)
+}
+
+/// Maps a key press to an action. SHIFT is ignored (it is already encoded in the character,
+/// and BackTab always carries it). A key typed in the Russian or Ukrainian layout works as the
+/// QWERTY key in the same place (also with Ctrl). Only hotkeys come here: text fields take the
+/// characters as they are.
+pub fn map_key(key: KeyEvent) -> Option<Action> {
+    let mods = key.modifiers - KeyModifiers::SHIFT;
+    lookup(key.code, mods).or_else(|| match key.code {
+        KeyCode::Char(c) => {
+            let q = qwerty(c);
+            if q == c {
+                None
+            } else {
+                lookup(KeyCode::Char(q), mods)
+            }
+        }
+        _ => None,
+    })
 }
 
 #[cfg(test)]
@@ -434,6 +504,81 @@ mod tests {
                 assert!(!seen.contains(key), "duplicate binding {key:?}");
                 seen.push(*key);
             }
+        }
+    }
+
+    /// A character of a layout for a binding's QWERTY character, case kept.
+    fn typed(q: char, layout: usize) -> char {
+        let lower = q.to_ascii_lowercase();
+        let (_, ru, uk) = LAYOUT_KEYS
+            .iter()
+            .find(|(l, ..)| *l == lower)
+            .unwrap_or_else(|| panic!("`{q}` has no key in the layout table"));
+        let c = if layout == 0 { *ru } else { *uk };
+        if q.is_ascii_uppercase() {
+            c.to_uppercase().next().unwrap()
+        } else {
+            c
+        }
+    }
+
+    #[test]
+    fn every_letter_binding_fires_from_qwerty_russian_and_ukrainian_of_the_same_key() {
+        let mut checked = 0;
+        for b in BINDINGS {
+            for (code, mods) in b.keys {
+                let KeyCode::Char(q) = code else { continue };
+                if !LAYOUT_KEYS
+                    .iter()
+                    .any(|(l, ..)| *l == q.to_ascii_lowercase())
+                {
+                    // `/`, `?` and the like are typed the same way in every layout.
+                    assert!(!q.is_ascii_alphabetic(), "letter `{q}` has no layout key");
+                    continue;
+                }
+                for layout in 0..2 {
+                    let c = typed(*q, layout);
+                    // Shift is part of an upper-case letter, a terminal may or may not add it.
+                    for extra in [KeyModifiers::NONE, KeyModifiers::SHIFT] {
+                        if extra == KeyModifiers::SHIFT && !q.is_ascii_uppercase() {
+                            continue;
+                        }
+                        let key = KeyEvent::new(KeyCode::Char(c), *mods | extra);
+                        assert_eq!(
+                            map_key(key),
+                            Some(b.action),
+                            "{:?}: `{c}` on the key of `{q}`",
+                            b.action
+                        );
+                    }
+                }
+                checked += 1;
+            }
+        }
+        assert!(checked > 20, "{checked}");
+    }
+
+    #[test]
+    fn the_case_is_kept_and_ctrl_works_in_the_cyrillic_layouts() {
+        let k = |c, m| KeyEvent::new(KeyCode::Char(c), m);
+        // q and Q are different actions: Quit and QuitAll.
+        assert_eq!(map_key(k('\u{439}', N)), Some(Action::Quit));
+        assert_eq!(map_key(k('\u{419}', N)), Some(Action::QuitAll));
+        assert_eq!(map_key(k('\u{437}', C)), Some(Action::Privacy)); // Ctrl + the P key
+        assert_eq!(map_key(k('\u{434}', C)), Some(Action::Redraw)); // Ctrl + the L key
+        assert_eq!(map_key(k('\u{456}', N)), Some(Action::Settings)); // Ukrainian i = s
+                                                                      // A Cyrillic character on a key without a binding stays unbound.
+        assert_eq!(map_key(k('\u{44a}', N)), None);
+    }
+
+    #[test]
+    fn the_layout_table_is_consistent() {
+        let mut seen = Vec::new();
+        for (q, ru, uk) in LAYOUT_KEYS {
+            assert!(!seen.contains(q), "{q} twice");
+            seen.push(*q);
+            assert_eq!(qwerty(*ru), *q);
+            assert_eq!(qwerty(*uk), *q);
         }
     }
 }

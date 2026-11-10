@@ -174,7 +174,7 @@ mod tests {
         // Mock list: FI-1 uses ws, Finland-3 uses grpc.
         let out = draw(80, MIN_HEIGHT, &mut app);
         println!("{out}");
-        assert!(out.matches("[устар.]").count() >= 2, "{out}");
+        assert!(out.matches("\u{2020}").count() >= 2, "{out}");
 
         // Select a deprecated server: details explain it.
         app.selected = 3; // main group header, DE-1, NL-2, FI-1
