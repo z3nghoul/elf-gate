@@ -21,6 +21,10 @@ TUI-клиент для Xray-core под Windows и Linux: серверы и п�
 (релизы: https://github.com/XTLS/Xray-core/releases), для TUN на Windows ещё `wintun.dll` (лежит в архиве Xray для Windows).
 Готовая тестовая сборка для Windows собирается в CI (`elf-gate-windows-test.zip`, всё уже внутри).
 
+**Скрипты запуска TUN** лежат в `packaging/scripts/` и кладутся рядом с бинарниками: `elf-gate-tun.sh` (Linux: один раз спросит sudo,
+ставит копию Xray с `cap_net_admin` в `/usr/local/lib/elf-gate/xray`, ожидает `bin/xray` рядом) и `elf-gate-tun.bat` (Windows: запуск
+с правами администратора через UAC; в архив тестовой сборки он входит).
+
 **Linux, TUN без root.** Нужна копия Xray, принадлежащая root, с правом создавать интерфейсы; программа покажет точные команды
 (`docs/linux-tun-setup.md`), примерно:
 
