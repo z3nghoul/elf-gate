@@ -1,127 +1,163 @@
-# elf-gate
+<p align="center">
+  <b>elf-gate</b><br>
+  <sub>a terminal client for xray-core · proxy or tun · rules per site, ip and process</sub>
+</p>
 
-TUI-клиент для Xray-core под Windows и Linux: серверы и подписки, системный прокси или TUN, правила по сайтам, IP и
-процессам (например, «только Discord через VPN»), основной и запасной сервер, статистика. Спецификация: [SPEC.md](SPEC.md),
-принятые решения: [docs/decisions.md](docs/decisions.md).
+<p align="center">
+  <a href="https://github.com/z3nghoul/elf-gate/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/z3nghoul/elf-gate/ci.yml?branch=main&style=for-the-badge&labelColor=1e1e2e&label=ci"></a>
+  <a href="https://github.com/z3nghoul/elf-gate/releases/tag/v1.0.0"><img alt="release" src="https://img.shields.io/badge/release-v1.0.0-cba6f7?style=for-the-badge&labelColor=1e1e2e"></a>
+  <img alt="platforms" src="https://img.shields.io/badge/linux_·_windows-a6e3a1?style=for-the-badge&labelColor=1e1e2e">
+  <a href="LICENSE"><img alt="AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-cba6f7?style=for-the-badge&labelColor=1e1e2e"></a>
+</p>
 
-## Как это устроено
+<p align="center">
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-1e1e2e?style=flat-square&logo=rust&logoColor=fab387">
+  <img alt="ratatui" src="https://img.shields.io/badge/ratatui-1e1e2e?style=flat-square&logo=gnometerminal&logoColor=a6e3a1">
+  <img alt="Xray-core" src="https://img.shields.io/badge/Xray--core-1e1e2e?style=flat-square&logo=v2ray&logoColor=89b4fa">
+  <img alt="languages" src="https://img.shields.io/badge/ui-en_·_ru_·_uk-1e1e2e?style=flat-square&logoColor=f9e2af">
+</p>
 
-Две программы в одной папке:
+---
 
-- `elf-gate` - интерфейс в терминале. Его вы и запускаете.
-- `elf-gated` - фоновая часть без окна: держит ядро Xray, системный прокси, TUN и значок в трее. `elf-gate` сам запускает её,
-  если она не работает. Закрытие интерфейса (`q`) VPN **не отключает**; `Q` останавливает и фоновую часть.
+pick a server, press `Enter`, forget about it. servers and subscriptions, system proxy or a real tun device,
+rules by site, ip and process (like "only discord through the vpn"), a primary and a backup server, live
+traffic and latency. one keyboard-driven screen, no electron.
 
-Связь между ними: unix-сокет (`$XDG_RUNTIME_DIR/elf-gate.sock`, права 0600) или именованный канал Windows. Ссылки на серверы
-и ключи через неё не передаются.
+[SPEC.md](SPEC.md) · [decisions](docs/decisions.md)
 
-## Установка
+## ✦ quick start
 
-Положите в одну папку: `elf-gate`, `elf-gated` (на Windows с `.exe`), ядро `xray`, `geoip.dat`, `geosite.dat`
-(релизы: https://github.com/XTLS/Xray-core/releases), для TUN на Windows ещё `wintun.dll` (лежит в архиве Xray для Windows).
-Готовая тестовая сборка для Windows собирается в CI (`elf-gate-windows-test.zip`, всё уже внутри).
+grab the archive for your system from the [latest release](https://github.com/z3nghoul/elf-gate/releases/latest),
+xray-core is already inside:
 
-**Скрипты запуска TUN** лежат в `packaging/scripts/` и кладутся рядом с бинарниками: `elf-gate-tun.sh` (Linux: один раз спросит sudo,
-ставит копию Xray с `cap_net_admin` в `/usr/local/lib/elf-gate/xray`, ожидает `bin/xray` рядом) и `elf-gate-tun.bat` (Windows: запуск
-с правами администратора через UAC; в архив тестовой сборки он входит).
+```sh
+# linux
+tar xzf elf-gate-linux-x86_64.tar.gz
+cd elf-gate-linux-x86_64
+./elf-gate
+```
 
-**Linux, TUN без root.** Нужна копия Xray, принадлежащая root, с правом создавать интерфейсы; программа покажет точные команды
-(`docs/linux-tun-setup.md`), примерно:
+on windows unpack `elf-gate-windows-x86_64.zip` and run `elf-gate.exe`. then:
 
-```bash
+1. `a`, paste a server link or a subscription url, `Enter`
+2. select a server, `Enter` to connect, `d` to disconnect
+3. `t` switches proxy ↔ tun, `?` shows every key
+
+<details>
+<summary>What is in the archives</summary>
+
+| File | What it is |
+|---|---|
+| `elf-gate` | the interface you run |
+| `elf-gated` | the background part: holds the core, the system proxy, tun and the tray icon. `elf-gate` starts it by itself |
+| `xray` / `xray.exe` | xray-core 26.11.9 |
+| `geoip.dat`, `geosite.dat` | geodata for the routing rules |
+| `wintun.dll` | the tun driver library (windows only) |
+| `elf-gate-tun.sh` / `.bat` | start with tun support (see below) |
+| `locales/` | the interface strings (en, ru, uk) |
+
+</details>
+
+## ✦ features
+
+- **Proxy or tun.** system proxy (gnome, kde, windows) or a real tun interface. `t` switches.
+- **Subscriptions.** plain links, base64, json configs with chains, hwid headers, auto update. hide a server from a subscription and it stays hidden after updates.
+- **Rules.** by domain, ip, geosite, geoip and process, plus built-in presets: `discord-only`, `games-direct`, `torrents-direct`, `ru-direct`, `ua-direct` and more. exclude or include mode.
+- **Primary and backup.** the backup takes over when the primary stops answering and gives the traffic back by itself.
+- **Honest latency.** the connected server shows `31 tcp · 98 vpn` in one fixed format: tcp is the way to the server, vpn is a real request through the tunnel (median of a series, the cold first request thrown away).
+- **tls fingerprint search.** when a provider breaks the handshake, elf-gate tries the fingerprints by itself. `f` picks one by hand, `z` turns fragmentation on.
+- **Privacy mode.** `Ctrl+P` hides hosts, ips, keys and links on the screen and in the tray, for screenshots and streams.
+- **Languages.** english, русский, українська. switch in settings, applied at once. hotkeys also work on the russian and ukrainian layouts.
+- **Tray icon** with connect, disconnect, server list and mode.
+
+## ✦ how it works
+
+two programs in one folder. `elf-gate` is the terminal ui, `elf-gated` is a windowless background part. closing the ui
+with `q` keeps the vpn up, `Q` stops everything.
+
+```text
+elf-gate (tui)  ──  unix socket / named pipe, owner only  ──  elf-gated ──► xray-core
+                                                                  ├─ system proxy
+                                                                  ├─ tun
+                                                                  └─ tray icon
+```
+
+links and keys never travel through that channel. the log file is always english, secrets in it are hidden.
+
+## ✦ keys
+
+`?` in the program shows all of them, the help is built from the same table as the key handler.
+
+| Key | Action |
+|---|---|
+| `j` `k` · `↑` `↓` | move |
+| `Enter` | connect / disconnect |
+| `t` | proxy ↔ tun |
+| `a` | add a link or a subscription |
+| `p` · `o` · `u` | ping · sort by ping · update subscriptions |
+| `r` · `s` · `l` | rules · settings · log |
+| `f` · `b` · `z` | tls fingerprint · role (primary / backup) · fragmentation |
+| `Ctrl+P` · `Ctrl+L` | privacy mode · redraw the screen |
+| `q` · `Q` | close the interface · stop everything |
+
+## ✦ recipes
+
+- **Only discord.** `t` for tun, `Enter`; on the first tun start answer `y` to the `discord-only` preset. discord (voice and streams over udp too) goes through the vpn, everything else goes direct.
+- **Everything except games.** exclude mode, open rules (`r`) and turn on `games-direct` and `torrents-direct`.
+- **Two servers.** select the main one, `b` → primary; the other one, `b` → backup. connect to the primary: if it dies, traffic moves to the backup in about 10 seconds and comes back by itself.
+
+## ✦ tun
+
+**Windows.** needs administrator rights: the background part restarts itself through uac, the interface stays normal.
+
+**Linux, without running as root.** xray needs a root-owned copy with the right to create interfaces. `elf-gate-tun.sh` does it once (asks for sudo, installs the copy into `/usr/local/lib/elf-gate/`). by hand:
+
+```sh
 sudo install -o root -g root -m 755 xray /usr/local/lib/elf-gate/xray
-sudo setcap cap_net_admin+ep /usr/local/lib/elf-gate/xray
+sudo setcap cap_net_admin,cap_sys_ptrace,cap_dac_read_search+ep /usr/local/lib/elf-gate/xray
 ```
 
-**Права копии ядра на Linux.** По умолчанию копия получает три права: `cap_net_admin` (создать TUN), `cap_sys_ptrace` и
-`cap_dac_read_search` (читать сокеты и `/proc/<pid>/fd` чужих и «песочных» процессов). Без двух последних Xray не видит, кому
-принадлежит соединение у программ другого пользователя и в песочницах (Chromium/Electron, Discord из Flatpak, systemd-resolved):
-правила по процессам для них не работают, а в журнале десятки ошибок «no process found» в минуту (проверено на практике: с тремя
-правами ошибки исчезают). Права даются только копии `/usr/local/lib/elf-gate/xray`, которая принадлежит root и недоступна для
-изменения; это более широкие права, чем один `cap_net_admin`. Отказаться: `ELF_GATE_FULL_CAPS=0 ./elf-gate-tun.sh` (останется только
-`cap_net_admin`; тогда при подключении будет предупреждение, а строки «no process found» скрываются в журнале).
+the last two capabilities let xray see which program owns a connection (chromium, electron, discord from flatpak), without them process rules do not work for those. `ELF_GATE_FULL_CAPS=0 ./elf-gate-tun.sh` keeps only `cap_net_admin`. details in [docs/linux-tun-setup.md](docs/linux-tun-setup.md).
 
-**Windows, TUN.** Нужны права администратора: фоновая часть сама перезапустится через UAC (интерфейс останется обычным).
+## ✦ where things live
 
-## Клавиши
+| What | Linux | Windows |
+|---|---|---|
+| config (servers, subscriptions, settings) | `~/.config/elf-gate/config.toml` | `%APPDATA%\elf-gate\` |
+| logs and run state | `~/.local/state/elf-gate/` | next to the config |
 
-Полный список и подсказки: `?` в программе (справка строится из той же таблицы, что и обработчик клавиш).
-Главное: `Enter` подключиться, `d` отключиться, `t` PROXY/TUN, `a` добавить ссылку или подписку, `p` пинг, `o` сортировка,
-`u` обновить подписки, `r` правила, `s` настройки, `l` журнал, `f` fp, `b` роль (основной/запасной), `z` фрагментация TLS,
-`q` закрыть интерфейс, `Q` остановить всё.
+your config is never part of the repository or the archives.
 
-## Типовые сценарии
+## ✦ language
 
-- **Только Discord.** `t` (TUN), `Enter`; при первом запуске TUN ответьте `y` на вопрос про пресет `discord-only`.
-  Через VPN идёт только Discord (голос и стримы по UDP тоже), остальное напрямую.
-- **Всё, кроме игр.** Режим `exclude`, на экране правил (`r`) включите `games-direct` и `torrents-direct`.
-- **Два сервера.** Выберите основной, нажмите `b` -> «основной»; запасной -> «запасной». Подключайтесь к основному: при его отказе
-  трафик уйдёт на запасной (проверка средствами Xray, около 10 с) и вернётся сам.
-- **Если провайдер ломает рукопожатие.** Программа сама перебирает fp (firefox, chrome, ...); вручную `f`; ещё `z` (фрагментация).
+english is the default and does not depend on the system language. settings (`s`), the first row, `Enter` cycles en → ru → uk
+and applies at once, the tray included. stored as `ui.language` in `config.toml`. the strings live in `locales/*.toml`
+(the same keys in every language, tests check that).
 
-## Настройки
+## ✦ build
 
-Экран `s`: пути, порты, режимы, пинг и автопинг, User-Agent и интервал подписок, тема (тёмная/светлая), «подключаться при
-запуске» и «запускать при входе в систему». Файл `config.toml` вручную править не обязательно.
-
-## Язык интерфейса
-Доступны English (по умолчанию, не зависит от языка системы), Русский и Українська. Переключение: экран настроек (`s`), первая строка
-«Язык» (на английском «Language», на украинском «Мова»), Enter меняет язык по кругу en → ru → uk и применяет его сразу, в том числе в
-меню трея. Выбор хранится в `config.toml` как `ui.language = "en"` (`"ru"`, `"uk"`) и после перезапуска сохраняется. Файл лога всегда на
-английском. Тексты лежат в `locales/*.toml`: чтобы добавить или поправить перевод, достаточно отредактировать эти файлы (набор ключей во
-всех языках должен совпадать, это проверяют тесты).
-
-## Для разработчика
-
-### Сборка и проверки
-
-```bash
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
+```sh
+git clone https://github.com/z3nghoul/elf-gate
+cd elf-gate
+cargo build --release
 cargo test
-cargo run            # TUI
+cargo clippy --all-targets -- -D warnings
 ```
 
-### Бинарник Xray для тестов
+the tests that need a real xray look for `XRAY_PATH`, then `bin/xray`, and print `SKIPPED` if there is none.
+put xray, `geoip.dat` and `geosite.dat` into `bin/` (it is in `.gitignore`, binaries never get committed).
 
-Бинарники и `.dat`-файлы в git не коммитятся (`/bin` в `.gitignore`).
-Скачайте релиз с https://github.com/XTLS/Xray-core/releases и положите в `bin/`:
-`xray` (на Windows `xray.exe`), `geoip.dat`, `geosite.dat`.
+a windows `.exe` is built by ci on `windows-latest`. locally `cargo check --target x86_64-pc-windows-gnu` is enough;
+a full cross build needs `mingw-w64` and `rustup target add x86_64-pc-windows-gnu`.
+open points of the windows build are in [docs/windows-checklist.md](docs/windows-checklist.md).
 
-Тесты, которым нужен настоящий Xray, ищут его так:
+## ✦ license
 
-1. переменная окружения `XRAY_PATH`;
-2. иначе `bin/xray` (`bin/xray.exe` на Windows);
-3. иначе тест печатает `SKIPPED` и завершается успешно, поэтому CI без бинарника остаётся зелёным.
+elf-gate is licensed under the [GNU Affero General Public License v3.0](LICENSE). the archives also carry xray-core
+(MPL-2.0) and wintun, each with its own license file next to the binary (`LICENSE-Xray`, `LICENSE-Wintun`).
 
-```bash
-XRAY_PATH=/path/to/xray cargo test xray::integration_tests -- --nocapture
-```
+---
 
-Предупреждения Xray про deprecated тесты печатают, но не считают ошибкой.
-
-В CI на ubuntu Xray v26.11.9 скачивается автоматически, SHA256 архива сверяется с хешем,
-зашитым в `.github/workflows/ci.yml`; там же проверяется, что xray-тесты не были пропущены.
-При смене версии обновите версию и хеш вместе.
-
-### Кросс-сборка под Windows с Linux
-
-Официальная проверка Windows-сборки - CI на `windows-latest`. Локально достаточно
-`cargo check --target x86_64-pc-windows-gnu` (линковщик не нужен). Для полной сборки
-`.exe` нужен `mingw-w64` и таргет Rust:
-
-```bash
-# Arch / CachyOS
-sudo pacman -S mingw-w64-gcc
-# Debian / Ubuntu
-sudo apt install mingw-w64
-# Fedora
-sudo dnf install mingw64-gcc
-
-rustup target add x86_64-pc-windows-gnu
-cargo build --release --target x86_64-pc-windows-gnu
-# результат: target/x86_64-pc-windows-gnu/release/elf-gate.exe
-```
-
-Запуск и проверка самого `.exe` возможны только на Windows, непроверенные пункты
-ведутся в [docs/windows-checklist.md](docs/windows-checklist.md).
+<p align="center">
+  <sub>made with 💜 and too many monsters · somewhere in ukraine</sub>
+</p>
