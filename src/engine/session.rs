@@ -46,6 +46,7 @@ async fn start_core(
     store: Option<&StateStore>,
     checker: &Checker,
     backup: Option<Server>,
+    known_hosts: Vec<String>,
 ) -> Result<Core, Failure> {
     // The server must answer over TCP before anything else: afterwards, with the tunnel up,
     // this machine's own connections would go through the tunnel. The address is resolved
@@ -69,6 +70,24 @@ async fn start_core(
         None => resolve_binary(&core_cfg.xray_path).map_err(|e| e.to_string())?,
     };
     let mut plan = tun::build_plan(config, host, mode, (mode == Mode::Tun).then_some(ip));
+    if mode == Mode::Tun {
+        // Every server and subscription host stays outside the tunnel: pings, the connection
+        // itself, downloads. Resolved now, while the names still resolve normally.
+        let mut ips: Vec<String> = tun::resolve_all(&known_hosts)
+            .await
+            .iter()
+            .map(|ip| ip.to_string())
+            .collect();
+        if !ips.contains(&ip.to_string()) {
+            ips.push(ip.to_string());
+        }
+        plan.direct_ips = ips;
+        plan.direct_domains = known_hosts
+            .iter()
+            .filter(|h| h.parse::<std::net::IpAddr>().is_err())
+            .map(|h| format!("full:{h}"))
+            .collect();
+    }
     if let Some(backup) = backup {
         // In TUN mode the backup's address must be resolved now too (never through the tunnel).
         let backup_ip = if mode == Mode::Tun {
@@ -162,6 +181,24 @@ impl Engine {
                 self.show_problem(problem);
                 return;
             }
+            if !self.caps_warned {
+                let rules = crate::model::rule::effective_rules(
+                    self.config.mode.routing,
+                    &self.config.rules,
+                    &self.config.presets.enabled,
+                    &crate::model::rule::builtin_presets(),
+                    cfg!(windows),
+                );
+                let core = preflight.setup.as_ref().map(|s| s.core.clone());
+                let caps = core.and_then(|c| self.tun_host.core_capabilities(&c));
+                if let Some(text) =
+                    tun::process_caps_warning(caps.as_deref(), !rules.processes.is_empty())
+                {
+                    self.caps_warned = true;
+                    self.log(Level::Warning, "TUN: у ядра нет cap_sys_ptrace/cap_dac_read_search, правила по процессам ограничены");
+                    self.alert(Alert::Notice(text));
+                }
+            }
             // Warnings (for example a strict rp_filter) do not stop the start.
             if let Some(warning) = preflight.problems.first() {
                 self.show_problem(warning);
@@ -188,6 +225,7 @@ impl Engine {
         let run_dir = self.run_dir.clone();
         let checker = self.checker.clone();
         let backup = self.backup_for(id);
+        let known_hosts = self.known_hosts();
         if let Some(b) = &backup {
             self.log(
                 Level::Info,
@@ -213,6 +251,7 @@ impl Engine {
                 store.as_ref(),
                 &checker,
                 backup,
+                known_hosts,
             )
             .await;
             checker.flush();
@@ -229,6 +268,29 @@ impl Engine {
             };
             let _ = tx.send(ev);
         });
+    }
+
+    /// Addresses that must stay outside the tunnel: every server's host and the hosts of the
+    /// subscription URLs.
+    fn known_hosts(&self) -> Vec<String> {
+        let mut hosts: Vec<String> = Vec::new();
+        let mut add = |h: String| {
+            if !h.is_empty() && !hosts.contains(&h) {
+                hosts.push(h);
+            }
+        };
+        for s in self.subs.iter().flat_map(|g| g.servers.iter()) {
+            add(s.address.clone());
+        }
+        for sc in &self.config.subscriptions {
+            if let Some(h) = url::Url::parse(&sc.url)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_string))
+            {
+                add(h);
+            }
+        }
+        hosts
     }
 
     /// Demo servers (debug builds): no real process.
@@ -828,6 +890,27 @@ mod tests {
         assert_eq!(host.killed.lock().unwrap().as_slice(), &[777]);
         assert!(store.load().unwrap().tun.is_none());
         assert!(a.logged("TUN:"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_missing_capability_with_process_rules_warns_once_and_does_not_stop_the_start() {
+        let dir = temp_dir("caps");
+        let host = MockTunHost {
+            caps: Some("/x/xray cap_net_admin=ep".into()),
+            ..MockTunHost::healthy()
+        };
+        let (mut a, id) = tun_app(host, true, &dir);
+        a.config.ui.tun_intro_done = true;
+        a.config.rules.push(Rule::new(RuleKind::Process, "Discord"));
+        a.connect(id);
+        let notes: Vec<_> = a
+            .alerts()
+            .into_iter()
+            .filter(|x| matches!(x, Alert::Notice(t) if t.contains("cap_sys_ptrace")))
+            .collect();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(a.conn, Conn::Connecting(id), "the start went on");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

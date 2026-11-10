@@ -66,6 +66,8 @@ pub struct CoreConfig {
     pub http_port: u16,
     pub api_port: u16,
     pub log_level: String,
+    /// Detailed core log: access lines ("accepted ...") and `info` level. Off by default.
+    pub verbose_log: bool,
 }
 
 impl Default for CoreConfig {
@@ -76,6 +78,7 @@ impl Default for CoreConfig {
             http_port: 10809,
             api_port: 10085,
             log_level: "warning".into(),
+            verbose_log: false,
         }
     }
 }

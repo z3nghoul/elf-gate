@@ -13,6 +13,7 @@ pub enum SettingId {
     HttpPort,
     ApiPort,
     LogLevel,
+    VerboseLog,
     SetSystemProxy,
     PingMode,
     PingUrl,
@@ -72,6 +73,11 @@ impl AppState {
                 SettingId::LogLevel,
                 "Уровень лога ядра".into(),
                 c.core.log_level.clone(),
+            ),
+            (
+                SettingId::VerboseLog,
+                "Подробный лог ядра (access)".into(),
+                onoff(c.core.verbose_log),
             ),
             (
                 SettingId::SetSystemProxy,
@@ -158,6 +164,7 @@ impl AppState {
             options[i % options.len()].to_string()
         };
         let set = match id {
+            SettingId::VerboseLog => Setting::VerboseLog(!c.core.verbose_log),
             SettingId::SetSystemProxy => Setting::SetSystemProxy(!c.proxy.set_system_proxy),
             SettingId::AutoConnect => Setting::AutoConnect(!c.ui.auto_connect),
             SettingId::Autostart => Setting::Autostart(!self.autostart),

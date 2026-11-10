@@ -99,6 +99,7 @@ expression: cfg
     }
   ],
   "log": {
+    "access": "none",
     "loglevel": "warning"
   },
   "outbounds": [

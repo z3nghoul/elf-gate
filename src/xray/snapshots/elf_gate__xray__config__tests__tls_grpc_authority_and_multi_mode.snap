@@ -55,6 +55,7 @@ expression: "config_for(&format!(\"vless://{UUID}@g.example.com:443?security=tls
     }
   ],
   "log": {
+    "access": "none",
     "loglevel": "warning"
   },
   "outbounds": [
