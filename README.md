@@ -23,7 +23,7 @@ pick a server, press `Enter`, forget about it. servers and subscriptions, system
 rules by site, ip and process (like "only discord through the vpn"), a primary and a backup server, live
 traffic and latency. one keyboard-driven screen, no electron.
 
-[SPEC.md](SPEC.md) · [decisions](docs/decisions.md)
+**English** · [Русский](README.ru.md) · [Українська](README.uk.md) · [SPEC.md](SPEC.md) · [decisions](docs/decisions.md)
 
 <p align="center">
   <img alt="elf-gate in a terminal: servers, pings, connecting, privacy mode, rules" src="docs/demo.gif" width="100%">
@@ -58,7 +58,8 @@ on windows unpack `elf-gate-windows-x86_64.zip` and run `elf-gate.exe`. then:
 | `geoip.dat`, `geosite.dat` | geodata for the routing rules |
 | `wintun.dll` | the tun driver library (windows only) |
 | `elf-gate-tun.sh` / `.bat` | start with tun support (see below) |
-| `locales/` | the interface strings (en, ru, uk) |
+| `locales/` | copies of the interface strings (en, ru, uk), the program has them built in (linux archive) |
+| `ТЕСТ-README.txt`, `ЧЕК-ЛИСТ.txt` | tester notes and a checklist, in russian (windows archive) |
 
 </details>
 
@@ -86,7 +87,7 @@ elf-gate (tui)  ──  unix socket / named pipe, owner only  ──  elf-gated 
                                                                   └─ tray icon
 ```
 
-links and keys never travel through that channel. the log file is always english, secrets in it are hidden.
+the channel is local and open to its owner only. a link you type goes to the background part and never comes back: the interface gets views without server links, subscription urls and keys. the log file is always english, secrets in it are hidden.
 
 ## ✦ keys
 
