@@ -10,6 +10,18 @@ SRC_XRAY="$DIR/bin/xray"
 DST_DIR="/usr/local/lib/elf-gate"
 DST_XRAY="$DST_DIR/xray"
 
+# Права ядра. По умолчанию только создание TUN. С ELF_GATE_FULL_CAPS=1 ещё чтение сокетов и
+# файловых дескрипторов чужих и "песочных" процессов (Chromium, Electron, Discord из Flatpak,
+# systemd-resolved): без этого правила по процессам их не видят. Оба права даются только root-копии
+# ядра, которую никто кроме root не может изменить.
+if [[ "${ELF_GATE_FULL_CAPS:-0}" == "1" ]]; then
+    CAPS="cap_net_admin,cap_sys_ptrace,cap_dac_read_search+ep"
+    WANT_CAP="cap_sys_ptrace"
+else
+    CAPS="cap_net_admin+ep"
+    WANT_CAP="cap_net_admin"
+fi
+
 if [[ $EUID -eq 0 ]]; then
     echo "Не запускайте через sudo: настройки elf-gate окажутся у root." >&2
     exit 1
@@ -18,7 +30,7 @@ fi
 needs_setup=0
 if [[ ! -x "$DST_XRAY" ]]; then
     needs_setup=1
-elif ! getcap "$DST_XRAY" 2>/dev/null | grep -q cap_net_admin; then
+elif ! getcap "$DST_XRAY" 2>/dev/null | grep -q "$WANT_CAP"; then
     needs_setup=1
 elif [[ -f "$SRC_XRAY" ]] && ! cmp -s "$SRC_XRAY" "$DST_XRAY"; then
     # xray обновился - копию нужно обновить, setcap слетает при замене файла
@@ -41,7 +53,7 @@ if [[ $needs_setup -eq 1 ]]; then
     echo "Первичная настройка TUN (нужен пароль sudo)..."
     sudo mkdir -p "$DST_DIR"
     sudo install -o root -g root -m 0755 "$SRC_XRAY" "$DST_XRAY"
-    sudo setcap cap_net_admin+ep "$DST_XRAY"
+    sudo setcap "$CAPS" "$DST_XRAY"
     for f in "${GEO_FILES[@]}"; do
         if [[ -f "$DIR/bin/$f" ]]; then
             sudo install -o root -g root -m 0644 "$DIR/bin/$f" "$DST_DIR/$f"

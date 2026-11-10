@@ -147,6 +147,9 @@ pub trait TunHost: Send + Sync {
     fn trusted_binary(&self, path: &Path) -> Result<(), String>;
     /// Can this core create the TUN device? `None` when it cannot be told in advance.
     fn core_can_create_tun(&self, core: &Path) -> Option<bool>;
+    /// Linux: the file capabilities of the core as `getcap` prints them (`None`: unknown or not
+    /// applicable). Process rules need more than `cap_net_admin` for other users' programs.
+    fn core_capabilities(&self, core: &Path) -> Option<String>;
     /// Strict reverse-path filtering breaks "direct" traffic through the tunnel (Linux).
     fn rp_filter(&self) -> Option<RpFilter>;
     /// Upstream resolvers of the system (never loopback stubs).

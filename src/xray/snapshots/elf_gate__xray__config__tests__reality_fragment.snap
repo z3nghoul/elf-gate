@@ -55,6 +55,7 @@ expression: "on"
     }
   ],
   "log": {
+    "access": "none",
     "loglevel": "warning"
   },
   "outbounds": [

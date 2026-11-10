@@ -55,6 +55,7 @@ expression: "config_for(&format!(\"vless://{UUID}@[fd00::1]:2053?type=tcp#v6\"))
     }
   ],
   "log": {
+    "access": "none",
     "loglevel": "warning"
   },
   "outbounds": [

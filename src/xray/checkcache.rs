@@ -56,11 +56,13 @@ impl CheckCache {
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
-        Self {
-            path,
-            data,
-            dirty: false,
-        }
+        let mut data: CacheFile = data;
+        // Entries written by older versions may hold refusals caused by the environment.
+        let before = data.entries.len();
+        data.entries
+            .retain(|_, v| !v.as_deref().is_some_and(validate::is_environmental));
+        let dirty = data.entries.len() != before;
+        Self { path, data, dirty }
     }
 
     /// Switches to `version`; entries of another version are forgotten.
@@ -228,6 +230,25 @@ mod tests {
         assert_ne!(config_key(&a), config_key(&json!({"a": [1, 3], "b": 1})));
         // Pinned value: a change here would silently invalidate every user's cache.
         assert_eq!(fnv1a(b"hello"), 0xa430_d846_80aa_bd0b);
+    }
+
+    #[test]
+    fn environmental_refusals_found_in_an_old_cache_file_are_dropped_on_load() {
+        let dir = std::env::temp_dir().join(format!("elf-gate-cc2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("check-cache.json");
+        std::fs::write(
+            &path,
+            r#"{"xray_version":"v","entries":{"a":null,"b":"stat /usr/local/lib/elf-gate/geoip.dat: no such file","c":"vless without TLS"}}"#,
+        )
+        .unwrap();
+        let mut c = CheckCache::load(Some(path));
+        c.use_version("v");
+        assert_eq!(c.lookup("a"), Some(Verdict::Accepted));
+        assert_eq!(c.lookup("b"), None, "the stale environment error is gone");
+        assert!(c.lookup("c").is_some());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

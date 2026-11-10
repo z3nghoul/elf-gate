@@ -177,6 +177,26 @@ pub fn explain(problem: &Problem, config: &Config) -> String {
     }
 }
 
+/// Capabilities the core needs to see the owner of connections of OTHER users' programs and of
+/// sandboxed (non-dumpable) ones: Chromium/Electron, Discord in Flatpak, system services.
+pub const PROCESS_CAPS: &str = "cap_net_admin,cap_sys_ptrace,cap_dac_read_search+ep";
+
+/// `Some(text)` when process rules exist but the core's capabilities (as `getcap` prints them)
+/// lack what process detection needs. Not an error: the rules still work for the user's own,
+/// ordinary programs.
+pub fn process_caps_warning(caps: Option<&str>, has_process_rules: bool) -> Option<String> {
+    let caps = caps?;
+    if !has_process_rules
+        || (caps.contains("cap_sys_ptrace") && caps.contains("cap_dac_read_search"))
+    {
+        return None;
+    }
+    Some(format!(
+        "Правила по процессам: у ядра есть только {}. Без cap_sys_ptrace и cap_dac_read_search Xray не видит, какой программе принадлежит соединение, если это программа другого пользователя или программа в песочнице (Chromium, Electron, Discord из Flatpak, системные службы). Такие соединения пойдут по правилу по умолчанию, а в журнале будут ошибки «no process found».\n\nЧтобы правила работали для всех программ (выполните сами; право читать чужие файлы и сокеты даётся только root-копии ядра, которую никто кроме root изменить не может):\n  sudo setcap {PROCESS_CAPS} {LINUX_CORE_DIR}/xray\nили запустите  ELF_GATE_FULL_CAPS=1 ./elf-gate-tun.sh",
+        caps.split_whitespace().last().unwrap_or(caps)
+    ))
+}
+
 /// An Xray start error that really means "no rights".
 pub fn looks_like_missing_privileges(error_text: &str) -> bool {
     let t = error_text.to_lowercase();
@@ -221,6 +241,8 @@ pub fn build_plan(
         tun,
         vps_ip: vps_ip.map(|ip| ip.to_string()),
         failover: None,
+        direct_ips: Vec::new(),
+        direct_domains: Vec::new(),
     }
 }
 
@@ -244,6 +266,38 @@ pub async fn resolve_server(address: &str, port: u16) -> Result<IpAddr, String> 
         .or_else(|| addrs.first())
         .map(|a| a.ip())
         .ok_or_else(|| format!("для {address} нет адресов"))
+}
+
+/// Resolves every name (in parallel, a few seconds at most) and returns all addresses; names that
+/// do not resolve are skipped. Used before the tunnel exists, for the "never through the tunnel" list.
+pub async fn resolve_all(hosts: &[String]) -> Vec<IpAddr> {
+    let mut set = tokio::task::JoinSet::new();
+    for h in hosts {
+        let h = h.clone();
+        set.spawn(async move {
+            if let Ok(ip) = h.parse::<IpAddr>() {
+                return vec![ip];
+            }
+            match timeout(
+                Duration::from_secs(3),
+                tokio::net::lookup_host((h.as_str(), 443)),
+            )
+            .await
+            {
+                Ok(Ok(addrs)) => addrs.map(|a| a.ip()).collect(),
+                _ => Vec::new(),
+            }
+        });
+    }
+    let mut out: Vec<IpAddr> = Vec::new();
+    while let Some(Ok(ips)) = set.join_next().await {
+        for ip in ips {
+            if !out.contains(&ip) {
+                out.push(ip);
+            }
+        }
+    }
+    out
 }
 
 /// Is the server reachable over TCP at all? Must run before the tunnel is up: afterwards
@@ -347,6 +401,29 @@ mod tests {
             "{text}"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_capability_warning_appears_only_when_process_rules_need_more() {
+        let only_admin = Some("/usr/local/lib/elf-gate/xray cap_net_admin=ep");
+        let full = Some(
+            "/usr/local/lib/elf-gate/xray cap_net_admin,cap_dac_read_search,cap_sys_ptrace=ep",
+        );
+        let w = process_caps_warning(only_admin, true).expect("warning");
+        assert!(
+            w.contains("setcap cap_net_admin,cap_sys_ptrace,cap_dac_read_search+ep")
+                && w.contains("no process found"),
+            "{w}"
+        );
+        assert!(
+            process_caps_warning(only_admin, false).is_none(),
+            "no process rules, no warning"
+        );
+        assert!(process_caps_warning(full, true).is_none());
+        assert!(
+            process_caps_warning(None, true).is_none(),
+            "unknown: stay quiet"
+        );
     }
 
     #[test]

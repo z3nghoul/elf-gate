@@ -82,6 +82,7 @@ pub struct MockTunHost {
     pub wintun_missing: bool,
     pub untrusted: Option<String>,
     pub can_create_tun: Option<bool>,
+    pub caps: Option<String>,
     pub rp: Option<RpFilter>,
     pub dns: Vec<String>,
     pub ipv6: bool,
@@ -99,6 +100,7 @@ impl MockTunHost {
             wintun_missing: false,
             untrusted: None,
             can_create_tun: Some(true),
+            caps: None,
             rp: None,
             dns: vec!["192.168.1.1".into()],
             ipv6: true,
@@ -123,6 +125,9 @@ impl TunHost for MockTunHost {
     }
     fn core_can_create_tun(&self, _core: &Path) -> Option<bool> {
         self.can_create_tun
+    }
+    fn core_capabilities(&self, _core: &Path) -> Option<String> {
+        self.caps.clone()
     }
     fn rp_filter(&self) -> Option<RpFilter> {
         self.rp.clone()

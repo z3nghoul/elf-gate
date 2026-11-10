@@ -33,6 +33,14 @@ sudo install -o root -g root -m 755 xray /usr/local/lib/elf-gate/xray
 sudo setcap cap_net_admin+ep /usr/local/lib/elf-gate/xray
 ```
 
+**Правила по процессам на Linux.** По умолчанию копия ядра получает только `cap_net_admin`. Этого хватает для программ вашего
+пользователя, но Xray не видит, кому принадлежит соединение у программ других пользователей и в песочницах (Chromium/Electron,
+Discord из Flatpak, systemd-resolved): в журнале «no process found», такие соединения идут по правилу по умолчанию. Чтобы
+они определялись, выдайте копии ядра ещё `cap_sys_ptrace` и `cap_dac_read_search` (`ELF_GATE_FULL_CAPS=1 ./elf-gate-tun.sh` или
+`sudo setcap cap_net_admin,cap_sys_ptrace,cap_dac_read_search+ep /usr/local/lib/elf-gate/xray`). Что это даёт: чтение чужих
+`/proc/<pid>/fd` и сокетов. Копия принадлежит root и недоступна для изменения, но это более широкие права, поэтому включение
+добровольное. Если процессные правила есть, а прав нет, elf-gate один раз предупредит.
+
 **Windows, TUN.** Нужны права администратора: фоновая часть сама перезапустится через UAC (интерфейс останется обычным).
 
 ## Клавиши

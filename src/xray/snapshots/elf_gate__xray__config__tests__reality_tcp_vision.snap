@@ -55,6 +55,7 @@ expression: "config_for(&format!(\"vless://{UUID}@de.example.com:443?flow=xtls-r
     }
   ],
   "log": {
+    "access": "none",
     "loglevel": "warning"
   },
   "outbounds": [

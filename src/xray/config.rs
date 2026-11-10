@@ -220,6 +220,11 @@ pub struct Plan {
     pub tun: Option<TunPlan>,
     pub vps_ip: Option<String>,
     pub failover: Option<Failover>,
+    /// TUN: addresses that must never enter the tunnel (every server in the list: pings and the
+    /// connection itself, resolved before the tunnel exists) and host names of the same kind
+    /// (servers, subscription URLs). They go direct whatever the process detection says.
+    pub direct_ips: Vec<String>,
+    pub direct_domains: Vec<String>,
 }
 
 impl Plan {
@@ -235,6 +240,8 @@ impl Plan {
             tun: None,
             vps_ip: None,
             failover: None,
+            direct_ips: Vec::new(),
+            direct_domains: Vec::new(),
         }
     }
 
@@ -395,6 +402,17 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
         "domain": [format!("full:{}", crate::net::health::HEALTH_HOST)],
         "outboundTag": "proxy",
     }));
+    // Servers must never be reached through the tunnel (a routing loop: VPN inside the VPN).
+    // Process detection can fail (no rights to read other processes' sockets), so this rule
+    // does not depend on it.
+    if plan.tun.is_some() && !plan.direct_ips.is_empty() {
+        rules.push(json!({ "type": "field", "ip": plan.direct_ips, "outboundTag": "direct" }));
+    }
+    if plan.tun.is_some() && !plan.direct_domains.is_empty() {
+        rules.push(
+            json!({ "type": "field", "domain": plan.direct_domains, "outboundTag": "direct" }),
+        );
+    }
     // elf-gate's own traffic (subscription downloads) must not enter the tunnel in any routing
     // mode: a subscription host may be blocked, and the tunnel may be down while we update.
     if plan.tun.is_some() {
@@ -474,7 +492,13 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
         );
     }
     let mut config = json!({
-        "log": { "loglevel": core.log_level },
+        // Without `access` Xray prints every connection to the console: that stays off unless
+        // the user asks for the detailed log.
+        "log": if core.verbose_log {
+            json!({ "loglevel": if core.log_level == "warning" { "info" } else { core.log_level.as_str() } })
+        } else {
+            json!({ "loglevel": core.log_level, "access": "none" })
+        },
         "inbounds": inbounds,
         "outbounds": outbounds,
         "routing": { "domainStrategy": "IPIfNonMatch", "rules": rules },
@@ -750,6 +774,8 @@ mod tests {
             tun: tun.then(|| tun_plan(false, true)),
             vps_ip: None,
             failover: None,
+            direct_ips: Vec::new(),
+            direct_domains: Vec::new(),
         }
     }
 
@@ -851,6 +877,40 @@ mod tests {
         r.get("process")
             .and_then(Value::as_array)
             .is_some_and(|p| !p.contains(&json!("elf-gate")))
+    }
+
+    #[test]
+    fn servers_and_subscription_hosts_never_enter_the_tunnel() {
+        for mode in [RoutingMode::Exclude, RoutingMode::Include] {
+            let mut plan = plan_for(mode, &["local-direct"], &[], true);
+            plan.direct_ips = vec!["212.147.241.154".into(), "2001:db8::1".into()];
+            plan.direct_domains = vec!["full:vpn.example.com".into()];
+            let cfg = build_with(&server(), &CoreConfig::default(), &plan).unwrap();
+            let rules = cfg["routing"]["rules"].as_array().unwrap();
+            let ip_rule = rules
+                .iter()
+                .position(|r| r["ip"] == json!(["212.147.241.154", "2001:db8::1"]))
+                .expect("direct ip rule");
+            assert_eq!(rules[ip_rule]["outboundTag"], "direct");
+            let first_user = rules
+                .iter()
+                .position(|r| r.get("process").is_some())
+                .unwrap_or(rules.len());
+            assert!(ip_rule < first_user, "before process and other user rules");
+            assert!(rules
+                .iter()
+                .any(|r| r["domain"] == json!(["full:vpn.example.com"])
+                    && r["outboundTag"] == "direct"));
+        }
+        // Plain proxy mode has no tunnel to loop through.
+        let mut plan = plan_for(RoutingMode::Exclude, &[], &[], false);
+        plan.direct_ips = vec!["1.2.3.4".into()];
+        let cfg = build_with(&server(), &CoreConfig::default(), &plan).unwrap();
+        assert!(cfg["routing"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["ip"] != json!(["1.2.3.4"])));
     }
 
     #[test]

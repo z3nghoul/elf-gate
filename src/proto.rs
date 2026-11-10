@@ -48,6 +48,7 @@ pub enum Setting {
     HttpPort(u16),
     ApiPort(u16),
     LogLevel(String),
+    VerboseLog(bool),
     SetSystemProxy(bool),
     PingMode(crate::storage::PingMode),
     PingUrl(String),

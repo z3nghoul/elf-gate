@@ -116,6 +116,10 @@ impl TunHost for Host {
         Some(Elevation.is_elevated())
     }
 
+    fn core_capabilities(&self, _core: &Path) -> Option<String> {
+        None
+    }
+
     fn rp_filter(&self) -> Option<RpFilter> {
         None
     }

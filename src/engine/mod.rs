@@ -129,11 +129,14 @@ pub struct Engine {
     updating: HashSet<String>,
     /// Servers whose fingerprint search is running.
     fp_searching: HashSet<u64>,
+    /// Repeated core lines: normalized text -> (first seen, suppressed since).
+    repeats: HashMap<String, (Instant, u32, String)>,
     last_auto_check: Option<Instant>,
     last_auto_ping: Option<Instant>,
     /// When a subscription's update last failed (not retried for ten minutes).
     failed_at: HashMap<String, Instant>,
     autostart_on: bool,
+    caps_warned: bool,
     /// Polls the core's traffic counters while it runs.
     stats_task: Option<tokio::task::JoinHandle<()>>,
     last_counters: Option<(crate::xray::stats::Counters, Instant)>,
@@ -244,10 +247,12 @@ impl Engine {
             checker: Checker::new(None),
             updating: HashSet::new(),
             fp_searching: HashSet::new(),
+            repeats: HashMap::new(),
             last_auto_check: None,
             last_auto_ping: None,
             failed_at: HashMap::new(),
             autostart_on: false,
+            caps_warned: false,
             stats_task: None,
             last_counters: None,
             next_id,
@@ -359,6 +364,58 @@ impl Engine {
     }
 
     fn push_log(&mut self, line: LogLine) {
+        // The core repeats the same complaint for every connection: show it once, count the
+        // rest, and report the count when the burst ends (or every ten seconds).
+        if line.text.starts_with("[xray") {
+            let key = dedupe_key(&line.text);
+            let now = Instant::now();
+            if let Some(entry) = self.repeats.get_mut(&key) {
+                if now.duration_since(entry.0) < Duration::from_secs(10) {
+                    entry.1 += 1;
+                    return;
+                }
+                let n = entry.1;
+                *entry = (now, 0, short(&line.text));
+                if n > 0 {
+                    self.emit_log(LogLine {
+                        time: line.time.clone(),
+                        level: line.level,
+                        text: format!("… (ещё {n} раз) {}", short(&line.text)),
+                    });
+                }
+            } else {
+                if self.repeats.len() > 500 {
+                    self.repeats.clear();
+                }
+                self.repeats.insert(key, (now, 0, short(&line.text)));
+            }
+        }
+        self.emit_log(line);
+    }
+
+    /// Reports the counts of finished bursts of repeated core lines.
+    fn flush_repeats(&mut self) {
+        let now = Instant::now();
+        let due: Vec<(String, u32)> = self
+            .repeats
+            .values_mut()
+            .filter(|(at, n, _)| *n > 0 && now.duration_since(*at) >= Duration::from_secs(10))
+            .map(|e| {
+                let n = e.1;
+                e.1 = 0;
+                (e.2.clone(), n)
+            })
+            .collect();
+        for (text, n) in due {
+            self.emit_log(LogLine {
+                time: now_hms(),
+                level: Level::Info,
+                text: format!("… (ещё {n} раз) {text}"),
+            });
+        }
+    }
+
+    fn emit_log(&mut self, line: LogLine) {
         #[cfg(test)]
         self.sent.push(Update::Log(line.clone()));
         self.hub.push_log(line);
@@ -522,6 +579,7 @@ impl Engine {
     /// One tick (the loop calls it about four times a second).
     pub fn on_tick(&mut self) {
         self.poll_core();
+        self.flush_repeats();
         self.auto_update_tick();
         self.auto_ping_tick();
         if self.mock && matches!(self.conn, Conn::Connected(_)) {
@@ -1082,6 +1140,7 @@ impl Engine {
                 }
                 self.config.core.log_level = v;
             }
+            VerboseLog(v) => self.config.core.verbose_log = v,
             SetSystemProxy(v) => self.config.proxy.set_system_proxy = v,
             PingMode(m) => self.config.ping.mode = m,
             PingUrl(v) => self.config.ping.url = v,
@@ -1160,6 +1219,29 @@ impl Engine {
     }
 }
 
+/// The text of a core line without what differs between repeats (time stamps, ports, numbers).
+fn dedupe_key(text: &str) -> String {
+    let body = text.split_once(']').map_or(text, |(_, rest)| rest);
+    let mut out = String::with_capacity(body.len());
+    let mut in_digits = false;
+    for c in body.chars() {
+        if c.is_ascii_digit() {
+            if !in_digits {
+                out.push('#');
+            }
+            in_digits = true;
+        } else {
+            in_digits = false;
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn short(text: &str) -> String {
+    text.chars().take(160).collect()
+}
+
 /// Stable identity of a server for per-server overrides: `"<group>/<name>|<host>:<port>"`.
 pub fn override_key(group: &str, server: &Server) -> String {
     format!("{group}/{}|{}:{}", server.name, server.address, server.port)
@@ -1179,6 +1261,53 @@ pub fn mode_name(m: Mode) -> &'static str {
     match m {
         Mode::Proxy => "PROXY",
         Mode::Tun => "TUN",
+    }
+}
+
+#[cfg(test)]
+mod noise_tests {
+    use super::*;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    #[test]
+    fn numbers_do_not_make_lines_different() {
+        assert_eq!(
+            dedupe_key("[xray:err] 2026/11/10 [Error] no process found for inode 9616"),
+            dedupe_key("[xray:err] 2026/11/11 [Error] no process found for inode 3801271")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_repeated_core_line_is_shown_once_and_counted() {
+        let (tx, _rx) = unbounded_channel();
+        let mut e = Engine::build(tx, Config::default(), None, false);
+        let line = |n: u32| LogLine {
+            time: "00:00:00".into(),
+            level: Level::Error,
+            text: format!("[xray:err] [Error] app/router: no process found for inode {n}"),
+        };
+        for n in 0..40 {
+            e.on_bg(BgEvent::Log(line(n)));
+        }
+        let shown = e
+            .sent
+            .iter()
+            .filter(|u| matches!(u, Update::Log(l) if l.text.contains("no process found")))
+            .count();
+        assert_eq!(shown, 1, "39 repeats are suppressed");
+        // After the window the count is reported.
+        for entry in e.repeats.values_mut() {
+            entry.0 = Instant::now() - Duration::from_secs(11);
+        }
+        e.on_tick();
+        assert!(e.logged("(ещё 39 раз)"));
+        // Other lines are untouched.
+        e.on_bg(BgEvent::Log(LogLine {
+            time: "t".into(),
+            level: Level::Info,
+            text: "[xray] other".into(),
+        }));
+        assert!(e.logged("other"));
     }
 }
 

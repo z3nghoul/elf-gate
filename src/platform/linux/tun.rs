@@ -155,6 +155,21 @@ impl TunHost for Host {
             .then(|| String::from_utf8_lossy(&out.stdout).contains("cap_net_admin"))
     }
 
+    fn core_capabilities(&self, core: &Path) -> Option<String> {
+        if geteuid().is_root() {
+            return None;
+        }
+        let out = Command::new("getcap")
+            .arg(core)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
     fn rp_filter(&self) -> Option<RpFilter> {
         let iface = default_interface(&fs::read_to_string("/proc/net/route").ok()?)?;
         let read = |p: String| read_trim(&p)?.parse::<u8>().ok();
