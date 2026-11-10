@@ -67,4 +67,6 @@ jobs:
             target/release/elf-gate.exe
             target/release/elf-gated
             target/release/elf-gated.exe
+            packaging/scripts/elf-gate-tun.sh
+            packaging/scripts/elf-gate-tun.bat
           if-no-files-found: error

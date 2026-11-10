@@ -50,6 +50,7 @@ jobs:
           New-Item -ItemType Directory -Path $out | Out-Null
           Copy-Item 'target\release\elf-gate.exe' $out
           Copy-Item 'target\release\elf-gated.exe' $out
+          Copy-Item 'packaging\scripts\elf-gate-tun.bat' $out
           # wintun.dll is the TUN driver library the core loads (it must sit next to xray.exe).
           foreach ($f in 'xray.exe', 'geoip.dat', 'geosite.dat', 'wintun.dll') { Copy-Item (Join-Path $x $f) $out }
           # Xray is MPL-2.0: its license must travel with the binary.
@@ -87,7 +88,7 @@ jobs:
       - name: Guard - no server links or stray files in the package
         run: |
           $out = 'elf-gate-windows-test'
-          $allowed = @('elf-gate.exe', 'elf-gated.exe', 'xray.exe', 'geoip.dat', 'geosite.dat', 'wintun.dll', 'LICENSE-Xray', 'LICENSE-Wintun',
+          $allowed = @('elf-gate.exe', 'elf-gated.exe', 'elf-gate-tun.bat', 'xray.exe', 'geoip.dat', 'geosite.dat', 'wintun.dll', 'LICENSE-Xray', 'LICENSE-Wintun',
                        'ТЕСТ-README.txt', 'ЧЕК-ЛИСТ.txt', 'ВЕРСИЯ.txt', 'SHA256SUMS.txt')
           $present = (Get-ChildItem -Path $out -Recurse -File).Name
           $unexpected = $present | Where-Object { $allowed -notcontains $_ }
