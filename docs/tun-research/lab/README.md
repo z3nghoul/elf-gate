@@ -29,6 +29,7 @@ docs/tun-research/lab/run.sh 04-reality-udp
 SB=bin/sing-box-1.14.4/sing-box-1.14.4-linux-amd64/sing-box docs/tun-research/lab/run.sh 05-singbox-chain
 docs/tun-research/lab/run.sh 06-dns-routing
 cargo build && docs/tun-research/lab/run.sh 07-elfgate-e2e   # the real elf-gate drives TUN
+cargo build && docs/tun-research/lab/run.sh 08-elfgated-e2e  # the background part elf-gated owns TUN (stage 7.5)
 ```
 
 Сценарий 07 запускает настоящий `target/debug/elf-gate` на pty внутри лаборатории: включение TUN, правила по процессам
