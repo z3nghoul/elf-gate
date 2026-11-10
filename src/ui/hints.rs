@@ -178,16 +178,22 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
                     (_, Some(s)) if !s.is_supported() => Some("причина".into()),
                     (_, Some(s)) => Some(
                         if matches!(app.conn, Conn::Connected(c) | Conn::Connecting(c) if c == s.id) {
-                            "отключить"
+                            "отключ."
                         } else {
-                            "подключить"
+                            "подкл."
                         }
                         .into(),
                     ),
                     _ => None,
                 },
             },
-            Action::Disconnect => (on_main && connected).then(|| b.short.to_string()),
+            // On the connected server Enter already disconnects: no second key for the same thing.
+            Action::Disconnect => (on_main
+                && connected
+                && !server.is_some_and(|s| {
+                    matches!(app.conn, Conn::Connected(c) | Conn::Connecting(c) if c == s.id)
+                }))
+            .then(|| b.short.to_string()),
             Action::ToggleMode => on_main.then(|| match app.mode {
                 crate::app::Mode::Proxy => "PROXY→TUN".to_string(),
                 crate::app::Mode::Tun => "TUN→PROXY".to_string(),
@@ -212,7 +218,7 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
                 } else {
                     match (row, server) {
                         (Some(Row::Group(i)), _) => Some(
-                            if app.subs[i].is_remote { "удалить подписку" } else { "удалить группу" }.into(),
+                            if app.subs[i].is_remote { "удал. подписку" } else { "удал. группу" }.into(),
                         ),
                         (_, Some(s)) if s.hidden => Some("вернуть".into()),
                         (Some(Row::Server(i, _)), Some(_)) if app.subs[i].is_remote => Some("скрыть".into()),
@@ -235,7 +241,7 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
             Action::ShowHidden => (servers_focus
                 && group.is_some_and(|g| g.servers.iter().any(|s| s.hidden)))
             .then(|| b.short.to_string()),
-            Action::Privacy => Some(if app.privacy() { "приватность: вкл" } else { "приватность" }.into()),
+            Action::Privacy => Some(if app.privacy() { "прив.: вкл" } else { "прив." }.into()),
             Action::Toggle | Action::RoutingMode => Some(b.short.to_string()),
             Action::Up
             | Action::PageUp
@@ -263,37 +269,63 @@ fn width_of(h: &Hint) -> usize {
     h.key.chars().count() + 1 + h.text.chars().count() + 2
 }
 
-/// Fits the hints and the tail into `width` columns: the least important ones go first and a
-/// `…` shows that some were left out. Never longer than the line.
-pub fn fit(mut list: Vec<Hint>, tail: Vec<Hint>, width: usize) -> Vec<Hint> {
-    let tail_w: usize = tail.iter().map(width_of).sum();
-    let total = |l: &[Hint], ellipsis: bool| -> usize {
-        l.iter().map(width_of).sum::<usize>() + tail_w + if ellipsis { 2 } else { 0 }
+/// Most rows the key bar may take.
+pub const MAX_ROWS: usize = 3;
+
+/// The keys laid out in rows of `width` columns (at most [`MAX_ROWS`]). Whole hints only; when
+/// even three rows are not enough the least important ones are left out, a `…` shows it, and
+/// the help key always ends the last row.
+pub fn layout_hints(list: Vec<Hint>, tail: Vec<Hint>, width: usize) -> Vec<Vec<Hint>> {
+    let rows_needed = |items: &[Hint], ellipsis: bool| -> Vec<Vec<Hint>> {
+        let mut all: Vec<Hint> = items.to_vec();
+        if ellipsis {
+            all.push(plain("…", "", 1));
+        }
+        all.extend(tail.iter().cloned());
+        let mut rows: Vec<Vec<Hint>> = vec![Vec::new()];
+        let mut used = 0;
+        for h in all {
+            let w = width_of(&h);
+            if used + w > width && !rows.last().unwrap().is_empty() {
+                rows.push(Vec::new());
+                used = 0;
+            }
+            used += w;
+            rows.last_mut().unwrap().push(h);
+        }
+        rows
     };
+    let mut items = list;
     let mut dropped = false;
-    while total(&list, dropped) > width && !list.is_empty() {
+    loop {
+        let rows = rows_needed(&items, dropped);
+        if rows.len() <= MAX_ROWS || items.is_empty() {
+            return rows;
+        }
         // The least important (largest prio); among equals the one furthest right.
-        let idx = list
+        let idx = items
             .iter()
             .enumerate()
             .max_by_key(|(i, h)| (h.prio, *i))
             .map(|(i, _)| i)
             .unwrap();
-        list.remove(idx);
+        items.remove(idx);
         dropped = true;
     }
-    if dropped {
-        list.push(plain("…", "", 1));
-    }
-    list.extend(tail);
-    list
 }
 
-/// The line as text (tests and the renderer share it).
-pub fn bar_text(app: &AppState, width: usize) -> String {
+/// The rows the key bar takes at this width (the screen reserves exactly this many lines).
+pub fn rows(app: &AppState, width: usize) -> Vec<Vec<Hint>> {
     let modal = modal_hints(app).is_some();
-    let list = fit(hints(app), if modal { Vec::new() } else { tail() }, width);
-    list.iter()
+    layout_hints(
+        hints(app),
+        if modal { Vec::new() } else { tail() },
+        width.max(1),
+    )
+}
+
+fn row_text(row: &[Hint]) -> String {
+    row.iter()
         .map(|h| {
             if h.text.is_empty() {
                 h.key.clone()
@@ -303,27 +335,38 @@ pub fn bar_text(app: &AppState, width: usize) -> String {
         })
         .collect::<Vec<_>>()
         .join("  ")
-        .chars()
-        .take(width)
+}
+
+/// The bar as text, one string per row (tests and snapshots).
+pub fn bar_lines(app: &AppState, width: usize) -> Vec<String> {
+    rows(app, width)
+        .iter()
+        .map(|r| row_text(r).chars().take(width).collect())
         .collect()
 }
 
+/// All rows joined (for substring checks).
+pub fn bar_text(app: &AppState, width: usize) -> String {
+    bar_lines(app, width).join("  ")
+}
+
 pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
-    let modal = modal_hints(app).is_some();
-    let list = fit(
-        hints(app),
-        if modal { Vec::new() } else { tail() },
-        area.width as usize,
-    );
-    let mut spans = Vec::new();
-    for (i, h) in list.iter().enumerate() {
-        if i > 0 {
-            spans.push(Span::styled("  ", th.muted()));
-        }
-        spans.push(Span::styled(h.key.clone(), th.title()));
-        if !h.text.is_empty() {
-            spans.push(Span::styled(format!(" {}", h.text), th.text()));
-        }
-    }
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    let lines: Vec<Line> = rows(app, area.width as usize)
+        .iter()
+        .take(area.height.max(1) as usize)
+        .map(|row| {
+            let mut spans = Vec::new();
+            for (i, h) in row.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled("  ", th.muted()));
+                }
+                spans.push(Span::styled(h.key.clone(), th.title()));
+                if !h.text.is_empty() {
+                    spans.push(Span::styled(format!(" {}", h.text), th.text()));
+                }
+            }
+            Line::from(spans)
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), area);
 }

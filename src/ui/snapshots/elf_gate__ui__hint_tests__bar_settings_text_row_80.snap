@@ -1,0 +1,5 @@
+---
+source: src/ui/hint_tests.rs
+expression: bar
+---
+j/k выбор  Enter изменить  Ctrl+P прив.  Esc назад  ? помощь  q/Q выход

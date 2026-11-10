@@ -167,7 +167,13 @@ fn states() -> Vec<(&'static str, AppState, (u16, u16))> {
 fn every_screen_and_state_has_a_key_bar_and_matches_its_snapshot() {
     for (name, mut a, (w, h)) in states() {
         let frame = draw(w, h, &mut a);
-        let last = frame.lines().last().unwrap().trim().to_string();
+        // The bar may take up to three rows: look at all of them.
+        let n = super::hints::rows(&a, w as usize).len();
+        let frame_lines: Vec<&str> = frame.lines().collect();
+        let last = frame_lines[frame_lines.len() - n..]
+            .join(" ")
+            .trim()
+            .to_string();
         assert!(!last.is_empty(), "{name}: the key bar is empty:\n{frame}");
         let modal = matches!(name, n if n.starts_with("dialog_") || n == "filter_input");
         if !modal {
@@ -182,10 +188,6 @@ fn every_screen_and_state_has_a_key_bar_and_matches_its_snapshot() {
                 "{name}: a dialog needs its own keys, got `{last}`"
             );
         }
-        assert!(
-            last.chars().count() <= w as usize,
-            "{name}: the bar overflows"
-        );
         insta::assert_snapshot!(name, frame);
     }
 }
@@ -197,16 +199,13 @@ fn the_bar_shows_only_keys_that_work_for_the_selected_item() {
     let a = app(&[REALITY]);
     let t = text(&a);
     assert!(
-        t.contains("Enter подключить")
+        t.contains("Enter подкл.")
             && t.contains("x удалить")
             && t.contains("f fp")
             && t.contains("b роль"),
         "{t}"
     );
-    assert!(
-        !t.contains("h скрытые") && !t.contains("d отключить"),
-        "{t}"
-    );
+    assert!(!t.contains("h скрытые") && !t.contains("d отключ."), "{t}");
     // A subscription server: x hides.
     let t = text(&remote(app(&[REALITY])));
     assert!(t.contains("x скрыть") && t.contains("u подписки"), "{t}");
@@ -226,9 +225,14 @@ fn the_bar_shows_only_keys_that_work_for_the_selected_item() {
     a.conn = Conn::Connected(1);
     let t = text(&a);
     assert!(
-        t.contains("Enter отключить") && t.contains("d отключить"),
-        "{t}"
+        t.contains("Enter отключ.") && !t.contains("d отключ."),
+        "{t}: Enter already disconnects, no second key for it"
     );
+    // Connected to another server: Enter switches, d disconnects.
+    let mut b = app(&[REALITY, TLS]);
+    b.conn = Conn::Connected(2);
+    let t = text(&b);
+    assert!(t.contains("Enter подкл.") && t.contains("d отключ."), "{t}");
     // Nothing selectable: only adding (and the screens), no pings or deletes.
     let mut a = app(&[]);
     a.selected = 0;
@@ -257,24 +261,75 @@ fn the_bar_shows_only_keys_that_work_for_the_selected_item() {
 }
 
 #[test]
-fn a_narrow_window_drops_the_least_important_keys_first_and_never_wraps() {
-    let a = app(&[REALITY, TLS]);
-    for width in [120usize, 80, 60, 40, 30, 20] {
-        let t = bar_text(&a, width);
-        assert!(t.chars().count() <= width, "{width}: `{t}` is too long");
-        assert!(
-            t.contains("? помощь") || width < 30,
-            "{width}: help must stay in `{t}`"
-        );
-        assert!(
-            t.contains("q/Q выход") || width < 30,
-            "{width}: quit must stay in `{t}`"
-        );
-        if width <= 60 {
-            assert!(t.contains('…'), "{width}: the cut must be shown in `{t}`");
+fn keys_wrap_to_more_rows_before_anything_is_dropped() {
+    use super::hints::{bar_lines, rows, tail, MAX_ROWS};
+    for (name, a, _) in states() {
+        // Wide windows: nothing is left out, whatever the screen.
+        for width in [120usize, 150] {
+            let all = super::hints::hints(&a).len() + tail().len();
+            let r = rows(&a, width);
+            let shown: usize = r.iter().map(|row| row.len()).sum();
+            let text = bar_lines(&a, width).join(" ");
+            assert!(!text.contains('…'), "{name}@{width}: `{text}`");
+            let modal = a.popup.is_some() || a.filtering;
+            let expected = if modal {
+                super::hints::hints(&a).len()
+            } else {
+                all
+            };
+            assert_eq!(
+                shown, expected,
+                "{name}@{width}: every key of the screen must be visible: `{text}`"
+            );
         }
-        if (50..=60).contains(&width) {
-            assert!(t.contains("Enter"), "{width}: the main key stays in `{t}`");
+        // Every width: at most three rows, no row longer than the window, help stays last.
+        for width in [150usize, 120, 80, 60, 40] {
+            let lines = bar_lines(&a, width);
+            assert!(
+                lines.len() <= MAX_ROWS,
+                "{name}@{width}: {} rows",
+                lines.len()
+            );
+            assert!(
+                lines.iter().all(|l| l.chars().count() <= width),
+                "{name}@{width}"
+            );
+            if a.popup.is_none() && !a.filtering {
+                let last = lines.last().unwrap();
+                assert!(last.contains("q/Q"), "{name}@{width}: `{last}`");
+            }
+        }
+    }
+    // When even three rows do not hold everything the least important keys go, with a mark.
+    let (_, a, _) = states()
+        .into_iter()
+        .find(|s| s.0 == "main_manual_server")
+        .unwrap();
+    let lines = bar_lines(&a, 30);
+    assert_eq!(lines.len(), MAX_ROWS);
+    assert!(
+        lines.join(" ").contains('…') && lines.last().unwrap().contains("помощь"),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn the_bar_snapshots_at_80_120_and_150_columns() {
+    // The bottom rows only (the screens above them are snapshotted elsewhere).
+    for width in [80u16, 120, 150] {
+        for name in [
+            "main_manual_server",
+            "main_subscription_server",
+            "main_connected",
+            "rules_on_a_preset",
+            "settings_text_row",
+        ] {
+            let (_, mut a, _) = states().into_iter().find(|s| s.0 == name).unwrap();
+            let frame = draw(width, 30, &mut a);
+            let n = super::hints::rows(&a, width as usize).len();
+            let lines: Vec<&str> = frame.lines().collect();
+            let bar = lines[lines.len() - n..].join("\n");
+            insta::assert_snapshot!(format!("bar_{name}_{width}"), bar);
         }
     }
 }

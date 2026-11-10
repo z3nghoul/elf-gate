@@ -31,7 +31,9 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
             "Увеличьте окно (минимум {MIN_WIDTH}x{MIN_HEIGHT}, сейчас {}x{})",
             area.width, area.height
         );
-        let [top, bar] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
+        let key_rows = hints::rows(app, area.width as usize).len().max(1) as u16;
+        let [top, bar] =
+            Layout::vertical([Constraint::Min(1), Constraint::Length(key_rows)]).areas(area);
         f.render_widget(
             Paragraph::new(msg)
                 .style(th.warn())
@@ -42,10 +44,12 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
         return;
     }
 
+    // The key bar takes as many rows as the keys need (up to three); the panels give them up.
+    let key_rows = hints::rows(app, area.width as usize).len().max(1) as u16;
     let [body, status, keys] = Layout::vertical([
         Constraint::Min(3),
         Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(key_rows),
     ])
     .areas(area);
 
