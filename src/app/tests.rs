@@ -571,3 +571,22 @@ async fn the_details_count_connections_without_a_known_process() {
     a.process_unresolved = 0;
     assert!(!crate::ui::tests_support::draw(110, 40, &mut a).contains("не определён процесс"));
 }
+
+#[tokio::test]
+async fn a_status_message_goes_away_by_itself() {
+    let (mut a, _rx) = app_with(&[REALITY]);
+    a.on_update(Update::Status("saved".into()));
+    assert_eq!(a.status.as_deref(), Some("saved"));
+    // A fresh message survives the ticks.
+    a.handle_event(Event::Tick);
+    assert_eq!(a.status.as_deref(), Some("saved"));
+    // An old one is cleared by the next tick.
+    a.status_since =
+        Some(std::time::Instant::now() - STATUS_LIFETIME - std::time::Duration::from_secs(1));
+    a.handle_event(Event::Tick);
+    assert_eq!(a.status, None);
+    // A newer message restarts the clock.
+    a.on_update(Update::Status("again".into()));
+    a.handle_event(Event::Tick);
+    assert_eq!(a.status.as_deref(), Some("again"));
+}
