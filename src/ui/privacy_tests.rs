@@ -213,7 +213,7 @@ fn ctrl_p_and_the_setting_switch_the_mode_at_once_and_tell_the_daemon() {
     );
     let frame = draw(100, 30, &mut a);
     assert!(frame.contains("PRIVACY"), "{frame}");
-    assert!(crate::ui::hints::bar_text(&a, 200).contains("Ctrl+P приватность: вкл"));
+    assert!(crate::ui::hints::bar_text(&a, 200).contains("Ctrl+P прив.: вкл"));
     a.handle_event(crate::event::Event::Key(KeyEvent::new(
         KeyCode::Char('p'),
         KeyModifiers::CONTROL,
