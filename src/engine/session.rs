@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::net::health;
-use crate::platform;
 use crate::storage::{CoreConfig, PresetsConfig};
 use crate::tun::{self, Problem};
 use crate::xray::config::{build_with, Failover};

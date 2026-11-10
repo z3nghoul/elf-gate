@@ -728,8 +728,6 @@ impl Engine {
         }
     }
 
-    fn sort_key_unused(&self) {}
-
     // ---------- adding and removing ----------
 
     pub(crate) fn add_link(&mut self, text: String) {
@@ -1009,6 +1007,3 @@ pub fn mode_name(m: Mode) -> &'static str {
         Mode::Tun => "TUN",
     }
 }
-
-#[allow(dead_code)]
-fn _unused(_: Ping, _: Rule, _: RuleKind, _: RuleRef) {}

@@ -3,7 +3,6 @@
 //! background process as a [`View`], and everything the user changes is sent back as a [`Cmd`].
 
 use crate::action::{map_key, Action};
-use crate::build_info;
 use crate::event::{now_hms, Event, Level, LinkEvent, LogLine};
 use crate::model::rule::{builtin_presets, validate, Rule, RuleKind, RoutingMode};
 use crate::model::server::{Security, Server, ServerRole, FINGERPRINTS};

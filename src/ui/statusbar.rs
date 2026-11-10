@@ -75,8 +75,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             Span::styled(
                 format!(
                     "up {}  down {}",
-                    format_bytes(app.up_bytes),
-                    format_bytes(app.down_bytes)
+                    format_bytes(app.traffic.proxy_up + app.traffic.direct_up),
+                    format_bytes(app.traffic.proxy_down + app.traffic.direct_down)
                 ),
                 th.text(),
             ),

@@ -1,6 +1,7 @@
 //! Pinging servers and the automatic TLS fingerprint search.
 
 use super::*;
+use crate::model::server::Security;
 use crate::net::ping;
 use crate::storage::PingMode;
 use crate::xray::process::resolve_binary;
