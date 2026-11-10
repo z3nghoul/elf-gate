@@ -1,0 +1,34 @@
+---
+source: src/ui/lang_tests.rs
+expression: frame
+---
+┌ Servers ───────────────────────────────────────────┐┌ Details ───────────────────────────────────────────────────────┐
+│  ▼ manual (1)                                      ││Name:        R1                                                 │
+│>   R1                           -                  ││Protocol:    VLESS+Reality                                      │
+│                                                    ││Transport:   tcp                                                │
+│                                                    ││Address:     h.example.com:443                                  │
+│                                                    ││SNI:         x.org                                              │
+│                                                    ││Fingerprint: chrome (f - change)                                │
+│                                                    ││Fragment:    off (z - turn on)                                  │
+│                                                    ││Role:        none (b - assign primary / backup)                 │
+│                                                    ││Ping:        -                                                  │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│           ┌ Confirmation ────────────────────────────────────────────────────────────────────────────────┐           │
+│           │Delete the server «R1»?                                                                       │           │
+└───────────│                                                                                              │───────────┘
+┌ Log ──────│y / Enter - yes, n / Esc - no                                                                 │───────────┐
+│           │                                                                                              │           │
+│           │                                                                                              │           │
+│           └──────────────────────────────────────────────────────────────────────────────────────────────┘           │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+● Disconnected | PROXY                                                                                                  
+y/Enter yes  n/Esc no

@@ -64,24 +64,28 @@ pub fn is_environmental(reason: &str) -> bool {
 pub fn spawn_report(binary: &Path, cfg_file: &Path, with_env: bool) -> String {
     let dir = super::process::asset_dir(binary);
     let seen = |f: &str| match std::fs::metadata(dir.join(f)) {
-        Ok(m) => format!("{f}: {} байт", m.len()),
+        Ok(m) => crate::t!("val.bytes", file = f, n = m.len()),
         Err(e) => format!("{f}: {e}"),
     };
     let env = |k: &str| std::env::var(k).unwrap_or_else(|_| "-".into());
-    format!(
-        "argv: {} run -test -c {}; cwd: {}; XRAY_LOCATION_ASSET: {}; PATH: {}; HOME: {}; XDG_RUNTIME_DIR: {}; container/flatpak: {}/{}; родитель видит {} и {}; {}",
-        binary.display(),
-        cfg_file.display(),
-        std::env::current_dir().map_or("?".into(), |d| d.display().to_string()),
-        if with_env { dir.display().to_string() } else { "не задан".into() },
-        env("PATH"),
-        env("HOME"),
-        env("XDG_RUNTIME_DIR"),
-        env("container"),
-        env("FLATPAK_ID"),
-        seen("geoip.dat"),
-        seen("geosite.dat"),
-        platform::process_restrictions()
+    crate::t!(
+        "val.report",
+        binary = binary.display(),
+        cfg = cfg_file.display(),
+        cwd = std::env::current_dir().map_or("?".into(), |d| d.display().to_string()),
+        asset = if with_env {
+            dir.display().to_string()
+        } else {
+            crate::t!("val.unset")
+        },
+        path = env("PATH"),
+        home = env("HOME"),
+        xdg = env("XDG_RUNTIME_DIR"),
+        c1 = env("container"),
+        c2 = env("FLATPAK_ID"),
+        f1 = seen("geoip.dat"),
+        f2 = seen("geosite.dat"),
+        limits = platform::process_restrictions()
     )
 }
 
@@ -109,13 +113,14 @@ async fn run_once(binary: &Path, file: &Path, with_env: bool) -> Result<Run, Ver
     guard.prepare(&mut cmd);
     let child = cmd
         .spawn()
-        .map_err(|e| Verdict::Unavailable(format!("не удалось запустить xray: {e}")))?;
+        .map_err(|e| Verdict::Unavailable(crate::t!("val.spawn_failed", error = e)))?;
     let _ = guard.attach(&child);
     match timeout(CHECK_TIMEOUT, child.wait_with_output()).await {
-        Err(_) => Err(Verdict::Unavailable(
-            "xray run -test не завершился за 10 с".into(),
-        )),
-        Ok(Err(e)) => Err(Verdict::Unavailable(format!("ошибка ожидания xray: {e}"))),
+        Err(_) => Err(Verdict::Unavailable(crate::t!("val.timeout"))),
+        Ok(Err(e)) => Err(Verdict::Unavailable(crate::t!(
+            "val.wait_failed",
+            error = e
+        ))),
         Ok(Ok(out)) => {
             let text = format!(
                 "{}{}",
@@ -151,7 +156,11 @@ pub async fn check_config(binary: &Path, cfg: &serde_json::Value, run_dir: &Path
         )
     };
     if let Err(e) = write() {
-        return Verdict::Unavailable(format!("не удалось записать {}: {e}", file.display()));
+        return Verdict::Unavailable(crate::t!(
+            "val.write_failed",
+            path = file.display(),
+            error = e
+        ));
     }
     let with_env = !asset_env_disabled();
     let verdict = match run_once(binary, &file, with_env).await {
@@ -183,9 +192,12 @@ pub async fn check_config(binary: &Path, cfg: &serde_json::Value, run_dir: &Path
                             crate::redact::secrets(&second),
                             crate::redact::secrets(&report)
                         );
-                        Verdict::Rejected(format!(
-                            "{first}\n\nПолный вывод xray:\n{}\n\nПовтор без XRAY_LOCATION_ASSET:\n{second}\n\n{report}",
-                            r.text.trim()
+                        Verdict::Rejected(crate::t!(
+                            "val.full_output",
+                            first = first,
+                            full = r.text.trim(),
+                            second = second,
+                            report = report
                         ))
                     }
                 }

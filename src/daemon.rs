@@ -62,10 +62,9 @@ async fn start_tray(
                 }
             });
         }
-        Err(e) => engine.log(
-            crate::event::Level::Info,
-            format!("значок в трее недоступен: {e}"),
-        ),
+        Err(e) => engine.logt(crate::event::Level::Info, || {
+            crate::t!("daemon.tray_unavailable", error = e)
+        }),
     }
 }
 
@@ -97,6 +96,7 @@ pub async fn run(args: &[String]) -> i32 {
             return 1;
         }
     };
+    crate::i18n::set(config.ui.language);
 
     let proxy = Arc::new(ProxyController::new(
         platform::system_proxy(),
@@ -104,7 +104,7 @@ pub async fn run(args: &[String]) -> i32 {
     ));
     let recovered = match proxy.recover() {
         Ok(note) => note,
-        Err(e) => Some(format!("не удалось восстановить системный прокси: {e}")),
+        Err(e) => Some(crate::t!("daemon.proxy_restore_failed", error = e)),
     };
     sysproxy::set_global(proxy.clone());
     let _ = platform::shutdown_signals().install(Box::new(|| {

@@ -1,0 +1,34 @@
+---
+source: src/ui/lang_tests.rs
+expression: frame
+---
+┌ Rules ───────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│Routing mode: exclude (everything through the VPN except the rules)                                                   │
+│Traffic mode: PROXY, process rules are inactive (they work only in TUN mode)                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ Presets and your rules ──────────────────────────────────────────────────────────────────────────────────────────────┐
+│> [ ] preset  Only Discord through the VPN  (inactive in exclude mode)                                                │
+│  [ ] preset  Games and launchers direct  (processes work only in TUN)                                                │
+│  [ ] preset  Torrent clients direct  (processes work only in TUN)                                                    │
+│  [ ] preset  Russian sites direct                                                                                    │
+│  [ ] preset  Ukrainian sites direct (by a domain list)                                                               │
+│  [x] preset  Local network direct                                                                                    │
+│  [ ] preset  Block UDP 443 (QUIC)                                                                                    │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│processes: Discord, DiscordPTB, DiscordCanary, vesktop.                                                               │
+│Space on/off   a add   x delete   m exclude/include mode   Esc back                                                   │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+● Disconnected | PROXY                                                                                                  
+j/k select  a rule  Ctrl+P priv.  Space on/off  m mode  Esc back  ? help  q/Q exit

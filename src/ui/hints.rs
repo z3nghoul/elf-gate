@@ -49,14 +49,14 @@ fn plain(key: &str, text: &str, prio: u8) -> Hint {
 /// What the keys at the bottom of every screen say: help and quit.
 pub fn tail() -> Vec<Hint> {
     vec![
-        hint(Action::Help, binding(Action::Help).short),
+        hint(Action::Help, binding(Action::Help).short()),
         Hint {
             key: format!(
                 "{}/{}",
                 binding(Action::Quit).bar,
                 binding(Action::QuitAll).bar
             ),
-            text: binding(Action::Quit).short.into(),
+            text: binding(Action::Quit).short(),
             prio: 1,
             action: Some(Action::Quit),
         },
@@ -68,27 +68,37 @@ fn modal_hints(app: &AppState) -> Option<Vec<Hint>> {
     if let Some(p) = &app.popup {
         return Some(match p {
             Popup::Select { .. } => vec![
-                plain("j/k", "выбор", 2),
-                plain("Enter", "применить", 1),
-                plain("Esc", "отмена", 1),
+                plain("j/k", &crate::t!("hint.select"), 2),
+                plain("Enter", &crate::t!("hint.apply"), 1),
+                plain("Esc", &crate::t!("hint.cancel"), 1),
             ],
             Popup::Input { .. } => vec![
-                plain("Enter", "подтвердить", 1),
-                plain("Esc", "отмена", 1),
-                plain("Backspace", "стереть", 3),
+                plain("Enter", &crate::t!("hint.confirm"), 1),
+                plain("Esc", &crate::t!("hint.cancel"), 1),
+                plain("Backspace", &crate::t!("hint.erase"), 3),
             ],
             Popup::Confirm { kind, .. } => match kind {
-                ConfirmKind::Ask(_) => vec![plain("y/Enter", "да", 1), plain("n/Esc", "нет", 1)],
-                _ => vec![plain("y/Enter", "да", 1), plain("n/Esc", "нет", 1)],
+                ConfirmKind::Ask(_) => vec![
+                    plain("y/Enter", &crate::t!("hint.yes"), 1),
+                    plain("n/Esc", &crate::t!("hint.no"), 1),
+                ],
+                _ => vec![
+                    plain("y/Enter", &crate::t!("hint.yes"), 1),
+                    plain("n/Esc", &crate::t!("hint.no"), 1),
+                ],
             },
-            Popup::Error(_) | Popup::Notice(_) => vec![plain("любая клавиша", "закрыть", 1)],
+            Popup::Error(_) | Popup::Notice(_) => vec![plain(
+                &crate::t!("hint.any_key"),
+                &crate::t!("hint.close"),
+                1,
+            )],
         });
     }
     if app.filtering {
         return Some(vec![
-            plain("Enter", "принять фильтр", 1),
-            plain("Esc", "сбросить", 1),
-            plain("текст", "ввод", 3),
+            plain("Enter", &crate::t!("hint.accept_filter"), 1),
+            plain("Esc", &crate::t!("hint.reset"), 1),
+            plain(&crate::t!("hint.text"), &crate::t!("hint.typing"), 3),
         ]);
     }
     None
@@ -146,13 +156,20 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
             continue;
         }
         let text: Option<String> = match a {
-            Action::Down => Some(if logs_focus { "прокрутка" } else { "выбор" }.into()),
-            Action::PageDown | Action::Bottom => logs_focus.then(|| b.short.to_string()),
-            Action::FocusNext => Some(b.short.to_string()),
-            Action::Back => Some(b.short.to_string()),
+            Action::Down => Some(if logs_focus {
+                crate::t!("hint.scroll")
+            } else {
+                crate::t!("hint.select")
+            }),
+            Action::PageDown | Action::Bottom => logs_focus.then(|| b.short()),
+            Action::FocusNext => Some(b.short()),
+            Action::Back => Some(b.short()),
             Action::Enter => match app.screen {
                 Screen::Settings => {
-                    let kind = app.settings_rows().get(app.settings_cursor).map(|r| r.0.clone());
+                    let kind = app
+                        .settings_rows()
+                        .get(app.settings_cursor)
+                        .map(|r| r.0.clone());
                     Some(match kind {
                         Some(
                             SettingId::SetSystemProxy
@@ -162,27 +179,28 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
                             | SettingId::PingMode
                             | SettingId::Theme
                             | SettingId::LogLevel,
-                        ) => "переключить",
-                        Some(SettingId::Hwid) => "о HWID",
-                        _ => "изменить",
-                    }
-                    .into())
+                        ) => crate::t!("hint.switch"),
+                        Some(SettingId::Hwid) => crate::t!("hint.about_hwid"),
+                        _ => crate::t!("hint.edit"),
+                    })
                 }
                 _ if !servers_focus => None,
                 _ => match (row, server) {
-                    (Some(Row::Group(i)), _) => Some(
-                        if app.subs[i].collapsed { "развернуть" } else { "свернуть" }.into(),
-                    ),
-                    (_, Some(s)) if s.hidden => Some("о сервере".into()),
-                    (_, Some(s)) if s.info_only => Some("пояснение".into()),
-                    (_, Some(s)) if !s.is_supported() => Some("причина".into()),
+                    (Some(Row::Group(i)), _) => Some(if app.subs[i].collapsed {
+                        crate::t!("hint.expand")
+                    } else {
+                        crate::t!("hint.fold")
+                    }),
+                    (_, Some(s)) if s.hidden => Some(crate::t!("hint.about_server")),
+                    (_, Some(s)) if s.info_only => Some(crate::t!("hint.explain")),
+                    (_, Some(s)) if !s.is_supported() => Some(crate::t!("hint.reason")),
                     (_, Some(s)) => Some(
-                        if matches!(app.conn, Conn::Connected(c) | Conn::Connecting(c) if c == s.id) {
-                            "отключ."
+                        if matches!(app.conn, Conn::Connected(c) | Conn::Connecting(c) if c == s.id)
+                        {
+                            crate::t!("hint.disconnect")
                         } else {
-                            "подкл."
-                        }
-                        .into(),
+                            crate::t!("hint.connect")
+                        },
                     ),
                     _ => None,
                 },
@@ -190,59 +208,77 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
             // On the connected server Enter already disconnects: no second key for the same thing.
             Action::Disconnect => (on_main
                 && connected
-                && !server.is_some_and(|s| {
-                    matches!(app.conn, Conn::Connected(c) | Conn::Connecting(c) if c == s.id)
-                }))
-            .then(|| b.short.to_string()),
+                && !server.is_some_and(
+                    |s| matches!(app.conn, Conn::Connected(c) | Conn::Connecting(c) if c == s.id),
+                ))
+            .then(|| b.short()),
             Action::ToggleMode => on_main.then(|| match app.mode {
                 crate::app::Mode::Proxy => "PROXY→TUN".to_string(),
                 crate::app::Mode::Tun => "TUN→PROXY".to_string(),
             }),
-            Action::PingAll => (on_main && any_servers).then(|| b.short.to_string()),
+            Action::PingAll => (on_main && any_servers).then(|| b.short()),
             Action::SortPing => (on_main && any_servers).then(|| {
-                if app.sorted_by_ping { "порядок" } else { "по пингу" }.to_string()
+                if app.sorted_by_ping {
+                    crate::t!("hint.order")
+                } else {
+                    crate::t!("hint.by_ping")
+                }
             }),
-            Action::UpdateSubs => (on_main && app.subs.iter().any(|g| g.is_remote)).then(|| b.short.to_string()),
-            Action::Add => Some(
-                if app.screen == Screen::Rules { "правило" } else { "добавить" }.into(),
-            ),
+            Action::UpdateSubs => {
+                (on_main && app.subs.iter().any(|g| g.is_remote)).then(|| b.short())
+            }
+            Action::Add => Some(if app.screen == Screen::Rules {
+                crate::t!("hint.rule")
+            } else {
+                crate::t!("hint.add")
+            }),
             Action::Delete => {
                 if app.screen == Screen::Rules {
                     matches!(
-                        app.rule_items().get(app.rules_cursor.min(app.rule_items().len().saturating_sub(1))),
+                        app.rule_items().get(
+                            app.rules_cursor
+                                .min(app.rule_items().len().saturating_sub(1))
+                        ),
                         Some(crate::app::RuleItem::Rule(_))
                     )
-                    .then(|| "удалить".to_string())
+                    .then(|| crate::t!("hint.delete"))
                 } else if !servers_focus {
                     None
                 } else {
                     match (row, server) {
-                        (Some(Row::Group(i)), _) => Some(
-                            if app.subs[i].is_remote { "удал. подписку" } else { "удал. группу" }.into(),
-                        ),
-                        (_, Some(s)) if s.hidden => Some("вернуть".into()),
-                        (Some(Row::Server(i, _)), Some(_)) if app.subs[i].is_remote => Some("скрыть".into()),
-                        (_, Some(_)) => Some("удалить".into()),
+                        (Some(Row::Group(i)), _) => Some(if app.subs[i].is_remote {
+                            crate::t!("hint.delete_sub")
+                        } else {
+                            crate::t!("hint.delete_group")
+                        }),
+                        (_, Some(s)) if s.hidden => Some(crate::t!("hint.restore")),
+                        (Some(Row::Server(i, _)), Some(_)) if app.subs[i].is_remote => {
+                            Some(crate::t!("hint.hide"))
+                        }
+                        (_, Some(_)) => Some(crate::t!("hint.delete")),
                         _ => None,
                     }
                 }
             }
-            Action::Rules | Action::Settings | Action::Logs => on_main.then(|| b.short.to_string()),
-            Action::Filter => (on_main && any_servers).then(|| b.short.to_string()),
-            Action::Fingerprint => {
-                (servers_focus && server.is_some_and(|s| !s.hidden && tls_like(s))).then(|| b.short.to_string())
-            }
-            Action::Fragment => {
-                (servers_focus && server.is_some_and(|s| !s.hidden && tls_like(s))).then(|| b.short.to_string())
-            }
+            Action::Rules | Action::Settings | Action::Logs => on_main.then(|| b.short()),
+            Action::Filter => (on_main && any_servers).then(|| b.short()),
+            Action::Fingerprint => (servers_focus
+                && server.is_some_and(|s| !s.hidden && tls_like(s)))
+            .then(|| b.short()),
+            Action::Fragment => (servers_focus && server.is_some_and(|s| !s.hidden && tls_like(s)))
+                .then(|| b.short()),
             Action::Role => (servers_focus
                 && server.is_some_and(|s| !s.hidden && s.is_supported() && s.full.is_none()))
-            .then(|| b.short.to_string()),
+            .then(|| b.short()),
             Action::ShowHidden => (servers_focus
                 && group.is_some_and(|g| g.servers.iter().any(|s| s.hidden)))
-            .then(|| b.short.to_string()),
-            Action::Privacy => Some(if app.privacy() { "прив.: вкл" } else { "прив." }.into()),
-            Action::Toggle | Action::RoutingMode => Some(b.short.to_string()),
+            .then(|| b.short()),
+            Action::Privacy => Some(if app.privacy() {
+                crate::t!("hint.privacy_on")
+            } else {
+                b.short()
+            }),
+            Action::Toggle | Action::RoutingMode => Some(b.short()),
             Action::Up
             | Action::PageUp
             | Action::Top

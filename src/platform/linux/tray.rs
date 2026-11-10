@@ -72,23 +72,31 @@ impl ksni::Tray for Item {
             }
             .into(),
             MenuItem::Separator,
-            self.entry("Подключиться", TrayAction::Connect, !on),
-            self.entry("Отключиться", TrayAction::Disconnect, on),
+            self.entry(&self.model.text("tray.connect"), TrayAction::Connect, !on),
+            self.entry(
+                &self.model.text("tray.disconnect"),
+                TrayAction::Disconnect,
+                on,
+            ),
             SubMenu {
-                label: "Сервер".into(),
+                label: self.model.text("tray.server"),
                 enabled: !servers.is_empty(),
                 submenu: servers,
                 ..Default::default()
             }
             .into(),
             self.entry(
-                &format!("Режим: {} (переключить)", mode_label(self.model.mode)),
+                &crate::i18n::tr(
+                    self.model.lang,
+                    "tray.mode",
+                    &[("mode", mode_label(self.model.mode))],
+                ),
                 TrayAction::ToggleMode,
                 true,
             ),
-            self.entry("Открыть интерфейс", TrayAction::OpenUi, true),
+            self.entry(&self.model.text("tray.open"), TrayAction::OpenUi, true),
             MenuItem::Separator,
-            self.entry("Выход (отключить VPN)", TrayAction::Quit, true),
+            self.entry(&self.model.text("tray.quit"), TrayAction::Quit, true),
         ]
     }
 }
@@ -135,7 +143,5 @@ pub fn open_interface(program: &Path) -> Result<(), PlatformError> {
             return Ok(());
         }
     }
-    Err(PlatformError::Failed(
-        "не нашёл терминал: запустите elf-gate вручную".into(),
-    ))
+    Err(PlatformError::Failed(crate::t!("err.no_terminal")))
 }

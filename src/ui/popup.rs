@@ -39,7 +39,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 .collect();
             lines.push(Line::default());
             lines.push(Line::from(Span::styled(
-                "j/k - выбор, Enter - применить, Esc - отмена",
+                crate::t!("popup.select_hint"),
                 th.muted(),
             )));
             (app.mask(title), lines, th.border(true))
@@ -62,16 +62,16 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                     th.text(),
                 )),
                 Line::default(),
-                Line::from(Span::styled("Enter - добавить, Esc - отмена", th.muted())),
+                Line::from(Span::styled(crate::t!("popup.input_hint"), th.muted())),
             ],
             th.border(true),
         ),
         Popup::Confirm { text, .. } => (
-            "Подтверждение".to_string(),
+            crate::t!("popup.confirm_title"),
             vec![
                 Line::from(Span::styled(app.mask(text), th.text())),
                 Line::default(),
-                Line::from(Span::styled("y / Enter - да, n / Esc - нет", th.muted())),
+                Line::from(Span::styled(crate::t!("popup.confirm_hint"), th.muted())),
             ],
             th.border(true),
         ),
@@ -82,10 +82,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 .collect();
             lines.push(Line::default());
             lines.push(Line::from(Span::styled(
-                "любая клавиша - закрыть",
+                crate::t!("popup.any_key"),
                 th.muted(),
             )));
-            ("Внимание".to_string(), lines, th.warn())
+            (crate::t!("popup.notice_title"), lines, th.warn())
         }
         Popup::Error(msg) => {
             let mut lines: Vec<Line> = msg
@@ -94,10 +94,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 .collect();
             lines.push(Line::default());
             lines.push(Line::from(Span::styled(
-                "любая клавиша - закрыть",
+                crate::t!("popup.any_key"),
                 th.muted(),
             )));
-            ("Ошибка".to_string(), lines, th.bad())
+            (crate::t!("popup.error_title"), lines, th.bad())
         }
     };
     // Count wrapped lines, not just newlines: install commands are long.

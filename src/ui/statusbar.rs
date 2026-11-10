@@ -48,7 +48,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         LinkState::Connecting => {
             f.render_widget(
                 Paragraph::new(privacy_badge(vec![Span::styled(
-                    "Подключение к фоновой части...",
+                    crate::t!("status.link_connecting"),
                     th.warn(),
                 )])),
                 area,
@@ -58,7 +58,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         LinkState::Down(why) => {
             f.render_widget(
                 Paragraph::new(privacy_badge(vec![Span::styled(
-                    app.mask(&format!("Нет связи с фоновой частью: {why}. Повторяю...")),
+                    app.mask(&crate::t!("status.link_down", why = why)),
                     th.bad(),
                 )])),
                 area,
@@ -68,26 +68,28 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         LinkState::Up => {}
     }
     let (dot_style, text) = match &app.conn {
-        Conn::Disconnected => (th.muted(), "Отключено".to_string()),
+        Conn::Disconnected => (th.muted(), crate::t!("status.disconnected")),
         Conn::Connecting(id) => (
             th.warn(),
-            format!(
-                "Подключение: {}",
-                app.server_by_id(*id)
+            crate::t!(
+                "status.connecting",
+                name = app
+                    .server_by_id(*id)
                     .map(|s| s.name.as_str())
                     .unwrap_or("?")
             ),
         ),
         Conn::Connected(id) => (
             th.good(),
-            format!(
-                "Подключено: {}",
-                app.server_by_id(*id)
+            crate::t!(
+                "status.connected",
+                name = app
+                    .server_by_id(*id)
                     .map(|s| s.name.as_str())
                     .unwrap_or("?")
             ),
         ),
-        Conn::Error(e) => (th.bad(), app.mask(&format!("Ошибка: {e}"))),
+        Conn::Error(e) => (th.bad(), app.mask(&crate::t!("status.error", error = e))),
     };
     let sep = Span::styled(" | ", th.muted());
     let mut spans = vec![
@@ -104,14 +106,14 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         spans.extend([
             sep.clone(),
             Span::styled(
-                format!(
-                    "↑{}/s ↓{}/s | VPN {}↑ {}↓ | напрямую {}↑ {}↓",
-                    format_bytes(t.speed_up),
-                    format_bytes(t.speed_down),
-                    format_bytes(t.proxy_up),
-                    format_bytes(t.proxy_down),
-                    format_bytes(t.direct_up),
-                    format_bytes(t.direct_down),
+                crate::t!(
+                    "status.traffic",
+                    up = format_bytes(t.speed_up),
+                    down = format_bytes(t.speed_down),
+                    pu = format_bytes(t.proxy_up),
+                    pd = format_bytes(t.proxy_down),
+                    du = format_bytes(t.direct_up),
+                    dd = format_bytes(t.direct_down),
                 ),
                 th.text(),
             ),

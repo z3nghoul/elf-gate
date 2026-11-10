@@ -277,7 +277,7 @@ impl AppState {
             }
             Update::Status(s) => self.status = Some(s),
             Update::Bye => {
-                self.link = LinkState::Down("фоновая часть остановлена".into());
+                self.link = LinkState::Down(crate::t!("app.link_stopped"));
             }
         }
     }
@@ -299,6 +299,9 @@ impl AppState {
             mock,
             ..
         } = view;
+        if !cfg!(test) {
+            crate::i18n::set(config.ui.language);
+        }
         let collapsed: Vec<String> = self
             .subs
             .iter()
@@ -574,11 +577,18 @@ impl AppState {
                 }
             },
             Popup::Confirm { text, kind } => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Char('д') | KeyCode::Enter => {
+                KeyCode::Char('y')
+                | KeyCode::Char('Y')
+                | KeyCode::Char('\u{434}')
+                | KeyCode::Enter => {
                     self.confirm(kind);
                     self.show_next_alert();
                 }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('н') | KeyCode::Esc => {
+                KeyCode::Char('n')
+                | KeyCode::Char('N')
+                | KeyCode::Char('\u{43d}')
+                | KeyCode::Char('\u{442}')
+                | KeyCode::Esc => {
                     self.decline(kind);
                     self.show_next_alert();
                 }
@@ -620,7 +630,7 @@ impl AppState {
             Quit => {
                 if matches!(self.conn, Conn::Connected(_) | Conn::Connecting(_)) {
                     self.popup = Some(Popup::Confirm {
-                        text: "Закрыть интерфейс? Подключение продолжит работать в фоне.\n(Q - выйти и отключить VPN)".into(),
+                        text: crate::t!("confirm.quit"),
                         kind: ConfirmKind::Quit,
                     });
                 } else {
@@ -629,7 +639,7 @@ impl AppState {
             }
             QuitAll => {
                 self.popup = Some(Popup::Confirm {
-                    text: "Отключить VPN и остановить фоновую часть?".into(),
+                    text: crate::t!("confirm.quit_all"),
                     kind: ConfirmKind::QuitAll,
                 });
             }
@@ -648,14 +658,11 @@ impl AppState {
             SortPing => {
                 self.sorted_by_ping = !self.sorted_by_ping;
                 self.selected = 0;
-                self.status = Some(
-                    if self.sorted_by_ping {
-                        "Сортировка по пингу (o - вернуть порядок)"
-                    } else {
-                        "Исходный порядок серверов"
-                    }
-                    .into(),
-                );
+                self.status = Some(if self.sorted_by_ping {
+                    crate::t!("status.sort_ping")
+                } else {
+                    crate::t!("status.sort_original")
+                });
             }
             UpdateSubs => self.send(Cmd::UpdateSubs),
             Add => {
@@ -663,7 +670,7 @@ impl AppState {
                     self.rules_add_menu();
                 } else {
                     self.popup = Some(Popup::Input {
-                        title: "Ссылка на сервер или подписку".into(),
+                        title: crate::t!("popup.add_title"),
                         buf: String::new(),
                         purpose: InputPurpose::Link,
                     })
@@ -734,14 +741,11 @@ impl AppState {
         let next = !self.privacy();
         // At once, without waiting for the answer: a screenshot must not catch the old state.
         self.config.ui.privacy_mode = next;
-        self.status = Some(
-            if next {
-                "Режим приватности включён: адреса, ключи и ссылки скрыты на экране (файлы и конфиг не меняются)"
-            } else {
-                "Режим приватности выключен"
-            }
-            .into(),
-        );
+        self.status = Some(if next {
+            crate::t!("status.privacy_on")
+        } else {
+            crate::t!("status.privacy_off")
+        });
         self.send(Cmd::Set(crate::proto::Setting::PrivacyMode(next)));
     }
 
@@ -862,26 +866,23 @@ impl AppState {
                 let live =
                     matches!(self.conn, Conn::Connected(c) | Conn::Connecting(c) if c == s.id);
                 let stop = if live {
-                    "\n\nСервер сейчас подключён: подключение будет остановлено."
+                    crate::t!("confirm.live_server")
                 } else {
-                    ""
+                    String::new()
                 };
                 let (text, kind) = if s.hidden {
                     (
-                        format!("Вернуть сервер «{}» в подписку?", s.name),
+                        crate::t!("confirm.unhide", name = s.name),
                         ConfirmKind::UnhideServer(s.id),
                     )
                 } else if remote {
                     (
-                        format!(
-                            "Скрыть сервер «{}»? Он не вернётся при обновлении подписки (вернуть: h на подписке, затем x на сервере).{stop}",
-                            s.name
-                        ),
+                        crate::t!("confirm.hide", name = s.name, stop = stop),
                         ConfirmKind::HideServer(s.id),
                     )
                 } else {
                     (
-                        format!("Удалить сервер «{}»?{stop}", s.name),
+                        crate::t!("confirm.delete_server", name = s.name, stop = stop),
                         ConfirmKind::DeleteServer(s.id),
                     )
                 };
@@ -891,13 +892,13 @@ impl AppState {
                 let g = &self.subs[i];
                 let live = matches!(self.conn, Conn::Connected(c) | Conn::Connecting(c) if g.servers.iter().any(|s| s.id == c));
                 self.popup = Some(Popup::Confirm {
-                    text: format!(
-                        "Удалить «{}» со всеми серверами и скрытыми?{}",
-                        g.name,
-                        if live {
-                            "\n\nПодключение к её серверу будет остановлено."
+                    text: crate::t!(
+                        "confirm.delete_group",
+                        name = g.name,
+                        stop = if live {
+                            crate::t!("confirm.live_group")
                         } else {
-                            ""
+                            String::new()
                         }
                     ),
                     kind: ConfirmKind::DeleteGroup(g.name.clone()),
@@ -919,14 +920,12 @@ impl AppState {
             .find(|g| g.name == name)
             .map_or(0, |g| g.servers.iter().filter(|s| s.hidden).count());
         if count == 0 {
-            self.status = Some("В этой подписке нет скрытых серверов".into());
+            self.status = Some(crate::t!("status.no_hidden"));
             return;
         }
         if !self.show_hidden.remove(&name) {
             self.show_hidden.insert(name);
-            self.status = Some(format!(
-                "Скрытых серверов: {count}. x на скрытом возвращает его, h скрывает список"
-            ));
+            self.status = Some(crate::t!("status.hidden_shown", count = count));
         }
         self.clamp_selection();
     }
@@ -958,26 +957,23 @@ impl AppState {
 
     fn open_fingerprint_menu(&mut self) {
         let Some(server) = self.selected_server() else {
-            self.status = Some("Выберите сервер (не группу)".into());
+            self.status = Some(crate::t!("status.pick_server"));
             return;
         };
         if server.full.is_some() {
-            self.status = Some(
-                "У готового конфига провайдера fp не меняется (цепочка переносится как есть)"
-                    .into(),
-            );
+            self.status = Some(crate::t!("status.fp_full"));
             return;
         }
         if !server.is_supported() || !matches!(server.security, Security::Tls | Security::Reality) {
-            self.status = Some("fp применим только к серверам с TLS или Reality".into());
+            self.status = Some(crate::t!("status.fp_tls_only"));
             return;
         }
         let from_link = if server.tls.fingerprint.is_empty() {
-            "по умолчанию"
+            crate::t!("menu.fp_default")
         } else {
-            &server.tls.fingerprint
+            server.tls.fingerprint.clone()
         };
-        let mut options = vec![format!("как в ссылке ({from_link})")];
+        let mut options = vec![crate::t!("menu.fp_from_link", link = from_link)];
         options.extend(FINGERPRINTS.iter().map(|f| f.to_string()));
         let selected = server
             .fp_override
@@ -994,14 +990,11 @@ impl AppState {
 
     fn open_role_menu(&mut self) {
         let Some(server) = self.selected_server() else {
-            self.status = Some("Выберите сервер (не группу)".into());
+            self.status = Some(crate::t!("status.pick_server"));
             return;
         };
         if !server.is_supported() || server.full.is_some() {
-            self.status = Some(
-                "Роль можно назначить только серверу из ссылки (не готовому конфигу провайдера)"
-                    .into(),
-            );
+            self.status = Some(crate::t!("status.role_link_only"));
             return;
         }
         let selected = match server.role {
@@ -1010,11 +1003,11 @@ impl AppState {
             Some(ServerRole::Backup) => 2,
         };
         self.popup = Some(Popup::Select {
-            title: format!("Роль сервера: {}", server.name),
+            title: crate::t!("menu.role_title", name = server.name),
             options: vec![
-                "нет".into(),
-                "основной (всегда первым)".into(),
-                "запасной (если основной недоступен)".into(),
+                crate::t!("menu.role_none"),
+                crate::t!("menu.role_primary"),
+                crate::t!("menu.role_backup"),
             ],
             selected,
             kind: SelectKind::Role(server.id),
@@ -1023,15 +1016,14 @@ impl AppState {
 
     fn toggle_fragment(&mut self) {
         let Some(server) = self.selected_server() else {
-            self.status = Some("Выберите сервер (не группу)".into());
+            self.status = Some(crate::t!("status.pick_server"));
             return;
         };
         if server.full.is_some()
             || !server.is_supported()
             || !matches!(server.security, Security::Tls | Security::Reality)
         {
-            self.status =
-                Some("Фрагментация применима только к серверам из ссылки с TLS или Reality".into());
+            self.status = Some(crate::t!("status.fragment_tls_only"));
             return;
         }
         let (id, on) = (server.id, !server.fragment);
@@ -1062,7 +1054,7 @@ impl AppState {
 
     /// Shown in the details pane when the connection check fails although the server answers
     /// over TCP (the check only starts after a successful TCP probe).
-    pub fn fp_hint(&self) -> Option<&'static str> {
+    pub fn fp_hint(&self) -> Option<String> {
         let Conn::Connected(id) = self.conn else {
             return None;
         };
@@ -1075,9 +1067,9 @@ impl AppState {
             && server.unsupported.is_none();
         Some(
             if fp_matters && server.effective_fingerprint() != "firefox" {
-                "Сервер доступен, но запрос через него не прошёл. Попробуйте fp=firefox (клавиша f)"
+                crate::t!("fphint.retry")
             } else {
-                "Сервер доступен, но трафик не проходит. Проверьте ключ, SNI, shortId и порт на сервере"
+                crate::t!("fphint.no_traffic")
             },
         )
     }
@@ -1137,8 +1129,7 @@ impl AppState {
         match self.current_rule_item() {
             Some(RuleItem::Rule(i)) => self.send(Cmd::DeleteRule(i)),
             Some(RuleItem::Preset(_)) => {
-                self.status =
-                    Some("Встроенный пресет нельзя удалить, его можно выключить (Space)".into());
+                self.status = Some(crate::t!("status.preset_undeletable"));
             }
             None => {}
         }
@@ -1154,14 +1145,14 @@ impl AppState {
 
     fn rules_add_menu(&mut self) {
         self.popup = Some(Popup::Select {
-            title: "Новое правило".into(),
+            title: crate::t!("menu.rule_title"),
             options: vec![
-                "Процесс: выбрать из запущенных".into(),
-                "Процесс: ввести имя".into(),
-                "Домен".into(),
-                "IP-адрес или сеть (CIDR)".into(),
-                "Набор geosite".into(),
-                "Набор geoip".into(),
+                crate::t!("menu.rule_pick_process"),
+                crate::t!("menu.rule_type_process"),
+                crate::t!("menu.rule_domain"),
+                crate::t!("menu.rule_ip"),
+                crate::t!("menu.rule_geosite"),
+                crate::t!("menu.rule_geoip"),
             ],
             selected: 0,
             kind: SelectKind::NewRuleKind,
@@ -1173,13 +1164,10 @@ impl AppState {
             0 => {
                 let names = self.tun_host.running_processes();
                 if names.is_empty() {
-                    self.popup = Some(Popup::Notice(
-                        "Не удалось получить список запущенных программ. Введите имя вручную."
-                            .into(),
-                    ));
+                    self.popup = Some(Popup::Notice(crate::t!("popup.no_processes")));
                 } else {
                     self.popup = Some(Popup::Select {
-                        title: "Запущенные программы (имя файла, как его видит ядро)".into(),
+                        title: crate::t!("popup.processes_title"),
                         options: names,
                         selected: 0,
                         kind: SelectKind::RuleProcess,
@@ -1194,14 +1182,14 @@ impl AppState {
             _ => RuleKind::Geoip,
         };
         let hint = match kind {
-            RuleKind::Process => "Имя процесса (Discord, steam), регистр важен",
-            RuleKind::Domain => "Домен (example.com, с поддоменами)",
-            RuleKind::Ip => "IP или сеть (10.0.0.0/8)",
-            RuleKind::Geosite => "Набор geosite (category-ru)",
-            RuleKind::Geoip => "Набор geoip (ru)",
+            RuleKind::Process => crate::t!("hint.rule_process"),
+            RuleKind::Domain => crate::t!("hint.rule_domain"),
+            RuleKind::Ip => crate::t!("hint.rule_ip"),
+            RuleKind::Geosite => crate::t!("hint.rule_geosite"),
+            RuleKind::Geoip => crate::t!("hint.rule_geoip"),
         };
         self.popup = Some(Popup::Input {
-            title: hint.into(),
+            title: hint,
             buf: String::new(),
             purpose: InputPurpose::Rule(kind),
         });
@@ -1220,13 +1208,13 @@ impl AppState {
                     .iter()
                     .any(|r: &Rule| r.kind == kind && r.value == value)
                 {
-                    self.popup = Some(Popup::Error("Такое правило уже есть".into()));
+                    self.popup = Some(Popup::Error(crate::t!("popup.rule_exists")));
                     return;
                 }
                 self.cursor_to_end = true;
                 self.send(Cmd::AddRule { kind, value });
             }
-            Err(e) => self.popup = Some(Popup::Error(format!("Правило не добавлено: {e}"))),
+            Err(e) => self.popup = Some(Popup::Error(crate::t!("popup.rule_rejected", error = e))),
         }
     }
 }

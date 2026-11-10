@@ -124,20 +124,13 @@ impl TunHost for Host {
             fs::canonicalize(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let meta = fs::metadata(&real).map_err(|e| format!("{}: {e}", real.display()))?;
         if !meta.is_file() {
-            return Err(format!("{} не файл", real.display()));
+            return Err(crate::t!("err.not_a_file", path = real.display()));
         }
         let unsafe_entry = |m: &fs::Metadata, p: &Path| -> Option<String> {
             if m.uid() != 0 {
-                Some(format!(
-                    "{} принадлежит не root (uid {})",
-                    p.display(),
-                    m.uid()
-                ))
+                Some(crate::t!("err.not_root", path = p.display(), uid = m.uid()))
             } else if m.mode() & 0o022 != 0 {
-                Some(format!(
-                    "{} доступен на запись группе или всем",
-                    p.display()
-                ))
+                Some(crate::t!("err.group_writable", path = p.display()))
             } else {
                 None
             }

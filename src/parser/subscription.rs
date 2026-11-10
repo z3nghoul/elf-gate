@@ -5,17 +5,23 @@ use super::parse_link;
 use crate::model::server::Server;
 use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD};
 use base64::Engine;
-use thiserror::Error;
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum SubscriptionError {
-    #[error(
-        "подписка в формате JSON не распознана (ожидается массив конфигов Xray или список ссылок)"
-    )]
     Json,
-    #[error("в подписке нет ни одной ссылки на сервер")]
     Empty,
 }
+
+impl std::fmt::Display for SubscriptionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&match self {
+            SubscriptionError::Json => crate::t!("parse.sub_json"),
+            SubscriptionError::Empty => crate::t!("parse.sub_empty"),
+        })
+    }
+}
+
+impl std::error::Error for SubscriptionError {}
 
 /// Servers parsed from a subscription plus how many lines were skipped as garbage.
 #[derive(Debug)]

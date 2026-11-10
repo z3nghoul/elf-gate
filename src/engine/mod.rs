@@ -168,6 +168,9 @@ impl Engine {
     pub(crate) fn build(tx: BgTx, config: Config, storage: Option<Storage>, mock: bool) -> Self {
         // The device id exists from the first moment (the settings show it at once).
         let mut config = config;
+        if !cfg!(test) {
+            crate::i18n::set(config.ui.language);
+        }
         let hwid_created = config.device.hwid.is_empty();
         if hwid_created {
             config.device.hwid = crate::net::device::generate_hwid();
@@ -380,6 +383,19 @@ impl Engine {
         });
     }
 
+    /// A message of the application itself: the screen gets it in the current language, the log
+    /// file always in English.
+    pub fn logt(&mut self, level: Level, make: impl Fn() -> String) {
+        let text = make();
+        let file = crate::i18n::with_lang(crate::i18n::Lang::En, make);
+        tracing::info!(target: "app", "{}", crate::redact::secrets(&file));
+        self.push_log(LogLine {
+            time: now_hms(),
+            level,
+            text,
+        });
+    }
+
     fn push_log(&mut self, line: LogLine) {
         // The core repeats the same complaint for every connection: show it once, count the
         // rest, and report the count when the burst ends (or every ten seconds).
@@ -407,7 +423,7 @@ impl Engine {
                     self.emit_log(LogLine {
                         time: line.time.clone(),
                         level: line.level,
-                        text: format!("… (ещё {n} раз) {}", short(&line.text)),
+                        text: crate::t!("eng.repeat", n = n, text = short(&line.text)),
                     });
                 }
             } else {
@@ -424,7 +440,11 @@ impl Engine {
     fn flush_process_noise(&mut self) {
         let (since, n) = self.process_unresolved_logged;
         if n > 0 && since.elapsed() >= Duration::from_secs(60) {
-            tracing::info!(target: "app", "не определён процесс у {n} соединений за последнюю минуту");
+            tracing::info!(
+                target: "app",
+                "{}",
+                crate::i18n::with_lang(crate::i18n::Lang::En, || crate::t!("eng.noise_log", n = n))
+            );
             self.process_unresolved_logged = (Instant::now(), 0);
         }
     }
@@ -446,7 +466,7 @@ impl Engine {
             self.emit_log(LogLine {
                 time: now_hms(),
                 level: Level::Info,
-                text: format!("… (ещё {n} раз) {text}"),
+                text: crate::t!("eng.repeat", n = n, text = text),
             });
         }
     }
@@ -551,13 +571,11 @@ impl Engine {
         }
         let core = &self.config.core;
         if !handle.controller.is_supported() {
-            let hint = format!(
-                "Системный прокси не поддерживается в этом окружении. Настройте вручную: \
-                 SOCKS5 127.0.0.1:{}, HTTP 127.0.0.1:{}. Либо используйте режим TUN (t).",
-                core.socks_port, core.http_port
-            );
-            self.log(Level::Warning, hint.clone());
-            self.status(hint);
+            let (socks, http) = (core.socks_port, core.http_port);
+            self.logt(Level::Warning, || {
+                crate::t!("eng.no_sysproxy", socks = socks, http = http)
+            });
+            self.status(crate::t!("eng.no_sysproxy", socks = socks, http = http));
             return;
         }
         let handle = self.proxy.as_ref().expect("checked above");
@@ -697,13 +715,13 @@ impl Engine {
                     self.proxy_active = false;
                     self.proxy_requested = false;
                     self.log(Level::Error, format!("[Error] system proxy: {e}"));
-                    self.error_alert(format!("Системный прокси: {e}"));
+                    self.error_alert(crate::t!("eng.sysproxy_alert", error = e));
                 }
             },
             BgEvent::ServerRejected { id, reason } => self.mark_rejected(id, &reason),
             BgEvent::ConnectFailed { id, reason } => {
                 if self.conn == Conn::Connecting(id) {
-                    self.conn = Conn::Error("не удалось подключиться".into());
+                    self.conn = Conn::Error(crate::t!("eng.connect_failed"));
                     self.log(Level::Error, format!("[Error] {reason}"));
                     self.error_alert(reason);
                 }
@@ -767,7 +785,7 @@ impl Engine {
             }
             (Ask::RelaunchElevated, true) => self.restart_elevated(),
             (Ask::RelaunchElevated, false) => {
-                self.status("Без прав администратора режим TUN не запустить");
+                self.status(crate::t!("eng.no_admin_tun"));
             }
             (Ask::ApplyRules(id), true) => self.connect(id),
             (Ask::ApplyRules(_), false) => {}
@@ -817,7 +835,7 @@ impl Engine {
             crate::tun::mark_down(store);
         }
         self.request_proxy_off();
-        self.conn = Conn::Error("ядро завершилось".into());
+        self.conn = Conn::Error(crate::t!("eng.core_exited"));
         self.log(
             Level::Error,
             format!(
@@ -828,7 +846,11 @@ impl Engine {
         );
         let last: Vec<&str> = info.tail.lines().rev().take(6).collect();
         let last = last.into_iter().rev().collect::<Vec<_>>().join("\n");
-        self.error_alert(format!("Ядро Xray завершилось ({}).\n\n{last}", info.code));
+        self.error_alert(crate::t!(
+            "eng.core_exited_alert",
+            code = info.code,
+            last = last
+        ));
     }
 
     fn toggle_mode(&mut self) {
@@ -837,7 +859,7 @@ impl Engine {
             Mode::Tun => Mode::Proxy,
         };
         if next == Mode::Tun && !crate::build_info::TUN_AVAILABLE {
-            self.status("Режим TUN в этой версии недоступен");
+            self.status(crate::t!("eng.tun_unavailable"));
             return;
         }
         self.mode = next;
@@ -930,7 +952,7 @@ impl Engine {
 
     fn add_manual_server(&mut self, mut server: Server) {
         if self.config.servers.iter().any(|e| e.link == server.link) {
-            self.error_alert("Этот сервер уже добавлен");
+            self.error_alert(crate::t!("eng.server_dup"));
             return;
         }
         self.next_id += 1;
@@ -955,7 +977,7 @@ impl Engine {
             }),
         }
         self.log(Level::Info, format!("added server {name}"));
-        self.status(format!("Добавлен: {name}"));
+        self.status(crate::t!("eng.server_added", name = name));
         self.save_config();
     }
 
@@ -989,10 +1011,9 @@ impl Engine {
                     .hidden
                     .push(crate::storage::HiddenServer { group, key });
             }
-            self.log(
-                Level::Info,
-                format!("сервер «{name}» скрыт (вернуть: h на подписке)"),
-            );
+            self.logt(Level::Info, || {
+                crate::t!("eng.server_hidden_log", name = name)
+            });
             self.save_config();
             return;
         }
@@ -1025,7 +1046,9 @@ impl Engine {
         self.config
             .hidden
             .retain(|h| !(h.group == group && h.key == key));
-        self.log(Level::Info, format!("сервер «{name}» возвращён в подписку"));
+        self.logt(Level::Info, || {
+            crate::t!("eng.server_restored_log", name = name)
+        });
         self.save_config();
     }
 
@@ -1075,14 +1098,13 @@ impl Engine {
             .flat_map(|s| s.servers.iter_mut())
             .filter(|s| s.id == id)
         {
-            server.unsupported = Some(format!("Xray отверг конфиг: {reason}"));
+            server.unsupported = Some(crate::t!("eng.xray_rejected", reason = reason));
             name = Some(server.name.clone());
         }
         if let Some(name) = name {
-            self.log(
-                Level::Warning,
-                format!("[Warning] {name}: Xray отверг конфиг: {reason}"),
-            );
+            self.logt(Level::Warning, || {
+                crate::t!("eng.xray_rejected_log", name = name, reason = reason)
+            });
         }
     }
 
@@ -1211,7 +1233,7 @@ impl Engine {
         self.save_config();
         if matches!(self.conn, Conn::Connected(c) | Conn::Connecting(c) if c == id) {
             if self.busy {
-                self.status("fp сохранён, применится при следующем подключении");
+                self.status(crate::t!("eng.fp_saved"));
             } else {
                 self.connect(id);
             }
@@ -1227,7 +1249,7 @@ impl Engine {
             XrayPath(v) => self.config.core.xray_path = v,
             TunXrayPath(v) => self.config.tun.xray_path = v,
             SocksPort(p) | HttpPort(p) | ApiPort(p) if !port_ok(p) => {
-                self.error_alert("Порт должен быть от 1024 до 65535");
+                self.error_alert(crate::t!("eng.port_range"));
                 return;
             }
             SocksPort(p) => self.config.core.socks_port = p,
@@ -1235,7 +1257,7 @@ impl Engine {
             ApiPort(p) => self.config.core.api_port = p,
             LogLevel(v) => {
                 if !["debug", "info", "warning", "error", "none"].contains(&v.as_str()) {
-                    self.error_alert("Уровень лога: debug, info, warning, error или none");
+                    self.error_alert(crate::t!("eng.log_level_values"));
                     return;
                 }
                 self.config.core.log_level = v;
@@ -1248,7 +1270,7 @@ impl Engine {
             PingAutoIntervalSecs(v) => self.config.ping.auto_interval_secs = v,
             TunName(v) => {
                 if v.is_empty() || v.len() > 15 {
-                    self.error_alert("Имя интерфейса: от 1 до 15 символов");
+                    self.error_alert(crate::t!("eng.iface_name"));
                     return;
                 }
                 self.config.tun.name = v;
@@ -1256,6 +1278,10 @@ impl Engine {
             TunnelDns(v) => self.config.tun.tunnel_dns = v,
             AutoConnect(v) => self.config.ui.auto_connect = v,
             PrivacyMode(v) => self.config.ui.privacy_mode = v,
+            Language(lang) => {
+                self.config.ui.language = lang;
+                crate::i18n::set(lang);
+            }
             Theme(v) => {
                 if v != "dark" && v != "light" {
                     return;
@@ -1270,7 +1296,7 @@ impl Engine {
                             cmd.extend(sp.args);
                             cmd
                         })
-                        .ok_or_else(|| "не найден путь к программе".to_string())
+                        .ok_or_else(|| crate::t!("eng.no_exe_path"))
                         .and_then(|cmd| {
                             crate::platform::autostart()
                                 .enable(&cmd)
@@ -1284,14 +1310,20 @@ impl Engine {
                 match result {
                     Ok(()) => self.autostart_on = on,
                     Err(e) => {
-                        self.error_alert(format!("Автозапуск: {e}"));
+                        self.error_alert(crate::t!("eng.autostart_alert", error = e));
                         return;
                     }
                 }
-                self.log(
-                    Level::Info,
-                    format!("автозапуск при входе: {}", if on { "вкл" } else { "выкл" }),
-                );
+                self.logt(Level::Info, || {
+                    crate::t!(
+                        "eng.autostart_log",
+                        state = if on {
+                            crate::t!("eng.state_on")
+                        } else {
+                            crate::t!("eng.state_off")
+                        }
+                    )
+                });
                 return;
             }
             SubscriptionUserAgent { name, value } => {
@@ -1316,7 +1348,7 @@ impl Engine {
             }
         }
         self.save_config();
-        self.status("Настройка сохранена (порты и пути применятся при следующем подключении)");
+        self.status(crate::t!("eng.setting_saved"));
     }
 }
 
@@ -1485,6 +1517,25 @@ mod settings_tests {
         assert_eq!(saved.core.socks_port, 2000);
         assert_eq!(saved.ui.theme, "light");
         assert_eq!(saved.ping.auto_interval_secs, 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn the_language_is_applied_at_once_saved_and_english_by_default() {
+        use crate::i18n::Lang;
+        let dir = std::env::temp_dir().join(format!("elf-gate-lang-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (tx, _rx) = unbounded_channel();
+        let mut e = Engine::build(tx, Config::default(), Some(Storage::new(&dir)), false);
+        assert_eq!(e.config.ui.language, Lang::En);
+        e.handle_cmd(Cmd::Set(Setting::Language(Lang::Uk)));
+        assert_eq!(crate::i18n::current(), Lang::Uk);
+        assert_eq!(Storage::new(&dir).load().unwrap().ui.language, Lang::Uk);
+        // The file log is English whatever the screen language is.
+        e.handle_cmd(Cmd::Set(Setting::Language(Lang::Ru)));
+        assert_eq!(crate::i18n::current(), Lang::Ru);
+        let text = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(text.contains("language = \"ru\""), "{text}");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

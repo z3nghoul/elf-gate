@@ -7,6 +7,7 @@ pub mod build_info;
 pub mod daemon;
 pub mod engine;
 pub mod event;
+pub mod i18n;
 pub mod ipc;
 pub mod mock;
 pub mod model;

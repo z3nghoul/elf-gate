@@ -68,9 +68,7 @@ impl Privileges for Elevation {
         if result.0 as isize > 32 {
             Ok(())
         } else {
-            Err(PlatformError::Failed(
-                "запуск с правами администратора отменён или не удался".into(),
-            ))
+            Err(PlatformError::Failed(crate::t!("err.elevation_cancelled")))
         }
     }
 }

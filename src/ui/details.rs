@@ -18,19 +18,19 @@ fn field<'a>(label: &str, value: String, th: &Theme) -> Line<'a> {
 /// Current fingerprint with its origin: override, link value or Xray's default.
 fn fingerprint_label(s: &Server) -> String {
     let from_link = if s.tls.fingerprint.is_empty() {
-        "не задан".to_string()
+        crate::t!("fp.unset")
     } else {
         s.tls.fingerprint.clone()
     };
     match &s.fp_override {
         Some(o) if s.fp_auto => {
-            format!("{o} (подобран автоматически; в ссылке: {from_link}; f - сменить)")
+            crate::t!("fp.auto", fp = o, link = from_link)
         }
-        Some(o) => format!("{o} (выбран; в ссылке: {from_link}; f - сменить)"),
+        Some(o) => crate::t!("fp.chosen", fp = o, link = from_link),
         None if s.tls.fingerprint.is_empty() && s.security == Security::Reality => {
-            "chrome (по умолчанию; f - сменить)".to_string()
+            crate::t!("fp.default")
         }
-        None => format!("{from_link} (f - сменить)"),
+        None => crate::t!("fp.from_link", link = from_link),
     }
 }
 
@@ -42,33 +42,37 @@ fn opt<'a>(lines: &mut Vec<Line<'a>>, label: &str, value: &str, th: &Theme) {
 }
 
 fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
-    let mut lines = vec![field("Имя:", s.name.clone(), th)];
+    let mut lines = vec![field(&crate::t!("detail.name"), s.name.clone(), th)];
     if let Some(reason) = &s.unsupported {
         lines.push(Line::from(Span::styled(reason.clone(), th.warn())));
-        opt(&mut lines, "Ссылка:", &s.link, th);
+        opt(&mut lines, &crate::t!("detail.link"), &s.link, th);
         return lines;
     }
     lines.push(field(
-        "Протокол:",
+        &crate::t!("detail.protocol"),
         format!("VLESS+{}", s.security.label()),
         th,
     ));
-    lines.push(field("Транспорт:", s.transport.label().into(), th));
+    lines.push(field(
+        &crate::t!("detail.transport"),
+        s.transport.label().into(),
+        th,
+    ));
     if let Some(note) = s.deprecated_transport() {
         lines.push(Line::from(Span::styled(note, th.warn())));
     }
     if let Some(f) = &s.full {
         lines.push(field(
-            "Цепочка:",
-            format!("готовый конфиг провайдера, узлов: {}", f.hops),
+            &crate::t!("detail.chain"),
+            crate::t!("detail.chain_value", count = f.hops),
             th,
         ));
     }
     lines.push(field(
-        if s.full.is_some() {
-            "Первый узел:"
+        &if s.full.is_some() {
+            crate::t!("detail.first_hop")
         } else {
-            "Адрес:"
+            crate::t!("detail.address")
         },
         s.host_port(),
         th,
@@ -76,11 +80,7 @@ fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
     opt(&mut lines, "UUID:", &s.uuid, th);
     opt(&mut lines, "Flow:", &s.flow, th);
     if s.flow.contains("vision") {
-        lines.push(field(
-            "QUIC:",
-            "UDP/443 закрыт самим Xray (flow=vision), пресет block-quic не нужен".into(),
-            th,
-        ));
+        lines.push(field("QUIC:", crate::t!("detail.quic_note"), th));
     }
     if !s.encryption.eq_ignore_ascii_case("none") {
         let short: String = s.encryption.chars().take(28).collect();
@@ -92,11 +92,11 @@ fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
     }
     if matches!(s.security, Security::Tls | Security::Reality) {
         lines.push(field(
-            "Фрагмент:",
+            &crate::t!("detail.fragment"),
             if s.fragment {
-                "включена (z - выключить)".into()
+                crate::t!("detail.fragment_on")
             } else {
-                "выключена (z - включить)".into()
+                crate::t!("detail.fragment_off")
             },
             th,
         ));
@@ -106,22 +106,22 @@ fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
     opt(&mut lines, "ShortId:", &s.tls.short_id, th);
     opt(&mut lines, "SpiderX:", &s.tls.spider_x, th);
     if s.tls.allow_insecure {
-        lines.push(field("Insecure:", "да".into(), th));
+        lines.push(field("Insecure:", crate::t!("detail.yes"), th));
     }
     opt(&mut lines, "Path:", &s.params.path, th);
     opt(&mut lines, "Host:", &s.params.host, th);
     opt(&mut lines, "Mode:", &s.params.mode, th);
     opt(&mut lines, "Service:", &s.params.service_name, th);
     lines.push(field(
-        "Роль:",
+        &crate::t!("detail.role"),
         match s.role {
-            Some(r) => format!("{} (b - сменить)", r.label()),
-            None => "нет (b - назначить основной / запасной)".into(),
+            Some(r) => crate::t!("detail.role_set", role = r.label()),
+            None => crate::t!("detail.role_none"),
         },
         th,
     ));
     lines.push(field(
-        "Пинг:",
+        &crate::t!("detail.ping"),
         if s.ping_at.is_some() {
             format!(
                 "{} ({})",
@@ -144,20 +144,24 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             if app.conn == crate::app::Conn::Connected(app.subs[i].servers[j].id) {
                 match &app.health {
                     crate::app::HealthState::Checking => {
-                        l.push(field("Проверка:", "идёт...".into(), th));
+                        l.push(field(
+                            &crate::t!("detail.check"),
+                            crate::t!("detail.check_running"),
+                            th,
+                        ));
                     }
                     crate::app::HealthState::Ok(d) => {
                         l.push(Line::from(vec![
-                            Span::styled(format!("{:<13}", "Проверка:"), th.muted()),
+                            Span::styled(format!("{:<13}", crate::t!("detail.check")), th.muted()),
                             Span::styled(
-                                format!("трафик идёт через сервер ({} мс)", d.as_millis()),
+                                crate::t!("detail.check_ok", ms = d.as_millis()),
                                 th.good(),
                             ),
                         ]));
                     }
                     crate::app::HealthState::Failed(e) => {
                         l.push(Line::from(Span::styled(
-                            app.mask(&format!("Проверка не прошла: {e}")),
+                            app.mask(&crate::t!("detail.check_failed", error = e)),
                             th.bad(),
                         )));
                     }
@@ -165,11 +169,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 }
                 if app.process_unresolved > 0 {
                     l.push(field(
-                        "Без процесса:",
-                        format!(
-                            "не определён процесс: {} соединений",
-                            app.process_unresolved
-                        ),
+                        &crate::t!("detail.no_process"),
+                        crate::tn!("detail.no_process_value", app.process_unresolved),
                         th,
                     ));
                 }
@@ -182,12 +183,16 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         Some(Row::Group(i)) => {
             let sub = &app.subs[i];
             let mut l = vec![
-                field("Подписка:", sub.name.clone(), th),
-                field("Серверов:", sub.servers.len().to_string(), th),
+                field(&crate::t!("detail.sub"), sub.name.clone(), th),
+                field(
+                    &crate::t!("detail.servers"),
+                    sub.servers.len().to_string(),
+                    th,
+                ),
             ];
             if let Some(info) = &sub.info {
                 l.push(field(
-                    "Трафик:",
+                    &crate::t!("detail.traffic"),
                     if info.total > 0 {
                         format!(
                             "{} / {}",
@@ -195,18 +200,18 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                             format_bytes(info.total)
                         )
                     } else {
-                        format!("{} (лимит не указан)", format_bytes(info.used()))
+                        crate::t!("detail.traffic_nolimit", used = format_bytes(info.used()))
                     },
                     th,
                 ));
                 if let Some(expire) = info.expire {
-                    l.push(field("Истекает:", format_date(expire), th));
+                    l.push(field(&crate::t!("detail.expires"), format_date(expire), th));
                 }
             }
             if sub.is_remote {
                 l.push(field(
-                    "Обновлено:",
-                    sub.updated.map_or("ещё не обновлялась".to_string(), |t| {
+                    &crate::t!("detail.updated"),
+                    sub.updated.map_or(crate::t!("detail.never_updated"), |t| {
                         format!("{} UTC", format_datetime(t))
                     }),
                     th,
@@ -215,14 +220,17 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             l
         }
         None => vec![Line::from(Span::styled(
-            "Нет серверов. Нажмите a",
+            crate::t!("detail.none"),
             th.muted(),
         ))],
     };
     f.render_widget(
         Paragraph::new(lines).wrap(Wrap { trim: false }).block(
             Block::bordered()
-                .title(Span::styled(" Детали ", th.title()))
+                .title(Span::styled(
+                    format!(" {} ", crate::t!("detail.title")),
+                    th.title(),
+                ))
                 .border_style(th.border(focused)),
         ),
         area,

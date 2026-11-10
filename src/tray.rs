@@ -29,16 +29,24 @@ pub struct TrayModel {
     pub servers: Vec<(u64, String)>,
     pub active: Option<u64>,
     pub mode: TrafficMode,
+    /// The language of the menu texts (the tray is drawn on its own thread).
+    pub lang: crate::i18n::Lang,
 }
 
 impl TrayModel {
+    /// A menu text in the language of this model.
+    pub fn text(&self, key: &str) -> String {
+        crate::i18n::tr(self.lang, key, &[])
+    }
+
     pub fn initial() -> Self {
         Self {
             state: IconState::Off,
-            title: "elf-gate: не подключено".into(),
+            title: crate::i18n::tr(crate::i18n::Lang::default(), "tray.off", &[]),
             servers: Vec::new(),
             active: None,
             mode: TrafficMode::Proxy,
+            lang: crate::i18n::Lang::default(),
         }
     }
 }
@@ -52,19 +60,21 @@ pub fn model_from_view(v: &View) -> TrayModel {
             .map(|s| s.name.clone())
             .unwrap_or_default()
     };
+    let lang = v.config.ui.language;
+    let tr = |key: &str, args: &[(&str, &str)]| crate::i18n::tr(lang, key, args);
     let (state, title, active) = match &v.conn {
-        Conn::Disconnected => (IconState::Off, "elf-gate: не подключено".to_string(), None),
+        Conn::Disconnected => (IconState::Off, tr("tray.off", &[]), None),
         Conn::Connecting(id) => (
             IconState::Connecting,
-            format!("elf-gate: подключение к {}", name_of(*id)),
+            tr("tray.connecting", &[("name", &name_of(*id))]),
             Some(*id),
         ),
         Conn::Connected(id) => (
             IconState::On,
-            format!("elf-gate: подключено, {}", name_of(*id)),
+            tr("tray.connected", &[("name", &name_of(*id))]),
             Some(*id),
         ),
-        Conn::Error(e) => (IconState::Error, format!("elf-gate: ошибка, {e}"), None),
+        Conn::Error(e) => (IconState::Error, tr("tray.error", &[("error", e)]), None),
     };
     // Privacy mode covers the tray too (its title can carry an error text with an address).
     let title = if v.config.ui.privacy_mode {
@@ -84,6 +94,7 @@ pub fn model_from_view(v: &View) -> TrayModel {
             .collect(),
         active,
         mode: v.mode,
+        lang,
     }
 }
 

@@ -114,18 +114,14 @@ pub fn drop_missing(rules: &mut EffectiveRules, geo: &Geo) -> Vec<String> {
     let mut warnings = Vec::new();
     rules.domains.retain(|d| match d.strip_prefix("geosite:") {
         Some(name) if !geo.has_geosite(name) => {
-            warnings.push(format!(
-                "в geosite.dat нет набора «{name}»: правило пропущено"
-            ));
+            warnings.push(crate::t!("err.geosite_missing", name = name));
             false
         }
         _ => true,
     });
     let mut keep_ip = |ip: &String| match ip.strip_prefix("geoip:") {
         Some(name) if !geo.has_geoip(name) => {
-            warnings.push(format!(
-                "в geoip.dat нет набора «{name}»: правило пропущено"
-            ));
+            warnings.push(crate::t!("err.geoip_missing", name = name));
             false
         }
         _ => true,

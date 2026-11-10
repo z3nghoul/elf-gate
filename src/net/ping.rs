@@ -129,7 +129,7 @@ pub async fn url_probe(
     run_dir: &Path,
 ) -> Result<Duration, String> {
     let _permit = CORE_PERMITS.acquire().await.ok();
-    let (socks, http) = free_ports().ok_or("нет свободных портов")?;
+    let (socks, http) = free_ports().ok_or_else(|| crate::t!("net.no_ports"))?;
     let probe_core = CoreConfig {
         socks_port: socks,
         http_port: http,
@@ -183,7 +183,7 @@ async fn request_through(socks_port: u16, url: &str, limit: Duration) -> Result<
         if resp.status().is_success() {
             Ok(started.elapsed())
         } else {
-            Err(format!("ответ {}", resp.status()))
+            Err(crate::t!("net.http_reply", status = resp.status()))
         }
     };
     get().await?;
@@ -191,7 +191,7 @@ async fn request_through(socks_port: u16, url: &str, limit: Duration) -> Result<
     for _ in 0..SAMPLES {
         samples.push(get().await?);
     }
-    median(samples).ok_or_else(|| "нет замеров".to_string())
+    median(samples).ok_or_else(|| crate::t!("net.no_samples"))
 }
 
 /// Maps a probe outcome to the label shown in the server list.

@@ -103,7 +103,7 @@ pub fn subscriptions(next_id: &mut u64) -> Vec<Subscription> {
                 ),
                 make_server(
                     id(),
-                    "Финляндия-3",
+                    "Finland-3",
                     "fi3.example.com",
                     Security::Tls,
                     Transport::Grpc,

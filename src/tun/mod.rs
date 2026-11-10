@@ -120,11 +120,11 @@ pub fn preflight(host: &dyn TunHost, config: &Config) -> Preflight {
 pub fn install_commands(current_core: Option<&Path>, dest_dir: &str) -> Vec<String> {
     let src = current_core
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "/путь/к/xray".into());
+        .unwrap_or_else(|| crate::t!("tun.path_to_xray"));
     let src_dir = current_core
         .and_then(|p| p.parent())
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "/путь/к".into());
+        .unwrap_or_else(|| crate::t!("tun.path_to"));
     vec![
         format!("sudo install -d -m 0755 -o root -g root {dest_dir}"),
         format!("sudo install -m 0755 -o root -g root '{src}' {dest_dir}/xray"),
@@ -137,43 +137,28 @@ pub fn install_commands(current_core: Option<&Path>, dest_dir: &str) -> Vec<Stri
 /// the user has to do something by hand.
 pub fn explain(problem: &Problem, config: &Config) -> String {
     let normal_core = resolve_binary(&config.core.xray_path).ok();
+    let cmds = || install_commands(normal_core.as_deref(), LINUX_CORE_DIR).join("\n  ");
     match problem {
-        Problem::CoreMissing(p) if cfg!(windows) => format!(
-            "Не найден xray.exe для режима TUN: {}. Положите его рядом с elf-gate.exe.",
-            p.display()
-        ),
-        Problem::CoreMissing(p) => format!(
-            "Для режима TUN нужна копия Xray, принадлежащая root: {} не найден.\n\nУстановка (выполните сами, elf-gate sudo не вызывает):\n  {}\n\nЗапасной путь: запустить  sudo elf-gate  (конфиг останется в вашей домашней папке).",
-            p.display(),
-            install_commands(normal_core.as_deref(), LINUX_CORE_DIR).join("\n  ")
-        ),
-        Problem::GeodataMissing(dir) => format!(
-            "Рядом с ядром для режима TUN нет geoip.dat и/или geosite.dat: {}.\nКопия ядра ищет их только рядом с собой.\n\nУстановка (выполните сами, elf-gate sudo не вызывает):\n  {}",
-            dir.display(),
-            install_commands(normal_core.as_deref(), LINUX_CORE_DIR).join("\n  ")
-        ),
-        Problem::NoTunDevice => {
-            "Нет /dev/net/tun. Загрузите модуль: sudo modprobe tun (или включите поддержку TUN в ядре/контейнере).".into()
+        Problem::CoreMissing(p) if cfg!(windows) => {
+            crate::t!("tun.core_missing_win", path = p.display())
         }
-        Problem::MissingWintun(p) => format!(
-            "Для режима TUN нужен wintun.dll рядом с xray.exe: {} не найден. Он лежит в официальном архиве Xray (Xray-windows-64.zip).",
-            p.display()
-        ),
-        Problem::UntrustedCore { path, reason } => format!(
-            "Ядро для режима TUN {} небезопасно: {reason}. Запускать с повышенными правами можно только копию, которую никто кроме root не может изменить.\n\nУстановка (выполните сами):\n  {}",
-            path.display(),
-            install_commands(normal_core.as_deref(), LINUX_CORE_DIR).join("\n  ")
-        ),
-        Problem::NeedsPrivileges if cfg!(windows) => {
-            "Режиму TUN нужны права администратора. Перезапустить elf-gate с правами администратора?".into()
+        Problem::CoreMissing(p) => crate::t!("tun.core_missing", path = p.display(), cmds = cmds()),
+        Problem::GeodataMissing(dir) => {
+            crate::t!("tun.geodata_missing", dir = dir.display(), cmds = cmds())
         }
-        Problem::NeedsPrivileges => format!(
-            "У Xray нет прав создавать TUN-интерфейс.\n\nОднократно выполните:\n  sudo setcap {PROCESS_CAPS} {LINUX_CORE_DIR}/xray\nлибо запустите  sudo elf-gate  (конфиг останется в вашей домашней папке)."
+        Problem::NoTunDevice => crate::t!("tun.no_device"),
+        Problem::MissingWintun(p) => crate::t!("tun.wintun_missing", path = p.display()),
+        Problem::UntrustedCore { path, reason } => crate::t!(
+            "tun.untrusted",
+            path = path.display(),
+            reason = reason,
+            cmds = cmds()
         ),
-        Problem::RpFilterStrict(rp) => format!(
-            "Предупреждение: на интерфейсе {iface} включён строгий rp_filter (1). Трафик «напрямую» через TUN может зависать.\nПроверьте и, если нужно, выполните сами:\n  sudo sysctl -w net.ipv4.conf.all.rp_filter=2 net.ipv4.conf.{iface}.rp_filter=2\nelf-gate эти настройки не меняет.",
-            iface = rp.interface
-        ),
+        Problem::NeedsPrivileges if cfg!(windows) => crate::t!("tun.needs_admin"),
+        Problem::NeedsPrivileges => {
+            crate::t!("tun.needs_caps", caps = PROCESS_CAPS, dir = LINUX_CORE_DIR)
+        }
+        Problem::RpFilterStrict(rp) => crate::t!("tun.rp_filter", iface = rp.interface),
     }
 }
 
@@ -191,9 +176,11 @@ pub fn process_caps_warning(caps: Option<&str>, has_process_rules: bool) -> Opti
     {
         return None;
     }
-    Some(format!(
-        "Правила по процессам: у ядра есть только {}. Без cap_sys_ptrace и cap_dac_read_search Xray не видит, какой программе принадлежит соединение, если это программа другого пользователя или программа в песочнице (Chromium, Electron, Discord из Flatpak, системные службы). Такие соединения пойдут по правилу по умолчанию, а в журнале будут ошибки «no process found».\n\nЧтобы правила работали для всех программ (выполните сами; право читать чужие файлы и сокеты даётся только root-копии ядра, которую никто кроме root изменить не может):\n  sudo setcap {PROCESS_CAPS} {LINUX_CORE_DIR}/xray\nили запустите  ./elf-gate-tun.sh (он выдаёт эти права сам; ELF_GATE_FULL_CAPS=0 оставляет только cap_net_admin)",
-        caps.split_whitespace().last().unwrap_or(caps)
+    Some(crate::t!(
+        "tun.caps_warning",
+        have = caps.split_whitespace().last().unwrap_or(caps),
+        caps = PROCESS_CAPS,
+        dir = LINUX_CORE_DIR
     ))
 }
 
@@ -258,15 +245,15 @@ pub async fn resolve_server(address: &str, port: u16) -> Result<IpAddr, String> 
         tokio::net::lookup_host((address, port)),
     )
     .await
-    .map_err(|_| format!("не удалось определить адрес {address}: таймаут DNS"))?
-    .map_err(|e| format!("не удалось определить адрес {address}: {e}"))?
+    .map_err(|_| crate::t!("tun.dns_timeout", address = address))?
+    .map_err(|e| crate::t!("tun.dns_error", address = address, error = e))?
     .collect::<Vec<_>>();
     addrs
         .iter()
         .find(|a| a.is_ipv4())
         .or_else(|| addrs.first())
         .map(|a| a.ip())
-        .ok_or_else(|| format!("для {address} нет адресов"))
+        .ok_or_else(|| crate::t!("tun.no_addresses", address = address))
 }
 
 /// Resolves every name (in parallel, a few seconds at most) and returns all addresses; names that
@@ -323,10 +310,17 @@ pub async fn resolve_map(hosts: &[String]) -> std::collections::HashMap<String, 
 pub async fn tcp_reachable(ip: IpAddr, port: u16, limit: Duration) -> Result<(), String> {
     match timeout(limit, TcpStream::connect((ip, port))).await {
         Ok(Ok(_)) => Ok(()),
-        Ok(Err(e)) => Err(format!("{ip}:{port} недоступен: {e}")),
-        Err(_) => Err(format!(
-            "{ip}:{port} недоступен: таймаут {} с",
-            limit.as_secs()
+        Ok(Err(e)) => Err(crate::t!(
+            "tun.unreachable",
+            ip = ip,
+            port = port,
+            error = e
+        )),
+        Err(_) => Err(crate::t!(
+            "tun.unreachable_timeout",
+            ip = ip,
+            port = port,
+            secs = limit.as_secs()
         )),
     }
 }
@@ -369,10 +363,10 @@ pub fn cleanup_stale(host: &dyn TunHost, store: &StateStore) -> Option<String> {
     mark_down(store);
     let left = host.interface_exists(&tun.interface);
     Some(match (killed, left) {
-        (true, false) => format!("остановлен Xray от прошлого запуска, интерфейс {} убран", tun.interface),
-        (true, true) => format!("остановлен Xray от прошлого запуска, но интерфейс {} ещё виден (должен исчезнуть сам)", tun.interface),
-        (false, true) => format!("интерфейс {} остался от прошлого запуска, а процесс уже не найден: удалите его вручную (ip link del {})", tun.interface, tun.interface),
-        (false, false) => "следов прошлого TUN-запуска не осталось (всё уже убрано)".to_string(),
+        (true, false) => crate::t!("tun.stale_killed", iface = tun.interface),
+        (true, true) => crate::t!("tun.stale_killed_left", iface = tun.interface),
+        (false, true) => crate::t!("tun.stale_left", iface = tun.interface),
+        (false, false) => crate::t!("tun.stale_none"),
     })
 }
 

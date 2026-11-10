@@ -48,13 +48,13 @@ pub fn log_dir() -> PathBuf {
 
 #[derive(Debug, Error)]
 pub enum StorageError {
-    #[error("не удалось прочитать {path}: {source}")]
+    #[error("{}", crate::t!("err.read", path = .path.display(), source = .source))]
     Read { path: PathBuf, source: io::Error },
-    #[error("не удалось записать {path}: {source}")]
+    #[error("{}", crate::t!("err.write", path = .path.display(), source = .source))]
     Write { path: PathBuf, source: io::Error },
-    #[error("ошибка в {path}: {message}")]
+    #[error("{}", crate::t!("err.parse", path = .path.display(), message = .message))]
     Parse { path: PathBuf, message: String },
-    #[error("не удалось сериализовать конфигурацию: {0}")]
+    #[error("{}", crate::t!("err.serialize", error = .0))]
     Serialize(String),
 }
 
@@ -173,6 +173,8 @@ pub struct UiConfig {
     pub theme: String,
     /// Privacy mode (screenshots, streams): the screens hide addresses, ids, keys and URLs.
     pub privacy_mode: bool,
+    /// Interface language: `en`, `ru` or `uk`. English unless chosen; never read from the system.
+    pub language: crate::i18n::Lang,
 }
 
 impl Default for UiConfig {
@@ -183,6 +185,7 @@ impl Default for UiConfig {
             auto_connect: false,
             theme: "dark".into(),
             privacy_mode: false,
+            language: crate::i18n::Lang::default(),
         }
     }
 }

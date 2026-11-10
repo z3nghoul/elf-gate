@@ -378,21 +378,13 @@ pub fn parse_entry(entry: &Value) -> Result<Server, String> {
     let endpoints: Vec<(String, u16, String)> =
         proxies.iter().filter_map(|o| endpoint(o)).collect();
     if proxies.is_empty() || endpoints.is_empty() {
-        return Ok(Server::info_only(
-            &link,
-            name,
-            "запись без сервера (заголовок или сообщение провайдера)",
-        ));
+        return Ok(Server::info_only(&link, name, &crate::t!("full.no_server")));
     }
     if endpoints.iter().all(|(a, p, id)| is_stub(a, *p, id)) {
-        return Ok(Server::info_only(
-            &link,
-            name,
-            "заглушка провайдера (нулевой адрес): включите HWID или смените User-Agent",
-        ));
+        return Ok(Server::info_only(&link, name, &crate::t!("parse.stub")));
     }
     let Some(main) = default_target(entry, &outbounds) else {
-        return Err(format!("«{name}»: не найден основной outbound"));
+        return Err(crate::t!("full.no_main", name = name));
     };
     let balancers_all: Vec<Value> = entry
         .pointer("/routing/balancers")
@@ -430,16 +422,14 @@ pub fn parse_entry(entry: &Value) -> Result<Server, String> {
         }
     }
     if keep.is_empty() {
-        return Err(format!(
-            "«{name}»: основной outbound не найден среди outbounds"
-        ));
+        return Err(crate::t!("full.main_not_in_outbounds", name = name));
     }
     full.outbounds
         .retain(|o| tag_of(o).is_some_and(|t| keep.contains(&t)));
     full.hops = full.outbounds.iter().filter(|o| is_proxy(o)).count();
     let (address, port) = full
         .entry_hop()
-        .ok_or_else(|| format!("«{name}»: не удалось определить адрес первого узла"))?;
+        .ok_or_else(|| crate::t!("full.no_first_hop", name = name))?;
     let main_ob = full
         .roots()
         .into_iter()

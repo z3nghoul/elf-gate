@@ -28,26 +28,29 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     .areas(area);
 
     let (mode_name, mode_text) = match routing {
-        RoutingMode::Exclude => ("exclude", "всё через VPN, кроме правил"),
-        RoutingMode::Include => ("include", "через VPN только правила, остальное напрямую"),
+        RoutingMode::Exclude => ("exclude", crate::t!("rules.mode_exclude")),
+        RoutingMode::Include => ("include", crate::t!("rules.mode_include")),
     };
     f.render_widget(
         Paragraph::new(vec![
             Line::from(vec![
-                Span::styled("Режим маршрутизации: ", th.muted()),
+                Span::styled(format!("{} ", crate::t!("rules.routing_label")), th.muted()),
                 Span::styled(mode_name, th.title()),
                 Span::styled(format!(" ({mode_text})"), th.text()),
             ]),
             Line::from(Span::styled(
                 if tun {
-                    "Режим трафика: TUN, правила по процессам работают"
+                    crate::t!("rules.traffic_tun")
                 } else {
-                    "Режим трафика: PROXY, правила по процессам неактивны (работают только в режиме TUN)"
+                    crate::t!("rules.traffic_proxy")
                 },
                 if tun { th.good() } else { th.warn() },
             )),
         ])
-        .block(Block::bordered().title(Span::styled(" Правила ", th.title()))),
+        .block(Block::bordered().title(Span::styled(
+            format!(" {} ", crate::t!("panel.rules")),
+            th.title(),
+        ))),
         head,
     );
 
@@ -65,14 +68,21 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 let has_processes = !p.processes(cfg!(windows)).is_empty();
                 let mut note = String::new();
                 if !active {
-                    note = format!("  (неактивен в режиме {mode_name})");
+                    note = format!("  {}", crate::t!("rules.inactive_in", mode = mode_name));
                 } else if has_processes && !tun {
-                    note = "  (процессы работают только в TUN)".into();
+                    note = format!("  {}", crate::t!("rules.processes_tun_only"));
                 }
                 let style = if on && active { th.text() } else { th.muted() };
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{} ", mark(on)), th.good()),
-                    Span::styled(format!("пресет  {}", p.title), style),
+                    Span::styled(
+                        format!(
+                            "{}  {}",
+                            crate::t!("rules.preset"),
+                            crate::model::rule::preset_title(p)
+                        ),
+                        style,
+                    ),
                     Span::styled(note, th.warn()),
                 ]))
             }
@@ -92,9 +102,9 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                     ),
                     Span::styled(
                         if inactive_process {
-                            "  (только в TUN)"
+                            format!("  {}", crate::t!("rules.rule_tun_only"))
                         } else {
-                            ""
+                            String::new()
                         },
                         th.warn(),
                     ),
@@ -106,7 +116,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     state.select(Some(app.rules_cursor.min(rows.len().saturating_sub(1))));
     f.render_stateful_widget(
         List::new(rows)
-            .block(Block::bordered().title(Span::styled(" Пресеты и ваши правила ", th.title())))
+            .block(Block::bordered().title(Span::styled(
+                format!(" {} ", crate::t!("panel.rules_list")),
+                th.title(),
+            )))
             .highlight_symbol("> ")
             .highlight_style(th.selected()),
         list_area,
@@ -123,15 +136,13 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 let mut text = if names.is_empty() {
                     String::new()
                 } else {
-                    format!("процессы: {names}. ")
+                    format!("{} ", crate::t!("rules.processes", names = names))
                 };
                 if p.block_udp443 && app.vision_in_use() {
                     // First, so the footer (two lines) cannot cut it off.
-                    text.push_str(
-                        "Выбранный сервер с flow=vision: UDP/443 закрыт ядром, пресет не нужен. ",
-                    );
+                    text.push_str(&format!("{} ", crate::t!("rules.vision_note")));
                 }
-                text.push_str(&p.note);
+                text.push_str(&crate::model::rule::preset_note(p));
                 text
             })
             .unwrap_or_default(),
@@ -140,10 +151,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     f.render_widget(
         Paragraph::new(vec![
             Line::from(Span::styled(hint, th.muted())),
-            Line::from(Span::styled(
-                "Space вкл/выкл   a добавить   x удалить   m режим exclude/include   Esc назад",
-                th.text(),
-            )),
+            Line::from(Span::styled(crate::t!("rules.footer"), th.text())),
         ])
         .wrap(Wrap { trim: false })
         .block(Block::bordered()),

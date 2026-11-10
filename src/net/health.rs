@@ -29,36 +29,37 @@ pub async fn check_host(
     match timeout(limit, request(socks_port, host, path)).await {
         Ok(Ok(latency)) => Ok(latency),
         Ok(Err(e)) => Err(e),
-        Err(_) => Err(format!("нет ответа за {} с", limit.as_secs())),
+        Err(_) => Err(crate::t!("net.no_answer", secs = limit.as_secs())),
     }
 }
 
 async fn request(socks_port: u16, host: &str, path: &str) -> Result<Duration, String> {
-    let io = |what: &'static str| move |e: std::io::Error| format!("{what}: {e}");
+    let io = |what: String| move |e: std::io::Error| format!("{what}: {e}");
     let mut s = TcpStream::connect(("127.0.0.1", socks_port))
         .await
-        .map_err(io("локальный прокси недоступен"))?;
+        .map_err(io(crate::t!("net.proxy_down")))?;
     // SOCKS5: no authentication, CONNECT to a domain name (resolved on the far side).
-    s.write_all(&[5, 1, 0]).await.map_err(io("socks"))?;
+    s.write_all(&[5, 1, 0])
+        .await
+        .map_err(io("socks".to_string()))?;
     let mut method = [0u8; 2];
-    s.read_exact(&mut method).await.map_err(io("socks"))?;
+    s.read_exact(&mut method)
+        .await
+        .map_err(io("socks".to_string()))?;
     if method != [5, 0] {
-        return Err("локальный прокси отказал в подключении".into());
+        return Err(crate::t!("net.proxy_refused"));
     }
     let name = host.as_bytes();
     let mut req = vec![5, 1, 0, 3, name.len() as u8];
     req.extend_from_slice(name);
     req.extend_from_slice(&80u16.to_be_bytes());
-    s.write_all(&req).await.map_err(io("socks"))?;
+    s.write_all(&req).await.map_err(io("socks".to_string()))?;
     let mut head = [0u8; 4];
     s.read_exact(&mut head)
         .await
-        .map_err(io("соединение через сервер"))?;
+        .map_err(io(crate::t!("net.via_server")))?;
     if head[1] != 0 {
-        return Err(format!(
-            "сервер не смог открыть соединение (код socks {})",
-            head[1]
-        ));
+        return Err(crate::t!("net.server_refused", code = head[1]));
     }
     // Skip the bound address of the reply.
     let skip = match head[3] {
@@ -66,30 +67,34 @@ async fn request(socks_port: u16, host: &str, path: &str) -> Result<Duration, St
         4 => 16 + 2,
         3 => {
             let mut len = [0u8; 1];
-            s.read_exact(&mut len).await.map_err(io("socks"))?;
+            s.read_exact(&mut len)
+                .await
+                .map_err(io("socks".to_string()))?;
             len[0] as usize + 2
         }
-        _ => return Err("непонятный ответ socks".into()),
+        _ => return Err(crate::t!("net.bad_socks")),
     };
     let mut rest = vec![0u8; skip];
-    s.read_exact(&mut rest).await.map_err(io("socks"))?;
+    s.read_exact(&mut rest)
+        .await
+        .map_err(io("socks".to_string()))?;
 
     let get = format!(
         "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nUser-Agent: elf-gate\r\n\r\n"
     );
     let started = Instant::now();
-    s.write_all(get.as_bytes()).await.map_err(io("запрос"))?;
+    s.write_all(get.as_bytes())
+        .await
+        .map_err(io(crate::t!("net.request")))?;
     let mut buf = [0u8; 64];
-    let n = s.read(&mut buf).await.map_err(io("ответ"))?;
+    let n = s.read(&mut buf).await.map_err(io(crate::t!("net.reply")))?;
     let latency = started.elapsed();
     let line = String::from_utf8_lossy(&buf[..n]);
     if line.starts_with("HTTP/1.1 204") || line.starts_with("HTTP/1.0 204") {
         Ok(latency)
     } else {
         let first = line.lines().next().unwrap_or("").trim();
-        Err(format!(
-            "неожиданный ответ: {first:?} (перехватчик провайдера или сбой сервера)"
-        ))
+        Err(crate::t!("net.unexpected", first = format!("{first:?}")))
     }
 }
 

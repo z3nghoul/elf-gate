@@ -59,6 +59,7 @@ pub enum Setting {
     AutoConnect(bool),
     Autostart(bool),
     Theme(String),
+    Language(crate::i18n::Lang),
     PrivacyMode(bool),
     /// `[[subscriptions]]` entry by name.
     SubscriptionUserAgent {

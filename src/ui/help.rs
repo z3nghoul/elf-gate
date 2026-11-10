@@ -13,7 +13,7 @@ pub fn render(f: &mut Frame, area: Rect, th: &Theme) {
         .map(|b| {
             Line::from(vec![
                 Span::styled(format!("{:<18}", b.label), th.title()),
-                Span::styled(b.desc, th.text()),
+                Span::styled(b.desc(), th.text()),
             ])
         })
         .collect();
@@ -24,22 +24,21 @@ pub fn render(f: &mut Frame, area: Rect, th: &Theme) {
     )));
     lines.push(Line::default());
     lines.push(Line::from(vec![
-        Span::styled(format!("{:<18}", "[устар.]"), th.warn()),
-        Span::styled(
-            "устаревший транспорт (ws, grpc): работает, но Xray его не советует",
-            th.text(),
-        ),
+        Span::styled(format!("{:<18}", crate::t!("tag.deprecated")), th.warn()),
+        Span::styled(crate::t!("help.legend_deprecated"), th.text()),
     ]));
     lines.push(Line::from(vec![
-        Span::styled(format!("{:<18}", "серый, n/a"), th.muted()),
         Span::styled(
-            "сервер не поддерживается или отвергнут Xray; причина в деталях",
-            th.text(),
+            format!("{:<18}", crate::t!("help.legend_grey_key")),
+            th.muted(),
         ),
+        Span::styled(crate::t!("help.legend_grey"), th.text()),
     ]));
     f.render_widget(
-        Paragraph::new(lines)
-            .block(Block::bordered().title(Span::styled(" Справка (Esc - назад) ", th.title()))),
+        Paragraph::new(lines).block(Block::bordered().title(Span::styled(
+            format!(" {} ", crate::t!("panel.help")),
+            th.title(),
+        ))),
         area,
     );
 }

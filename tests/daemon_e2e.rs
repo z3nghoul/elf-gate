@@ -134,10 +134,26 @@ async fn hello_view_single_instance_and_private_socket() {
     );
     c.until("a view", |_| true).await;
     // Without a desktop session there is no tray: that is a log line, not an error.
+    // The empty config means the default language, so the text comes from the same key.
+    let marker = elf_gate::i18n::tr(
+        elf_gate::i18n::Lang::En,
+        "daemon.tray_unavailable",
+        &[("error", "\u{0}")],
+    );
+    let prefix = marker.split('\u{0}').next().unwrap().to_string();
     let mut saw_tray_note = false;
-    for _ in 0..5 {
-        let l = c.lines.next_line().await.unwrap().unwrap();
-        if l.contains("в трее недоступен") {
+    let end = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < end {
+        let left = end.saturating_duration_since(Instant::now());
+        let Ok(Ok(Some(l))) = tokio::time::timeout(left, c.lines.next_line()).await else {
+            break;
+        };
+        let lines = match decode::<Update>(&l) {
+            Ok(Update::Log(line)) => vec![line],
+            Ok(Update::Backlog(lines)) => lines,
+            _ => Vec::new(),
+        };
+        if lines.iter().any(|line| line.text.starts_with(&prefix)) {
             saw_tray_note = true;
             break;
         }
@@ -146,9 +162,13 @@ async fn hello_view_single_instance_and_private_socket() {
 
     // A second background process refuses to start and exits at once; the first keeps serving.
     let mut second = env.daemon();
-    let status = tokio::task::spawn_blocking(move || second.wait().unwrap())
-        .await
-        .unwrap();
+    let status = tokio::time::timeout(
+        Duration::from_secs(20),
+        tokio::task::spawn_blocking(move || second.wait().unwrap()),
+    )
+    .await
+    .expect("the second background process must exit at once")
+    .unwrap();
     assert!(status.success());
     c.send(Cmd::ToggleMode).await;
     c.until("mode TUN", |v| {
