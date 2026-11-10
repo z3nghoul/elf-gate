@@ -1,3 +1,4 @@
+pub mod checkcache;
 pub mod config;
 pub mod geodata;
 #[cfg(test)]

@@ -87,7 +87,8 @@ async fn run(
     let mut app = AppState::with_config(tx.clone(), config, Some(storage))
         .with_run_dir(storage::state_dir().join("run"))
         .with_proxy(ProxyHandle::spawn(proxy, tx))
-        .with_state_store(StateStore::default_location());
+        .with_state_store(StateStore::default_location())
+        .with_check_cache(storage::state_dir().join("check-cache.json"));
     // Stop a core a crashed run left behind (a TUN would still be up).
     app.startup_tun_cleanup();
     for note in notes {

@@ -4,7 +4,7 @@
 
 use super::config;
 use super::process::{Core, CoreError};
-use super::validate::{self, Verdict};
+use super::validate::Verdict;
 use crate::action::Action;
 use crate::app::{AppState, Conn};
 use crate::event::{BgEvent, Event};
@@ -288,7 +288,11 @@ async fn xray_validation_decides_domains() {
         assert!(server.is_supported(), "the parser must not judge {host}");
         let dir = tmp.path().to_path_buf();
         let core_cfg = core_cfg.clone();
-        async move { validate::check(&core_cfg, &server, &dir).await }
+        async move {
+            super::checkcache::Checker::new(None)
+                .check(&core_cfg, &server, &dir)
+                .await
+        }
     };
 
     match check("example.com", "security=none").await {
@@ -728,4 +732,53 @@ async fn set_system_proxy_false_never_touches_the_system() {
     assert!(!r.controller.is_active());
     r.app.shutdown().await;
     assert_eq!(r.desktop.snapshot(), before);
+}
+
+#[tokio::test]
+async fn repeated_checks_come_from_the_cache_and_a_new_version_drops_it() {
+    use super::checkcache::{config_key, Checker};
+    let xray = require_xray!();
+    let dir = TempDir::new("checkcache");
+    let cache_file = dir.path().join("check-cache.json");
+    let server = parse_link(&format!(
+        "vless://{UUID}@h.example.com:443?security=reality&sni=x.org&pbk=4GObrWHDR0TyD84iQ06z24v4YBxQ69vxeG1MCqOyFlI&sid=ab&fp=chrome#R"
+    ))
+    .unwrap();
+    let core = CoreConfig {
+        xray_path: xray.display().to_string(),
+        ..CoreConfig::default()
+    };
+    let cfg = config::build(&server, &core).unwrap();
+
+    let checker = Checker::new(Some(cache_file.clone()));
+    assert_eq!(
+        checker.check(&core, &server, dir.path()).await,
+        Verdict::Accepted
+    );
+    checker.flush();
+    let text = std::fs::read_to_string(&cache_file).unwrap();
+    assert!(text.contains(&config_key(&cfg)), "{text}");
+
+    // A new process (fresh Checker) answers from the file without starting Xray: a binary
+    // path that does not exist for `xray run -test` still gets the cached verdict only if the
+    // version lookup works, so check through the real binary but with the work dir missing.
+    let again = Checker::new(Some(cache_file.clone()));
+    let started = std::time::Instant::now();
+    assert_eq!(
+        again
+            .check(&core, &server, &dir.path().join("no-such-dir"))
+            .await,
+        Verdict::Accepted
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "a cached verdict must not need a test run"
+    );
+    // The run directory was never created: nothing was executed.
+    assert!(!dir.path().join("no-such-dir").exists());
+
+    // Another version string wipes the cache.
+    let mut raw = super::checkcache::CheckCache::load(Some(cache_file));
+    raw.use_version("Xray 0.0.0-other");
+    assert_eq!(raw.lookup(&config_key(&cfg)), None);
 }

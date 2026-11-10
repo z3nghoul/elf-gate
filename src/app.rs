@@ -9,8 +9,9 @@ use crate::parser;
 use crate::platform::{ProxyAddr, TunHost};
 use crate::storage::{Config, ServerEntry, ServerOverride, StateStore, Storage};
 use crate::sysproxy::{ProxyCmd, ProxyHandle};
+use crate::xray::checkcache::Checker;
 use crate::xray::process::Core;
-use crate::xray::validate::{self, Verdict};
+use crate::xray::validate::Verdict;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 use std::collections::VecDeque;
@@ -165,6 +166,8 @@ pub struct AppState {
     /// A core start or stop is in flight; new connect requests wait for it.
     busy: bool,
     run_dir: PathBuf,
+    /// Cached, rate-limited `xray run -test`.
+    checker: Arc<Checker>,
     next_id: u64,
     tx: BgTx,
     rng: Lcg,
@@ -249,6 +252,7 @@ impl AppState {
             mock,
             busy: false,
             run_dir: std::env::temp_dir().join("elf-gate-run"),
+            checker: Checker::new(None),
             next_id,
             tx,
             rng: Lcg::from_clock(),
@@ -281,6 +285,12 @@ impl AppState {
 
     pub fn with_state_store(mut self, store: StateStore) -> Self {
         self.state_store = Some(store);
+        self
+    }
+
+    /// Keeps `xray run -test` verdicts in `path` between runs.
+    pub fn with_check_cache(mut self, path: PathBuf) -> Self {
+        self.checker = Checker::new(Some(path));
         self
     }
 
@@ -1104,7 +1114,8 @@ impl AppState {
         }
     }
 
-    /// Checks the given servers with `xray run -test` in the background, one after another.
+    /// Checks the given servers with `xray run -test` in the background (at most four
+    /// processes at once, verdicts come from the cache when the config was seen before).
     fn spawn_checks(&self, servers: Vec<Server>) {
         if servers.is_empty() {
             return;
@@ -1112,27 +1123,40 @@ impl AppState {
         let tx = self.tx.clone();
         let core_cfg = self.config.core.clone();
         let run_dir = self.run_dir.clone();
+        let checker = self.checker.clone();
         tokio::spawn(async move {
+            let mut tasks = tokio::task::JoinSet::new();
             for server in servers {
-                match validate::check(&core_cfg, &server, &run_dir).await {
-                    Verdict::Accepted => {}
-                    Verdict::Rejected(reason) => {
-                        let _ = tx.send(BgEvent::ServerRejected {
-                            id: server.id,
-                            reason,
-                        });
+                let (tx, core_cfg, run_dir, checker) = (
+                    tx.clone(),
+                    core_cfg.clone(),
+                    run_dir.clone(),
+                    checker.clone(),
+                );
+                tasks.spawn(async move {
+                    match checker.check(&core_cfg, &server, &run_dir).await {
+                        Verdict::Accepted => {}
+                        Verdict::Rejected(reason) => {
+                            let _ = tx.send(BgEvent::ServerRejected {
+                                id: server.id,
+                                reason,
+                            });
+                        }
+                        Verdict::Unavailable(why) => {
+                            // Not Xray's verdict on the server (e.g. no binary yet): say so once.
+                            if checker.first_unavailable() {
+                                let _ = tx.send(BgEvent::Log(LogLine {
+                                    time: now_hms(),
+                                    level: Level::Info,
+                                    text: format!("server validation skipped: {why}"),
+                                }));
+                            }
+                        }
                     }
-                    Verdict::Unavailable(why) => {
-                        // Not Xray's verdict on the server (e.g. no binary yet): skip the rest.
-                        let _ = tx.send(BgEvent::Log(LogLine {
-                            time: now_hms(),
-                            level: Level::Info,
-                            text: format!("server validation skipped: {why}"),
-                        }));
-                        break;
-                    }
-                }
+                });
             }
+            while tasks.join_next().await.is_some() {}
+            checker.flush();
         });
     }
 

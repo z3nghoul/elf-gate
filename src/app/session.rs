@@ -37,6 +37,7 @@ async fn start_core(
     run_dir: &Path,
     tx: &BgTx,
     store: Option<&StateStore>,
+    checker: &Checker,
 ) -> Result<Core, Failure> {
     // The server must answer over TCP before anything else: afterwards, with the tunnel up,
     // this machine's own connections would go through the tunnel. The address is resolved
@@ -47,7 +48,7 @@ async fn start_core(
         .map_err(|e| format!("Сервер недоступен по TCP: {e}"))?;
 
     // Ask Xray about the server itself first: a refusal greys the server out.
-    if let Verdict::Rejected(reason) = validate::check(core_cfg, server, run_dir).await {
+    if let Verdict::Rejected(reason) = checker.check(core_cfg, server, run_dir).await {
         let _ = tx.send(BgEvent::ServerRejected {
             id: server.id,
             reason: reason.clone(),
@@ -70,7 +71,7 @@ async fn start_core(
         }
     }
     let cfg = build_with(server, core_cfg, &plan).map_err(|e| e.to_string())?;
-    if let Verdict::Rejected(reason) = validate::check_config(&binary, &cfg, run_dir).await {
+    if let Verdict::Rejected(reason) = checker.check_config(&binary, &cfg, run_dir).await {
         return Err(format!("Xray отверг итоговый конфиг (проверьте правила): {reason}").into());
     }
 
@@ -152,6 +153,7 @@ impl AppState {
         let host = self.tun_host.clone();
         let store = self.state_store.clone();
         let run_dir = self.run_dir.clone();
+        let checker = self.checker.clone();
         tokio::spawn(async move {
             if let Some(old) = old {
                 old.stop().await;
@@ -169,8 +171,10 @@ impl AppState {
                 &run_dir,
                 &tx,
                 store.as_ref(),
+                &checker,
             )
             .await;
+            checker.flush();
             let ev = match result {
                 Ok(core) => BgEvent::CoreStarted {
                     id,

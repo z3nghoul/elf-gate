@@ -2,11 +2,7 @@
 //! (`xray run -test`). This replaces guessing from address patterns: Xray's own
 //! rules (for example which hosts may use unencrypted VLESS) stay Xray's business.
 
-use super::config;
-use super::process::resolve_binary;
-use crate::model::server::Server;
 use crate::platform;
-use crate::storage::CoreConfig;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -42,19 +38,6 @@ pub fn root_cause(output: &str) -> String {
         .unwrap_or(last)
         .trim()
         .to_string()
-}
-
-/// Generates the server's plain proxy config and runs `xray run -test` on it.
-pub async fn check(core: &CoreConfig, server: &Server, run_dir: &Path) -> Verdict {
-    let cfg = match config::build(server, core) {
-        Ok(c) => c,
-        Err(e) => return Verdict::Rejected(e.to_string()),
-    };
-    let binary = match resolve_binary(&core.xray_path) {
-        Ok(b) => b,
-        Err(e) => return Verdict::Unavailable(e.to_string()),
-    };
-    check_config(&binary, &cfg, run_dir).await
 }
 
 /// Runs `xray run -test` on any ready-made config (TUN configs included: `-test` does not
@@ -119,6 +102,8 @@ pub async fn check_config(binary: &Path, cfg: &serde_json::Value, run_dir: &Path
 mod tests {
     use super::*;
     use crate::parser::parse_link;
+    use crate::storage::CoreConfig;
+    use crate::xray::checkcache::Checker;
 
     #[test]
     fn extracts_root_cause_from_nested_xray_error() {
@@ -143,14 +128,18 @@ mod tests {
             xray_path: "/definitely/not/here/xray".into(),
             ..CoreConfig::default()
         };
-        let v = check(&core, &server, &std::env::temp_dir()).await;
+        let v = Checker::new(None)
+            .check(&core, &server, &std::env::temp_dir())
+            .await;
         assert!(matches!(v, Verdict::Unavailable(_)), "{v:?}");
     }
 
     #[tokio::test]
     async fn unsupported_server_is_rejected_without_running_xray() {
         let server = parse_link("trojan://p@h:443#t").unwrap();
-        let v = check(&CoreConfig::default(), &server, &std::env::temp_dir()).await;
+        let v = Checker::new(None)
+            .check(&CoreConfig::default(), &server, &std::env::temp_dir())
+            .await;
         assert!(matches!(v, Verdict::Rejected(_)), "{v:?}");
     }
 }
