@@ -235,6 +235,7 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
             Action::ShowHidden => (servers_focus
                 && group.is_some_and(|g| g.servers.iter().any(|s| s.hidden)))
             .then(|| b.short.to_string()),
+            Action::Privacy => Some(if app.privacy() { "приватность: вкл" } else { "приватность" }.into()),
             Action::Toggle | Action::RoutingMode => Some(b.short.to_string()),
             Action::Up
             | Action::PageUp

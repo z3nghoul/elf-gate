@@ -37,23 +37,30 @@ pub fn format_bytes(n: u64) -> String {
 
 pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     use crate::app::LinkState;
+    let privacy_badge = |mut spans: Vec<Span<'static>>| -> Line<'static> {
+        if app.privacy() {
+            spans.insert(0, Span::styled(" PRIVACY ", th.privacy_badge()));
+            spans.insert(1, Span::raw(" "));
+        }
+        Line::from(spans)
+    };
     match &app.link {
         LinkState::Connecting => {
             f.render_widget(
-                Paragraph::new(Line::from(Span::styled(
+                Paragraph::new(privacy_badge(vec![Span::styled(
                     "Подключение к фоновой части...",
                     th.warn(),
-                ))),
+                )])),
                 area,
             );
             return;
         }
         LinkState::Down(why) => {
             f.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    format!("Нет связи с фоновой частью: {why}. Повторяю..."),
+                Paragraph::new(privacy_badge(vec![Span::styled(
+                    app.mask(&format!("Нет связи с фоновой частью: {why}. Повторяю...")),
                     th.bad(),
-                ))),
+                )])),
                 area,
             );
             return;
@@ -80,7 +87,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                     .unwrap_or("?")
             ),
         ),
-        Conn::Error(e) => (th.bad(), format!("Ошибка: {e}")),
+        Conn::Error(e) => (th.bad(), app.mask(&format!("Ошибка: {e}"))),
     };
     let sep = Span::styled(" | ", th.muted());
     let mut spans = vec![
@@ -112,9 +119,9 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     }
     if let Some(msg) = &app.status {
         spans.push(sep.clone());
-        spans.push(Span::styled(msg.clone(), th.warn()));
+        spans.push(Span::styled(app.mask(msg), th.warn()));
     }
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    f.render_widget(Paragraph::new(privacy_badge(spans)), area);
 }
 
 #[cfg(test)]

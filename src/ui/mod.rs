@@ -5,6 +5,8 @@ mod hint_tests;
 pub mod hints;
 mod logs;
 mod popup;
+#[cfg(test)]
+mod privacy_tests;
 mod rules;
 mod servers;
 mod settings;

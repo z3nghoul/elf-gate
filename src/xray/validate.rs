@@ -169,7 +169,7 @@ pub async fn check_config(binary: &Path, cfg: &serde_json::Value, run_dir: &Path
                         tracing::warn!(
                             "xray run -test passed only {} XRAY_LOCATION_ASSET; using that way from now on. First output: {}",
                             if with_env { "without" } else { "with" },
-                            r.text.trim()
+                            crate::redact::secrets(r.text.trim())
                         );
                         Verdict::Accepted
                     }
@@ -178,8 +178,10 @@ pub async fn check_config(binary: &Path, cfg: &serde_json::Value, run_dir: &Path
                             .map_or_else(|v| format!("{v:?}"), |r2| r2.text.trim().to_string());
                         let report = spawn_report(binary, &file, with_env);
                         tracing::warn!(
-                            "xray run -test refused: {}\n--- retry: {second}\n--- {report}",
-                            r.text.trim()
+                            "xray run -test refused: {}\n--- retry: {}\n--- {}",
+                            crate::redact::secrets(r.text.trim()),
+                            crate::redact::secrets(&second),
+                            crate::redact::secrets(&report)
                         );
                         Verdict::Rejected(format!(
                             "{first}\n\nПолный вывод xray:\n{}\n\nПовтор без XRAY_LOCATION_ASSET:\n{second}\n\n{report}",

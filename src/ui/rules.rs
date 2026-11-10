@@ -86,7 +86,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 };
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{} ", mark(r.enabled)), th.good()),
-                    Span::styled(format!("{:<8} {}", r.kind.label(), r.value), style),
+                    Span::styled(
+                        format!("{:<8} {}", r.kind.label(), app.rule_value(r)),
+                        style,
+                    ),
                     Span::styled(
                         if inactive_process {
                             "  (только в TUN)"

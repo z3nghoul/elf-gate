@@ -14,6 +14,7 @@ pub mod net;
 pub mod parser;
 pub mod platform;
 pub mod proto;
+pub mod redact;
 pub mod storage;
 pub mod sysproxy;
 pub mod tray;

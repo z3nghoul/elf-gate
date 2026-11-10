@@ -59,6 +59,7 @@ pub enum Setting {
     AutoConnect(bool),
     Autostart(bool),
     Theme(String),
+    PrivacyMode(bool),
     /// `[[subscriptions]]` entry by name.
     SubscriptionUserAgent {
         name: String,

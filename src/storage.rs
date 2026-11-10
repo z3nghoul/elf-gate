@@ -171,6 +171,8 @@ pub struct UiConfig {
     pub auto_connect: bool,
     /// `dark` or `light`.
     pub theme: String,
+    /// Privacy mode (screenshots, streams): the screens hide addresses, ids, keys and URLs.
+    pub privacy_mode: bool,
 }
 
 impl Default for UiConfig {
@@ -180,6 +182,7 @@ impl Default for UiConfig {
             tun_intro_done: false,
             auto_connect: false,
             theme: "dark".into(),
+            privacy_mode: false,
         }
     }
 }
