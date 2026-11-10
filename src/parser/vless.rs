@@ -20,8 +20,9 @@ pub fn plain_vless_blocked_for_ip(address: &str) -> bool {
     }
 }
 
-pub const PLAIN_VLESS_REASON: &str = "несовместим с текущим Xray: VLESS без шифрования \
-(security=none, encryption=none) на публичный IP запрещён. Нужен TLS/Reality или encryption";
+pub fn plain_vless_reason() -> String {
+    crate::t!("parse.plain_vless")
+}
 
 /// `vless://uuid@host:port?params#name`
 pub fn parse(link: &str) -> Result<Server, ParseError> {
@@ -54,7 +55,7 @@ pub fn parse(link: &str) -> Result<Server, ParseError> {
         "tls" => Security::Tls,
         "reality" => Security::Reality,
         other => {
-            unsupported = Some(format!("security={other} не поддерживается"));
+            unsupported = Some(crate::t!("parse.security_unsupported", value = other));
             Security::None
         }
     };
@@ -64,7 +65,7 @@ pub fn parse(link: &str) -> Result<Server, ParseError> {
         "grpc" => Transport::Grpc,
         "ws" => Transport::Ws,
         other => {
-            unsupported.get_or_insert(format!("транспорт type={other} не поддерживается"));
+            unsupported.get_or_insert(crate::t!("parse.transport_unsupported", value = other));
             Transport::Tcp
         }
     };
@@ -77,7 +78,7 @@ pub fn parse(link: &str) -> Result<Server, ParseError> {
         && encryption.eq_ignore_ascii_case("none")
         && plain_vless_blocked_for_ip(&address)
     {
-        unsupported.get_or_insert_with(|| PLAIN_VLESS_REASON.to_string());
+        unsupported.get_or_insert_with(plain_vless_reason);
     }
 
     let flag = |v: String| matches!(v.to_ascii_lowercase().as_str(), "1" | "true");

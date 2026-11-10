@@ -1,0 +1,34 @@
+---
+source: src/ui/lang_tests.rs
+expression: frame
+---
+┌ Help (Esc - back) ───────────────────────────────────────────────────────────────────────────────────────────────────┐
+│q / Ctrl+C        close the interface (the VPN keeps running in the background)                                       │
+│Q                 quit and stop the background part (the VPN goes down)                                               │
+│j k / ↑ ↓         move through the list                                                                               │
+│PgUp / PgDn       page up / down                                                                                      │
+│g / G             to the start / to the end                                                                           │
+│Tab / Shift+Tab   switch the panel                                                                                    │
+│Enter             connect / disconnect (on the current server) / fold a group                                         │
+│d                 disconnect                                                                                          │
+│t                 mode PROXY / TUN                                                                                    │
+│p                 ping all servers                                                                                    │
+│o                 sort by ping                                                                                        │
+│u                 update the subscriptions                                                                            │
+│a                 add a server or a subscription by link                                                              │
+│x                 delete the selected item                                                                            │
+│r                 rules screen                                                                                        │
+│s                 settings screen                                                                                     │
+│l                 full-screen log                                                                                     │
+│/                 filter the server list                                                                              │
+│Ctrl+P            privacy mode (hide addresses, keys and links on the screen)                                         │
+│f                 change the TLS fingerprint of the selected server                                                   │
+│h                 subscription: show hidden servers (restore: x on a hidden one)                                      │
+│b                 server role: primary / backup (automatic failover)                                                  │
+│z                 TLS ClientHello fragmentation of the selected server                                                │
+│Space             rules screen: enable or disable the rule                                                            │
+│m                 rules screen: routing mode exclude / include                                                        │
+│?                 help                                                                                                │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+● Disconnected | PROXY                                                                                                  
+Ctrl+P priv.  Esc back  ? help  q/Q exit

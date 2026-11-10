@@ -104,7 +104,7 @@ impl Engine {
     /// `u`: update every subscription now.
     pub(super) fn update_subscriptions(&mut self) {
         if self.config.subscriptions.is_empty() {
-            self.status("Нет подписок: добавьте ссылку на подписку клавишей a");
+            self.status(crate::t!("eng.no_subs"));
             return;
         }
         let names: Vec<String> = self
@@ -115,9 +115,9 @@ impl Engine {
             .collect();
         let started = names.into_iter().filter(|n| self.spawn_update(n)).count();
         self.status(if started > 0 {
-            "Обновление подписок..."
+            crate::t!("eng.subs_updating")
         } else {
-            "Обновление уже идёт"
+            crate::t!("eng.subs_already")
         });
     }
 
@@ -189,11 +189,10 @@ impl Engine {
             Err(e) => {
                 // The old list stays: only a warning.
                 self.failed_at.insert(name.clone(), Instant::now());
-                self.log(
-                    Level::Warning,
-                    format!("[Warning] подписка «{name}» не обновлена: {e}"),
-                );
-                self.status(format!("Подписка «{name}»: {e}"));
+                self.logt(Level::Warning, || {
+                    crate::t!("eng.sub_failed_log", name = name, error = e)
+                });
+                self.status(crate::t!("eng.sub_failed_status", name = name, error = e));
             }
             Ok(update) => {
                 self.failed_at.remove(&name);
@@ -237,23 +236,29 @@ impl Engine {
         sub.servers = servers;
         sub.info = update.info;
         sub.updated = Some(unix_now());
-        self.log(
-            Level::Info,
-            format!(
-                "подписка «{name}» обновлена: {count} серверов{}{}",
-                if gone > 0 {
-                    format!(", убрано {gone}")
+        let skipped = update.skipped;
+        self.logt(Level::Info, || {
+            crate::t!(
+                "eng.sub_updated_log",
+                name = name,
+                count = count,
+                gone = if gone > 0 {
+                    crate::t!("eng.sub_gone", n = gone)
                 } else {
                     String::new()
                 },
-                if update.skipped > 0 {
-                    format!(", пропущено строк: {}", update.skipped)
+                skipped = if skipped > 0 {
+                    crate::t!("eng.sub_skipped", n = skipped)
                 } else {
                     String::new()
                 }
-            ),
-        );
-        self.status(format!("Подписка «{name}»: {count} серверов"));
+            )
+        });
+        self.status(crate::t!(
+            "eng.sub_updated_status",
+            name = name,
+            count = count
+        ));
         self.save_subscription_cache();
         // Only servers whose config changed cost a real `xray run -test`: the cache knows the rest.
         let to_check: Vec<Server> = self.subs[gi]
@@ -268,14 +273,14 @@ impl Engine {
     /// `a` with an http(s) link: download first, add the subscription only if it works.
     pub(super) fn add_subscription_url(&mut self, url: String) {
         if self.config.subscriptions.iter().any(|s| s.url == url) {
-            self.error_alert("Эта подписка уже добавлена");
+            self.error_alert(crate::t!("eng.sub_dup"));
             return;
         }
         if url::Url::parse(&url).is_err() {
-            self.error_alert("Некорректный адрес подписки");
+            self.error_alert(crate::t!("eng.sub_bad_url"));
             return;
         }
-        self.status("Загрузка подписки...");
+        self.status(crate::t!("eng.sub_loading"));
         let tx = self.tx.clone();
         let user_agent = fetch::DEFAULT_USER_AGENT.to_string();
         let device = self.device();
@@ -298,11 +303,10 @@ impl Engine {
         let update = match result {
             Ok(u) => u,
             Err(e) => {
-                self.log(
-                    Level::Warning,
-                    format!("[Warning] подписка не добавлена: {e}"),
-                );
-                self.error_alert(format!("Подписку не удалось загрузить:\n{e}"));
+                self.logt(Level::Warning, || {
+                    crate::t!("eng.sub_add_failed_log", error = e)
+                });
+                self.error_alert(crate::t!("eng.sub_add_failed", error = e));
                 return;
             }
         };

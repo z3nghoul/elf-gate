@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
@@ -26,20 +25,47 @@ pub const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
 pub const STOP_TIMEOUT: Duration = Duration::from_secs(3);
 const TAIL_LINES: usize = 20;
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum CoreError {
-    #[error("ядро Xray не найдено: «{0}»{1}. Положите его рядом с elf-gate или укажите xray_path в config.toml")]
     BinaryNotFound(String, String),
-    #[error("порт {port} ({what}) уже занят другой программой")]
     PortBusy { port: u16, what: &'static str },
-    #[error("не удалось записать конфиг ядра {path}: {source}")]
     WriteConfig { path: PathBuf, source: io::Error },
-    #[error("не удалось запустить ядро: {0}")]
     Spawn(String),
-    #[error("ядро завершилось сразу после запуска ({code}):\n{tail}")]
     ExitedEarly { code: String, tail: String },
-    #[error("ядро не начало слушать порт {port} за {secs} с")]
     NotReady { port: u16, secs: u64 },
+}
+
+impl std::fmt::Display for CoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            CoreError::BinaryNotFound(name, looked) => {
+                crate::t!("core.not_found", name = name, looked = looked)
+            }
+            CoreError::PortBusy { port, what } => {
+                crate::t!("core.port_busy", port = port, what = what)
+            }
+            CoreError::WriteConfig { path, source } => {
+                crate::t!("core.write_config", path = path.display(), source = source)
+            }
+            CoreError::Spawn(e) => crate::t!("core.spawn", error = e),
+            CoreError::ExitedEarly { code, tail } => {
+                crate::t!("core.exited_early", code = code, tail = tail)
+            }
+            CoreError::NotReady { port, secs } => {
+                crate::t!("core.not_ready", port = port, secs = secs)
+            }
+        };
+        f.write_str(&text)
+    }
+}
+
+impl std::error::Error for CoreError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            CoreError::WriteConfig { source, .. } => Some(source),
+            _ => None,
+        }
+    }
 }
 
 /// Resolves `xray_path`. A path with directories must be an existing file. A bare name
@@ -63,21 +89,21 @@ fn resolve_binary_in(
 ) -> Result<PathBuf, CoreError> {
     // Say where we looked: "not found" next to a file that exists is otherwise a mystery.
     let looked = || {
-        let beside = exe_dir.map_or(
-            "(путь к elf-gate неизвестен)".to_string(),
-            |d| d.display().to_string(),
-        );
-        format!(
-            " (искал: {}; рядом с программой: {beside}; PATH: {})",
-            if Path::new(xray_path).components().count() > 1 {
-                "по указанному пути"
+        let beside = exe_dir.map_or(crate::t!("core.exe_dir_unknown"), |d| {
+            d.display().to_string()
+        });
+        crate::t!(
+            "core.looked",
+            how = if Path::new(xray_path).components().count() > 1 {
+                crate::t!("core.by_path")
             } else {
-                "по имени"
+                crate::t!("core.by_name")
             },
-            if path_var.is_some() {
-                "задан"
+            beside = beside,
+            path = if path_var.is_some() {
+                crate::t!("core.path_set")
             } else {
-                "не задан"
+                crate::t!("core.path_unset")
             }
         )
     };
@@ -136,17 +162,17 @@ pub fn describe_core(binary: &Path) -> String {
     let dir = asset_dir(binary);
     let yn = |f: &str| {
         if dir.join(f).is_file() {
-            "есть"
+            crate::t!("core.have")
         } else {
-            "НЕТ"
+            crate::t!("core.missing")
         }
     };
-    format!(
-        "xray: {}, ассеты: {} (geoip.dat: {}, geosite.dat: {})",
-        binary.display(),
-        dir.display(),
-        yn("geoip.dat"),
-        yn("geosite.dat")
+    crate::t!(
+        "core.describe",
+        binary = binary.display(),
+        dir = dir.display(),
+        geoip = yn("geoip.dat"),
+        geosite = yn("geosite.dat")
     )
 }
 
@@ -212,8 +238,8 @@ pub struct ExitInfo {
 
 fn describe(status: std::process::ExitStatus) -> String {
     match status.code() {
-        Some(c) => format!("код {c}"),
-        None => "прерван сигналом".to_string(),
+        Some(c) => crate::t!("core.code", code = c),
+        None => crate::t!("core.signal"),
     }
 }
 

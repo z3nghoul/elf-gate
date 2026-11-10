@@ -94,7 +94,7 @@ async fn connect_or_spawn(spawn: Option<&Spawn>) -> Result<BoxStream, String> {
     if let Some(sp) = spawn {
         platform::spawn_detached(&sp.program, &sp.args).map_err(|e| e.to_string())?;
     }
-    let mut last = String::from("не отвечает");
+    let mut last = crate::t!("ipc.no_answer");
     for _ in 0..50 {
         tokio::time::sleep(Duration::from_millis(200)).await;
         match platform::ipc_connect().await {
@@ -102,7 +102,7 @@ async fn connect_or_spawn(spawn: Option<&Spawn>) -> Result<BoxStream, String> {
             Err(e) => last = e.to_string(),
         }
     }
-    Err(format!("фоновая часть не запустилась за 10 с ({last})"))
+    Err(crate::t!("ipc.start_timeout", last = last))
 }
 
 /// Keeps the link to the background process alive: connects (starting the process if needed),
@@ -127,8 +127,10 @@ pub async fn run_link(events: LinkTx, mut cmds: UnboundedReceiver<Cmd>, spawn: O
                         line = lines.next_line() => match line {
                             Ok(Some(l)) => match decode::<Update>(&l) {
                                 Ok(Update::Hello { protocol, .. }) if protocol != PROTOCOL_VERSION => {
-                                    let _ = events.send(LinkEvent::Down(format!(
-                                        "версия протокола фоновой части {protocol}, нужна {PROTOCOL_VERSION}: перезапустите её"
+                                    let _ = events.send(LinkEvent::Down(crate::t!(
+                                        "ipc.protocol",
+                                        protocol = protocol,
+                                        need = PROTOCOL_VERSION
                                     )));
                                     break;
                                 }
@@ -148,7 +150,7 @@ pub async fn run_link(events: LinkTx, mut cmds: UnboundedReceiver<Cmd>, spawn: O
                         },
                     }
                 }
-                let _ = events.send(LinkEvent::Down("связь с фоновой частью потеряна".into()));
+                let _ = events.send(LinkEvent::Down(crate::t!("ipc.lost")));
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }

@@ -341,9 +341,9 @@ pub trait IpcListener: Send {
 
 #[derive(Debug, Error)]
 pub enum IpcBindError {
-    #[error("фоновая часть уже запущена")]
+    #[error("{}", crate::t!("err.already_running"))]
     AlreadyRunning,
-    #[error("не удалось создать канал связи: {0}")]
+    #[error("{}", crate::t!("err.ipc_create", error = .0))]
     Other(String),
 }
 

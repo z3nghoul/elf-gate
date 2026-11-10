@@ -8,7 +8,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConfigError {
-    #[error("сервер «{0}» не поддерживается: {1}")]
+    #[error("{}", crate::t!("err.server_unsupported", name = .0, reason = .1))]
     Unsupported(String, String),
 }
 

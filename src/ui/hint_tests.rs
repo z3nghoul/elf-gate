@@ -48,7 +48,7 @@ fn press(a: &mut AppState, code: KeyCode) {
 }
 
 /// Every state: a name and the app in that state.
-fn states() -> Vec<(&'static str, AppState, (u16, u16))> {
+pub(super) fn states() -> Vec<(&'static str, AppState, (u16, u16))> {
     let big = (100, 30);
     let mut v: Vec<(&'static str, AppState, (u16, u16))> = Vec::new();
 
@@ -80,7 +80,7 @@ fn states() -> Vec<(&'static str, AppState, (u16, u16))> {
     log(&mut a, "[xray] started");
     v.push(("main_connected", a, big));
     let mut a = app(&[REALITY]);
-    a.conn = Conn::Error("ядро завершилось".into());
+    a.conn = Conn::Error("core exited".into());
     v.push(("main_error", a, big));
     let mut a = app(&[REALITY]);
     a.link = LinkState::Down("не отвечает".into());

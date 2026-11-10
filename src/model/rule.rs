@@ -32,13 +32,13 @@ pub enum RuleKind {
 }
 
 impl RuleKind {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            RuleKind::Domain => "домен",
-            RuleKind::Ip => "ip",
-            RuleKind::Geosite => "geosite",
-            RuleKind::Geoip => "geoip",
-            RuleKind::Process => "процесс",
+            RuleKind::Domain => crate::t!("rules.kind_domain"),
+            RuleKind::Ip => "ip".to_string(),
+            RuleKind::Geosite => "geosite".to_string(),
+            RuleKind::Geoip => "geoip".to_string(),
+            RuleKind::Process => crate::t!("rules.kind_process"),
         }
     }
 }
@@ -113,6 +113,30 @@ pub fn builtin_presets() -> Vec<Preset> {
     toml::from_str::<PresetFile>(BUILTIN)
         .expect("presets.toml is embedded and tested")
         .preset
+}
+
+/// The preset's title in the current language (the file's own title is the fallback).
+pub fn preset_title(p: &Preset) -> String {
+    let key = format!("preset.{}.title", p.id);
+    match crate::i18n::table(crate::i18n::current())
+        .get(&key)
+        .or_else(|| crate::i18n::table(crate::i18n::Lang::En).get(&key))
+    {
+        Some(t) => t.clone(),
+        None => p.title.clone(),
+    }
+}
+
+/// The preset's note in the current language.
+pub fn preset_note(p: &Preset) -> String {
+    let key = format!("preset.{}.note", p.id);
+    match crate::i18n::table(crate::i18n::current())
+        .get(&key)
+        .or_else(|| crate::i18n::table(crate::i18n::Lang::En).get(&key))
+    {
+        Some(t) => t.clone(),
+        None => p.note.clone(),
+    }
 }
 
 impl Preset {
@@ -256,7 +280,7 @@ pub fn bypass_additions(mode: RoutingMode, rules: &EffectiveRules) -> Vec<String
 pub fn validate(kind: RuleKind, value: &str) -> Result<String, String> {
     let v = value.trim();
     if v.is_empty() {
-        return Err("значение не может быть пустым".into());
+        return Err(crate::t!("rulecheck.empty"));
     }
     match kind {
         RuleKind::Domain => {
@@ -270,22 +294,19 @@ pub fn validate(kind: RuleKind, value: &str) -> Result<String, String> {
                         && l.chars().all(|c| c.is_alphanumeric() || c == '-')
                 })
                 && d.contains('.');
-            ok.then_some(d)
-                .ok_or_else(|| "ожидается домен вида example.com".to_string())
+            ok.then_some(d).ok_or_else(|| crate::t!("rulecheck.domain"))
         }
         RuleKind::Ip => {
             let (addr, prefix) = match v.split_once('/') {
                 Some((a, p)) => (a, Some(p)),
                 None => (v, None),
             };
-            let ip: IpAddr = addr.parse().map_err(|_| {
-                "ожидается IP-адрес или сеть (10.0.0.0/8, 2001:db8::/32)".to_string()
-            })?;
+            let ip: IpAddr = addr.parse().map_err(|_| crate::t!("rulecheck.ip"))?;
             if let Some(p) = prefix {
                 let max = if ip.is_ipv4() { 32 } else { 128 };
                 match p.parse::<u8>() {
                     Ok(n) if n <= max => {}
-                    _ => return Err(format!("длина префикса должна быть от 0 до {max}")),
+                    _ => return Err(crate::t!("rulecheck.prefix", max = max)),
                 }
             }
             Ok(v.to_string())
@@ -294,15 +315,14 @@ pub fn validate(kind: RuleKind, value: &str) -> Result<String, String> {
             let ok = v
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '!' || c == '@' || c == '_');
-            ok.then(|| v.to_ascii_lowercase()).ok_or_else(|| {
-                "имя набора: латиница, цифры и дефис (например category-ru, ru)".into()
-            })
+            ok.then(|| v.to_ascii_lowercase())
+                .ok_or_else(|| crate::t!("rulecheck.set"))
         }
         RuleKind::Process => {
             let name = v.strip_suffix(".exe").unwrap_or(v);
             let ok = !name.is_empty() && !name.contains(['/', '\\']);
             ok.then(|| name.to_string())
-                .ok_or_else(|| "ожидается имя процесса без пути (Discord, steam)".into())
+                .ok_or_else(|| crate::t!("rulecheck.process"))
         }
     }
 }

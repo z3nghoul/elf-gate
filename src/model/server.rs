@@ -9,10 +9,10 @@ pub enum ServerRole {
 }
 
 impl ServerRole {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            ServerRole::Primary => "основной",
-            ServerRole::Backup => "запасной",
+            ServerRole::Primary => crate::t!("role.primary"),
+            ServerRole::Backup => crate::t!("role.backup"),
         }
     }
 }
@@ -177,19 +177,13 @@ impl Server {
 
     /// Explanation when the transport still works but Xray marks it deprecated.
     /// This is separate from `unsupported` (incompatibility): such servers stay usable.
-    pub fn deprecated_transport(&self) -> Option<&'static str> {
+    pub fn deprecated_transport(&self) -> Option<String> {
         if !self.is_supported() {
             return None;
         }
         match self.transport {
-            Transport::Ws => Some(
-                "Устаревший транспорт ws: Xray помечает WebSocket как deprecated и может \
-                 убрать его. Рекомендуется XHTTP.",
-            ),
-            Transport::Grpc => Some(
-                "Устаревший транспорт grpc: Xray помечает gRPC как deprecated и может \
-                 убрать его. Рекомендуется XHTTP.",
-            ),
+            Transport::Ws => Some(crate::t!("model.deprecated_ws")),
+            Transport::Grpc => Some(crate::t!("model.deprecated_grpc")),
             Transport::Tcp | Transport::Xhttp => None,
         }
     }
@@ -259,15 +253,15 @@ impl PingKind {
             PingKind::Tunnel => "vpn",
         }
     }
-    pub fn long(self) -> &'static str {
+    pub fn long(self) -> String {
         match self {
-            PingKind::Tcp => "TCP до сервера",
-            PingKind::Tunnel => "через туннель",
+            PingKind::Tcp => crate::t!("pingkind.tcp"),
+            PingKind::Tunnel => crate::t!("pingkind.tunnel"),
         }
     }
 }
 
-/// `42 ms, 30 с назад`: the age tells that the number is alive.
+/// `42 ms, 30 s ago`: the age tells that the number is alive.
 pub fn ping_label_with_age(ping: Ping, at: Option<i64>, now: i64) -> String {
     let base = ping.label();
     let Some(at) = at.filter(|_| !matches!(ping, Ping::Unknown | Ping::Pending)) else {
@@ -275,13 +269,13 @@ pub fn ping_label_with_age(ping: Ping, at: Option<i64>, now: i64) -> String {
     };
     let age = (now - at).max(0);
     let ago = if age < 90 {
-        format!("{age} с")
+        crate::t!("ping.unit_s", n = age)
     } else if age < 5400 {
-        format!("{} мин", age / 60)
+        crate::t!("ping.unit_min", n = age / 60)
     } else {
-        format!("{} ч", age / 3600)
+        crate::t!("ping.unit_h", n = age / 3600)
     };
-    format!("{base}, {ago} назад")
+    crate::t!("ping.age", base = base, ago = ago)
 }
 
 impl Ping {

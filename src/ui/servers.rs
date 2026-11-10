@@ -16,14 +16,17 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
     let rows = app.rows();
     if rows.is_empty() && app.filter.is_empty() {
         // First run: nothing to select yet, so tell the user what to do.
-        let text = "Список серверов пуст.\n\nНажмите a, чтобы добавить сервер.\n(ссылка на сервер, а не на подписку)";
+        let text = crate::t!("servers.empty");
         f.render_widget(
             Paragraph::new(text)
                 .style(th.text())
                 .wrap(Wrap { trim: false })
                 .block(
                     Block::bordered()
-                        .title(Span::styled(" Серверы ", th.title()))
+                        .title(Span::styled(
+                            format!(" {} ", crate::t!("panel.servers")),
+                            th.title(),
+                        ))
                         .border_style(th.border(focused)),
                 ),
             area,
@@ -41,7 +44,13 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                         let hidden = sub.servers.iter().filter(|s| s.hidden).count();
                         let shown = sub.servers.len() - hidden;
                         if hidden > 0 {
-                            format!("{arrow} {} ({shown}, скрыто {hidden})", sub.name)
+                            crate::t!(
+                                "servers.group_hidden",
+                                arrow = arrow,
+                                name = sub.name,
+                                shown = shown,
+                                hidden = hidden
+                            )
                         } else {
                             format!("{arrow} {} ({shown})", sub.name)
                         }
@@ -65,7 +74,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                 if s.hidden {
                     return ListItem::new(Line::from(vec![
                         Span::styled("  ", th.muted()),
-                        Span::styled(format!("{} (скрыт)", s.name), th.muted()),
+                        Span::styled(crate::t!("servers.hidden_row", name = s.name), th.muted()),
                     ]));
                 }
                 if s.info_only {
@@ -82,9 +91,9 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                 };
                 // Separate from incompatibility: the server works, but its transport is deprecated.
                 let tag = if s.deprecated_transport().is_some() {
-                    "[устар.]"
+                    crate::t!("tag.deprecated")
                 } else {
-                    ""
+                    String::new()
                 };
                 let name: String = s.name.chars().take(14).collect();
                 ListItem::new(Line::from(vec![
@@ -108,7 +117,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
         })
         .collect();
 
-    let mut title = String::from(" Серверы ");
+    let mut title = format!(" {} ", crate::t!("panel.servers"));
     if app.filtering || !app.filter.is_empty() {
         title.push_str(&format!(
             "[/{}{}] ",

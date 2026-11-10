@@ -25,6 +25,7 @@ pub enum SettingId {
     Autostart,
     Hwid,
     Theme,
+    Language,
     Privacy,
     SubUa(String),
     SubHours(String),
@@ -34,11 +35,10 @@ const LOG_LEVELS: [&str; 5] = ["debug", "info", "warning", "error", "none"];
 
 fn onoff(b: bool) -> String {
     if b {
-        "включено"
+        crate::t!("setting.on")
     } else {
-        "выключено"
+        crate::t!("setting.off")
     }
-    .into()
 }
 
 impl AppState {
@@ -47,48 +47,53 @@ impl AppState {
         let c = &self.config;
         let mut rows = vec![
             (
+                SettingId::Language,
+                crate::t!("setting.language"),
+                crate::i18n::current().native_name().to_string(),
+            ),
+            (
                 SettingId::XrayPath,
-                "Путь к Xray".into(),
+                crate::t!("setting.xray_path"),
                 c.core.xray_path.clone(),
             ),
             (
                 SettingId::TunXrayPath,
-                "Xray для TUN (Linux)".into(),
+                crate::t!("setting.tun_xray_path"),
                 c.tun.xray_path.clone(),
             ),
             (
                 SettingId::SocksPort,
-                "Порт SOCKS".into(),
+                crate::t!("setting.socks_port"),
                 c.core.socks_port.to_string(),
             ),
             (
                 SettingId::HttpPort,
-                "Порт HTTP".into(),
+                crate::t!("setting.http_port"),
                 c.core.http_port.to_string(),
             ),
             (
                 SettingId::ApiPort,
-                "Порт API (статистика)".into(),
+                crate::t!("setting.api_port"),
                 c.core.api_port.to_string(),
             ),
             (
                 SettingId::LogLevel,
-                "Уровень лога ядра".into(),
+                crate::t!("setting.log_level"),
                 c.core.log_level.clone(),
             ),
             (
                 SettingId::VerboseLog,
-                "Подробный лог ядра (access)".into(),
+                crate::t!("setting.verbose_log"),
                 onoff(c.core.verbose_log),
             ),
             (
                 SettingId::SetSystemProxy,
-                "Системный прокси".into(),
+                crate::t!("setting.system_proxy"),
                 onoff(c.proxy.set_system_proxy),
             ),
             (
                 SettingId::PingMode,
-                "Режим пинга".into(),
+                crate::t!("setting.ping_mode"),
                 match c.ping.mode {
                     PingMode::Tcp => "tcp",
                     PingMode::Url => "url",
@@ -97,50 +102,54 @@ impl AppState {
             ),
             (
                 SettingId::PingUrl,
-                "Адрес для пинга по URL".into(),
+                crate::t!("setting.ping_url"),
                 c.ping.url.clone(),
             ),
             (
                 SettingId::PingTimeout,
-                "Таймаут пинга, мс".into(),
+                crate::t!("setting.ping_timeout"),
                 c.ping.timeout_ms.to_string(),
             ),
             (
                 SettingId::PingAuto,
-                "Автопинг, с (0 = выкл)".into(),
+                crate::t!("setting.ping_auto"),
                 c.ping.auto_interval_secs.to_string(),
             ),
             (
                 SettingId::TunName,
-                "Имя TUN-интерфейса".into(),
+                crate::t!("setting.tun_name"),
                 c.tun.name.clone(),
             ),
             (
                 SettingId::TunnelDns,
-                "DNS через туннель".into(),
+                crate::t!("setting.tunnel_dns"),
                 c.tun.tunnel_dns.clone(),
             ),
             (
                 SettingId::AutoConnect,
-                "Подключаться при запуске".into(),
+                crate::t!("setting.auto_connect"),
                 onoff(c.ui.auto_connect),
             ),
             (
                 SettingId::Autostart,
-                "Запускать при входе в систему".into(),
+                crate::t!("setting.autostart"),
                 onoff(self.autostart),
             ),
             (
                 SettingId::Hwid,
-                "HWID этого устройства".into(),
+                crate::t!("setting.hwid"),
                 c.device.hwid.clone(),
             ),
             (
                 SettingId::Privacy,
-                "Режим приватности (Ctrl+P)".into(),
+                crate::t!("setting.privacy"),
                 onoff(c.ui.privacy_mode),
             ),
-            (SettingId::Theme, "Тема".into(), c.ui.theme.clone()),
+            (
+                SettingId::Theme,
+                crate::t!("setting.theme"),
+                c.ui.theme.clone(),
+            ),
         ];
         for s in &c.subscriptions {
             rows.push((
@@ -150,7 +159,7 @@ impl AppState {
             ));
             rows.push((
                 SettingId::SubHours(s.name.clone()),
-                format!("«{}»: обновлять, ч (0 = выкл)", s.name),
+                crate::t!("setting.sub_hours", name = s.name),
                 s.auto_update_hours.to_string(),
             ));
         }
@@ -186,17 +195,22 @@ impl AppState {
             }),
             SettingId::Privacy => Setting::PrivacyMode(!c.ui.privacy_mode),
             SettingId::Hwid => {
-                self.popup = Some(Popup::Notice(format!(
-                    "HWID: {}\n\nЭто идентификатор устройства для панели подписок (заголовок x-hwid). Каждая подписка, которую вы загрузили с ним, занимает один слот устройств у провайдера; он одинаков при каждом запуске и для всех подписок. Менять его не нужно.",
-                    if c.ui.privacy_mode { crate::redact::hwid(&c.device.hwid) } else { c.device.hwid.clone() }
+                self.popup = Some(Popup::Notice(crate::t!(
+                    "setting.hwid_info",
+                    hwid = if c.ui.privacy_mode {
+                        crate::redact::hwid(&c.device.hwid)
+                    } else {
+                        c.device.hwid.clone()
+                    }
                 )));
                 return;
             }
+            SettingId::Language => Setting::Language(c.ui.language.next()),
             SettingId::Theme => Setting::Theme(cycle(&["dark", "light"], &c.ui.theme)),
             SettingId::LogLevel => Setting::LogLevel(cycle(&LOG_LEVELS, &c.core.log_level)),
             other => {
                 self.popup = Some(Popup::Input {
-                    title: format!("{label} (сейчас: {value})"),
+                    title: crate::t!("setting.input_title", label = label, value = value),
                     buf: value,
                     purpose: InputPurpose::Setting(other),
                 });
@@ -209,14 +223,8 @@ impl AppState {
     /// The typed text of a text or number row; a bad number is explained here.
     pub(super) fn submit_setting(&mut self, id: SettingId, text: String) {
         let text = text.trim().to_string();
-        let num = |t: &str| {
-            t.parse::<u64>()
-                .map_err(|_| "ожидается целое число".to_string())
-        };
-        let port = |t: &str| {
-            t.parse::<u16>()
-                .map_err(|_| "порт: число от 1024 до 65535".to_string())
-        };
+        let num = |t: &str| t.parse::<u64>().map_err(|_| crate::t!("setting.err_int"));
+        let port = |t: &str| t.parse::<u16>().map_err(|_| crate::t!("setting.err_port"));
         let set: Result<Setting, String> = match id {
             SettingId::XrayPath => Ok(Setting::XrayPath(text)),
             SettingId::TunXrayPath => Ok(Setting::TunXrayPath(text)),

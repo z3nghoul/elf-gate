@@ -24,16 +24,13 @@ pub fn choose_method(
     tun_up: bool,
     physical: Option<String>,
     can_bind: bool,
-) -> (Method, Option<&'static str>) {
+) -> (Method, Option<String>) {
     match (configured, tun_up) {
         (PingMode::Url, _) => (Method::Url, None),
         (PingMode::Tcp, false) => (Method::Tcp, None),
         (PingMode::Tcp, true) => match physical.filter(|_| can_bind) {
             Some(iface) => (Method::TcpBound(iface), None),
-            None => (
-                Method::Url,
-                Some("В режиме TUN TCP-пинг мимо туннеля недоступен: пинг идёт через ядро (медленнее)"),
-            ),
+            None => (Method::Url, Some(crate::t!("eng.tun_ping_via_core"))),
         },
     }
 }
@@ -105,7 +102,7 @@ impl Engine {
         }
         if real.is_empty() {
             if !self.mock {
-                self.status("Нет серверов для пинга");
+                self.status(crate::t!("eng.no_ping_servers"));
             }
             return;
         }
@@ -131,7 +128,7 @@ impl Engine {
             match resolve_binary(&self.config.core.xray_path) {
                 Ok(b) => Some(b),
                 Err(e) => {
-                    self.status(format!("Пинг по URL: {e}"));
+                    self.status(crate::t!("eng.url_ping_error", error = e));
                     return;
                 }
             }
@@ -223,13 +220,9 @@ impl Engine {
             return;
         };
         self.fp_searching.insert(server.id);
-        self.log(
-            Level::Info,
-            format!(
-                "{}: сервер отвечает по TCP, но запрос через него не проходит; подбираю fp",
-                server.name
-            ),
-        );
+        self.logt(Level::Info, || {
+            crate::t!("eng.fp_searching", name = server.name)
+        });
         let tx = self.tx.clone();
         let core = self.config.core.clone();
         let cfg = self.config.ping.clone();
@@ -286,20 +279,14 @@ impl Engine {
         }
         match &found {
             Some(fp) => {
-                self.log(
-                    Level::Info,
-                    format!("{name}: fp подобран автоматически: {fp}"),
-                );
-                self.status(format!("{name}: подобран fp={fp}"));
+                self.logt(Level::Info, || {
+                    crate::t!("eng.fp_found_log", name = name, fp = fp)
+                });
+                self.status(crate::t!("eng.fp_found_status", name = name, fp = fp));
             }
             None => {
-                self.log(
-                    Level::Warning,
-                    format!(
-                        "[Warning] {name}: ни один fp не помог. Проверьте ключ, SNI, shortId и порт на сервере"
-                    ),
-                );
-                self.status(format!("{name}: подобрать fp не удалось"));
+                self.logt(Level::Warning, || crate::t!("eng.fp_none_log", name = name));
+                self.status(crate::t!("eng.fp_none_status", name = name));
             }
         }
         let current = found.clone();

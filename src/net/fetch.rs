@@ -83,14 +83,14 @@ pub async fn fetch(
             user_agent
         })
         .build()
-        .map_err(|e| format!("не удалось создать HTTP-клиент: {e}"))?;
+        .map_err(|e| crate::t!("net.http_client", error = e))?;
     let resp = client
         .get(url)
         .send()
         .await
         .map_err(|e| describe(e.without_url()))?;
     if !resp.status().is_success() {
-        return Err(format!("сервер подписки ответил {}", resp.status()));
+        return Err(crate::t!("net.sub_status", status = resp.status()));
     }
     let header = |name: &str| {
         resp.headers()
@@ -101,11 +101,11 @@ pub async fn fetch(
     let info = header("subscription-userinfo").and_then(|h| parse_userinfo(&h));
     let title = header("profile-title").and_then(|h| parse_title(&h));
     if resp.content_length().is_some_and(|n| n as usize > MAX_BODY) {
-        return Err("ответ слишком большой для подписки".into());
+        return Err(crate::t!("net.sub_too_big"));
     }
     let bytes = resp.bytes().await.map_err(|e| describe(e.without_url()))?;
     if bytes.len() > MAX_BODY {
-        return Err("ответ слишком большой для подписки".into());
+        return Err(crate::t!("net.sub_too_big"));
     }
     Ok(Fetched {
         body: String::from_utf8_lossy(&bytes).into_owned(),
@@ -116,11 +116,11 @@ pub async fn fetch(
 
 fn describe(e: reqwest::Error) -> String {
     if e.is_timeout() {
-        "подписка не загрузилась за 15 с".into()
+        crate::t!("net.sub_timeout")
     } else if e.is_connect() {
-        "нет соединения с сервером подписки (проверьте интернет)".into()
+        crate::t!("net.sub_no_connect")
     } else {
-        format!("не удалось загрузить подписку: {e}")
+        crate::t!("net.sub_failed", error = e)
     }
 }
 

@@ -3,25 +3,34 @@ pub mod vless;
 
 use crate::model::server::Server;
 use percent_encoding::percent_decode_str;
-use thiserror::Error;
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ParseError {
-    #[error("пустая ссылка")]
     Empty,
-    #[error("это не ссылка на сервер (ожидается схема://...)")]
     NotALink,
-    #[error("неизвестная схема: {0}://")]
     UnknownScheme(String),
-    #[error("некорректная ссылка: {0}")]
     InvalidUrl(String),
-    #[error("в ссылке нет UUID")]
     MissingUuid,
-    #[error("в ссылке нет адреса сервера")]
     MissingHost,
-    #[error("в ссылке нет порта")]
     MissingPort,
 }
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            ParseError::Empty => crate::t!("parse.empty"),
+            ParseError::NotALink => crate::t!("parse.not_a_link"),
+            ParseError::UnknownScheme(x) => crate::t!("parse.unknown_scheme", scheme = x),
+            ParseError::InvalidUrl(x) => crate::t!("parse.invalid_url", error = x),
+            ParseError::MissingUuid => crate::t!("parse.no_uuid"),
+            ParseError::MissingHost => crate::t!("parse.no_host"),
+            ParseError::MissingPort => crate::t!("parse.no_port"),
+        };
+        f.write_str(&text)
+    }
+}
+
+impl std::error::Error for ParseError {}
 
 /// Schemes we recognise but do not support yet; they are imported as greyed-out servers.
 const UNSUPPORTED_SCHEMES: &[&str] = &[
@@ -60,9 +69,7 @@ pub fn parse_link(input: &str) -> Result<Server, ParseError> {
 /// Placeholder rows (zero UUID, address 0.0.0.0, port 0 or 1) are notices, not servers.
 fn mark_stub(mut s: Server) -> Server {
     if crate::model::fullconfig::is_stub(&s.address, s.port, &s.uuid) {
-        s.unsupported = Some(
-            "заглушка провайдера (нулевой адрес): включите HWID или смените User-Agent".into(),
-        );
+        s.unsupported = Some(crate::t!("parse.stub"));
         s.info_only = true;
     }
     s
@@ -73,7 +80,7 @@ fn unsupported_server(link: &str, scheme: &str) -> Server {
     Server::unsupported(
         link,
         name,
-        format!("протокол {scheme}:// пока не поддерживается"),
+        crate::t!("parse.unsupported_scheme", scheme = scheme),
     )
 }
 

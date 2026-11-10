@@ -20,9 +20,19 @@ fn build_menu(m: &TrayModel) -> Menu {
     let on = matches!(m.state, IconState::On | IconState::Connecting);
     let _ = menu.append(&MenuItem::with_id("title", &m.title, false, None));
     let _ = menu.append(&PredefinedMenuItem::separator());
-    let _ = menu.append(&MenuItem::with_id("connect", "Подключиться", !on, None));
-    let _ = menu.append(&MenuItem::with_id("disconnect", "Отключиться", on, None));
-    let servers = Submenu::with_id("servers", "Сервер", !m.servers.is_empty());
+    let _ = menu.append(&MenuItem::with_id(
+        "connect",
+        m.text("tray.connect"),
+        !on,
+        None,
+    ));
+    let _ = menu.append(&MenuItem::with_id(
+        "disconnect",
+        m.text("tray.disconnect"),
+        on,
+        None,
+    ));
+    let servers = Submenu::with_id("servers", m.text("tray.server"), !m.servers.is_empty());
     for (id, name) in &m.servers {
         let mark = if Some(*id) == m.active { "● " } else { "" };
         let _ = servers.append(&MenuItem::with_id(
@@ -35,18 +45,13 @@ fn build_menu(m: &TrayModel) -> Menu {
     let _ = menu.append(&servers);
     let _ = menu.append(&MenuItem::with_id(
         "mode",
-        format!("Режим: {} (переключить)", mode_label(m.mode)),
+        crate::i18n::tr(m.lang, "tray.mode", &[("mode", mode_label(m.mode))]),
         true,
         None,
     ));
-    let _ = menu.append(&MenuItem::with_id("open", "Открыть интерфейс", true, None));
+    let _ = menu.append(&MenuItem::with_id("open", m.text("tray.open"), true, None));
     let _ = menu.append(&PredefinedMenuItem::separator());
-    let _ = menu.append(&MenuItem::with_id(
-        "quit",
-        "Выход (отключить VPN)",
-        true,
-        None,
-    ));
+    let _ = menu.append(&MenuItem::with_id("quit", m.text("tray.quit"), true, None));
     menu
 }
 
@@ -71,7 +76,7 @@ pub async fn start(model: watch::Receiver<TrayModel>, on_action: OnAction) -> Re
         let mut model = model;
         let first = model.borrow().clone();
         let Some(ic) = icon(first.state) else {
-            let _ = ready_tx.send(Err("не удалось создать значок".into()));
+            let _ = ready_tx.send(Err(crate::t!("err.tray_icon")));
             return;
         };
         let tray = match TrayIconBuilder::new()

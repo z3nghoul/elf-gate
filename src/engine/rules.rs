@@ -43,7 +43,7 @@ impl Engine {
     pub(crate) fn submit_rule(&mut self, kind: RuleKind, text: String) {
         match validate(kind, &text) {
             Ok(value) => self.add_rule(kind, value),
-            Err(e) => self.error_alert(format!("Правило не добавлено: {e}")),
+            Err(e) => self.error_alert(crate::t!("eng.rule_rejected", error = e)),
         }
     }
 
@@ -54,7 +54,7 @@ impl Engine {
             .iter()
             .any(|r| r.kind == kind && r.value == value)
         {
-            self.error_alert("Такое правило уже есть");
+            self.error_alert(crate::t!("eng.rule_exists"));
             return;
         }
         self.config.rules.push(Rule::new(kind, value));
@@ -67,7 +67,7 @@ impl Engine {
         if let (Conn::Connected(id), Some(_)) = (&self.conn, &self.core) {
             let id = *id;
             self.alert(Alert::Ask {
-                text: "Правила изменены. Перезапустить ядро, чтобы применить?".into(),
+                text: crate::t!("eng.rules_restart"),
                 ask: Ask::ApplyRules(id),
             });
         }

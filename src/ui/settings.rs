@@ -28,24 +28,24 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     state.select(Some(app.settings_cursor.min(rows.len().saturating_sub(1))));
     f.render_stateful_widget(
         List::new(items)
-            .block(Block::bordered().title(Span::styled(" Настройки ", th.title())))
+            .block(Block::bordered().title(Span::styled(
+                format!(" {} ", crate::t!("panel.settings")),
+                th.title(),
+            )))
             .highlight_symbol("> ")
             .highlight_style(th.selected()),
         list_area,
         &mut state,
     );
     let tray = if app.tray {
-        "значок в трее: есть"
+        crate::t!("settings.tray_present")
     } else {
-        "значок в трее: нет (не поддерживается окружением или не запущен)"
+        crate::t!("settings.tray_absent")
     };
     f.render_widget(
         Paragraph::new(vec![
             Line::from(Span::styled(tray, th.muted())),
-            Line::from(Span::styled(
-                "Enter - изменить / переключить   Esc - назад. Порты и пути применяются при следующем подключении.",
-                th.text(),
-            )),
+            Line::from(Span::styled(crate::t!("settings.footer"), th.text())),
         ])
         .wrap(ratatui::widgets::Wrap { trim: false })
         .block(Block::bordered()),

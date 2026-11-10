@@ -38,9 +38,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
         })
         .collect();
 
-    let mut title = String::from(" Логи ");
+    let mut title = format!(" {} ", crate::t!("panel.logs"));
     if app.log_scroll > 0 {
-        title.push_str(&format!("(↑{}, G - вниз) ", app.log_scroll));
+        title.push_str(&format!(
+            "{} ",
+            crate::t!("logs.scrolled", n = app.log_scroll)
+        ));
     }
     f.render_widget(
         Paragraph::new(lines).block(

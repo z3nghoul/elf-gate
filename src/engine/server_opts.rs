@@ -27,9 +27,7 @@ impl Engine {
             .server_by_id(id)
             .is_some_and(|s| s.is_supported() && s.full.is_none());
         if !supported {
-            self.status(
-                "Роль можно назначить только серверу из ссылки (не готовому конфигу провайдера)",
-            );
+            self.status(crate::t!("status.role_link_only"));
             return;
         }
         let mut displaced = Vec::new();
@@ -59,10 +57,13 @@ impl Engine {
             name = server.name.clone();
         }
         self.update_override(&key, |o| o.role = role);
-        self.log(
-            Level::Info,
-            format!("роль {name}: {}", role.map_or("нет", |r| r.label())),
-        );
+        self.logt(Level::Info, || {
+            crate::t!(
+                "eng.role_log",
+                name = name,
+                role = role.map_or_else(|| crate::t!("eng.role_none"), |r| r.label())
+            )
+        });
         self.save_config();
         self.restart_if_affected(id);
     }
@@ -80,7 +81,7 @@ impl Engine {
                 )
         });
         if !applicable {
-            self.status("Фрагментация применима только к серверам с TLS или Reality");
+            self.status(crate::t!("eng.fragment_tls_only"));
             return;
         }
         let mut name = String::new();
@@ -94,13 +95,17 @@ impl Engine {
             name = server.name.clone();
         }
         self.update_override(&key, |o| o.fragment = on);
-        self.log(
-            Level::Info,
-            format!(
-                "фрагментация ClientHello для {name}: {}",
-                if on { "вкл" } else { "выкл" }
-            ),
-        );
+        self.logt(Level::Info, || {
+            crate::t!(
+                "eng.fragment_log",
+                name = name,
+                state = if on {
+                    crate::t!("eng.state_on")
+                } else {
+                    crate::t!("eng.state_off")
+                }
+            )
+        });
         self.save_config();
         self.restart_if_affected(id);
     }
@@ -120,7 +125,7 @@ impl Engine {
             return;
         }
         if self.busy {
-            self.status("Изменение применится при следующем подключении");
+            self.status(crate::t!("eng.applies_next"));
         } else {
             self.connect(c);
         }

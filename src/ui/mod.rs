@@ -3,6 +3,8 @@ mod help;
 #[cfg(test)]
 mod hint_tests;
 pub mod hints;
+#[cfg(test)]
+mod lang_tests;
 mod logs;
 mod popup;
 #[cfg(test)]
@@ -27,9 +29,12 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
     let area = f.area();
 
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
-        let msg = format!(
-            "Увеличьте окно (минимум {MIN_WIDTH}x{MIN_HEIGHT}, сейчас {}x{})",
-            area.width, area.height
+        let msg = crate::t!(
+            "ui.too_small",
+            min_w = MIN_WIDTH,
+            min_h = MIN_HEIGHT,
+            w = area.width,
+            h = area.height
         );
         let key_rows = hints::rows(app, area.width as usize).len().max(1) as u16;
         let [top, bar] =
@@ -150,7 +155,7 @@ mod tests {
     async fn deprecated_and_rejected_servers_are_tagged() {
         let (tx, _rx) = unbounded_channel();
         let mut app = AppState::with_demo(tx);
-        // Mock list: FI-1 uses ws, Финляндия-3 uses grpc.
+        // Mock list: FI-1 uses ws, Finland-3 uses grpc.
         let out = draw(80, MIN_HEIGHT, &mut app);
         println!("{out}");
         assert!(out.matches("[устар.]").count() >= 2, "{out}");

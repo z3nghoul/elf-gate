@@ -54,7 +54,7 @@ async fn start_core(
     let ip = tun::resolve_server(&server.address, server.port).await?;
     tun::tcp_reachable(ip, server.port, Duration::from_secs(4))
         .await
-        .map_err(|e| format!("Сервер недоступен по TCP: {e}"))?;
+        .map_err(|e| crate::t!("eng.server_tcp_down", error = e))?;
 
     // Ask Xray about the server itself first: a refusal greys the server out.
     if let Verdict::Rejected(reason) = checker.check(core_cfg, server, run_dir).await {
@@ -62,7 +62,7 @@ async fn start_core(
             id: server.id,
             reason: reason.clone(),
         });
-        return Err(format!("Xray отверг конфиг сервера: {reason}").into());
+        return Err(crate::t!("eng.server_rejected", reason = reason).into());
     }
 
     let binary = match &setup {
@@ -102,7 +102,10 @@ async fn start_core(
             match tun::resolve_server(&backup.address, backup.port).await {
                 Ok(ip) => Some(ip.to_string()),
                 Err(e) => {
-                    log_warning(tx, format!("запасной сервер {} пропущен: {e}", backup.name));
+                    log_warning(
+                        tx,
+                        crate::t!("eng.backup_skipped", name = backup.name, error = e),
+                    );
                     None
                 }
             }
@@ -128,9 +131,10 @@ async fn start_core(
     }
     let cfg = build_with(server, core_cfg, &plan).map_err(|e| e.to_string())?;
     if let Verdict::Rejected(reason) = checker.check_config(&binary, &cfg, run_dir).await {
-        return Err(format!(
-            "Xray отверг итоговый конфиг (проверьте правила): {reason}\n{}",
-            crate::xray::process::describe_core(&binary)
+        return Err(crate::t!(
+            "eng.final_rejected",
+            reason = reason,
+            core = crate::xray::process::describe_core(&binary)
         )
         .into());
     }
@@ -161,7 +165,7 @@ async fn start_core(
 impl Engine {
     pub(super) fn connect(&mut self, id: u64) {
         if self.busy {
-            self.status("Подождите: ядро запускается или останавливается");
+            self.status(crate::t!("eng.wait_core"));
             return;
         }
         let Some(server) = self.server_by_id(id).cloned() else {
@@ -178,7 +182,7 @@ impl Engine {
         if mode == Mode::Tun {
             if self.tun_first_run() {
                 self.alert(Alert::Ask {
-                    text: "Режим TUN. Включить пресет «только Discord»?\n\nДа: через VPN пойдёт только Discord, всё остальное напрямую.\nНет: через VPN пойдёт всё, кроме локальной сети.\n(Это можно изменить на экране правил, клавиша r.)".into(),
+                    text: crate::t!("eng.tun_intro"),
                     ask: Ask::PresetOffer(id),
                 });
                 return;
@@ -203,7 +207,7 @@ impl Engine {
                     tun::process_caps_warning(caps.as_deref(), !rules.processes.is_empty())
                 {
                     self.caps_warned = true;
-                    self.log(Level::Warning, "TUN: у ядра нет cap_sys_ptrace/cap_dac_read_search, правила по процессам ограничены");
+                    self.logt(Level::Warning, || crate::t!("eng.tun_caps_log"));
                     self.alert(Alert::Notice(text));
                 }
             }
@@ -236,10 +240,7 @@ impl Engine {
         let backup = self.backup_for(id);
         let known_hosts = self.known_hosts();
         if let Some(b) = &backup {
-            self.log(
-                Level::Info,
-                format!("запасной сервер: {} (автопереключение)", b.name),
-            );
+            self.logt(Level::Info, || crate::t!("eng.backup_log", name = b.name));
         }
         tokio::spawn(async move {
             if let Some(old) = old {
@@ -358,7 +359,7 @@ impl Engine {
             return;
         }
         self.tun_active = false;
-        self.conn = Conn::Error("не удалось запустить ядро".into());
+        self.conn = Conn::Error(crate::t!("eng.core_start_failed"));
         self.request_proxy_off();
         if needs_privileges {
             self.show_problem(&Problem::NeedsPrivileges);
@@ -511,7 +512,7 @@ impl Engine {
     /// `--tun`: switch to TUN and connect to the server used last.
     pub fn start_tun_from_cli(&mut self) {
         if !crate::build_info::TUN_AVAILABLE {
-            self.status("Режим TUN в этой версии недоступен");
+            self.status(crate::t!("eng.tun_unavailable"));
             return;
         }
         self.mode = Mode::Tun;
@@ -525,10 +526,7 @@ impl Engine {
             return;
         }
         self.mode = self.config.mode.traffic;
-        self.log(
-            Level::Info,
-            "auto_connect: подключаюсь к последнему серверу",
-        );
+        self.logt(Level::Info, || crate::t!("eng.auto_connect_log"));
         self.connect_last_server();
     }
 
@@ -543,7 +541,7 @@ impl Engine {
         });
         match found {
             Some(id) => self.connect(id),
-            None => self.status("Нет сервера для автоподключения: выберите сервер и нажмите Enter"),
+            None => self.status(crate::t!("eng.no_auto_server")),
         }
     }
 }

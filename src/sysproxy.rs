@@ -17,9 +17,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ProxyError {
-    #[error("системный прокси не поддерживается в этом окружении")]
+    #[error("{}", crate::t!("err.sysproxy_unsupported"))]
     Unsupported,
-    #[error("приложение завершается")]
+    #[error("{}", crate::t!("err.closing"))]
     Closed,
     #[error("{0}")]
     Platform(#[from] PlatformError),
@@ -115,9 +115,7 @@ impl ProxyController {
     pub fn recover(&self) -> Result<Option<String>, ProxyError> {
         let addr = self.store.load()?.proxy.map(|p| p.address);
         match (addr, self.disable()?) {
-            (Some(addr), true) => Ok(Some(format!(
-                "восстановлены прежние настройки системного прокси (после сбоя оставался {addr})"
-            ))),
+            (Some(addr), true) => Ok(Some(crate::t!("err.sysproxy_restored", addr = addr))),
             _ => Ok(None),
         }
     }

@@ -67,9 +67,9 @@ impl Autostart for Entry {
 
     fn enable(&self, command: &[String]) -> Result<(), PlatformError> {
         if command.is_empty() {
-            return Err(PlatformError::Failed("пустая команда автозапуска".into()));
+            return Err(PlatformError::Failed(crate::t!("err.autostart_empty")));
         }
-        let fail = |e: std::io::Error| PlatformError::Failed(format!("автозапуск: {e}"));
+        let fail = |e: std::io::Error| PlatformError::Failed(crate::t!("err.autostart", error = e));
         fs::create_dir_all(&self.dir).map_err(fail)?;
         fs::write(self.path(), desktop_file(command)).map_err(fail)
     }
@@ -78,7 +78,7 @@ impl Autostart for Entry {
         match fs::remove_file(self.path()) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(PlatformError::Failed(format!("автозапуск: {e}"))),
+            Err(e) => Err(PlatformError::Failed(crate::t!("err.autostart", error = e))),
         }
     }
 }
