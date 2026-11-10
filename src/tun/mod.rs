@@ -129,7 +129,7 @@ pub fn install_commands(current_core: Option<&Path>, dest_dir: &str) -> Vec<Stri
         format!("sudo install -d -m 0755 -o root -g root {dest_dir}"),
         format!("sudo install -m 0755 -o root -g root '{src}' {dest_dir}/xray"),
         format!("sudo install -m 0644 -o root -g root '{src_dir}/geoip.dat' '{src_dir}/geosite.dat' {dest_dir}/"),
-        format!("sudo setcap cap_net_admin+ep {dest_dir}/xray"),
+        format!("sudo setcap {PROCESS_CAPS} {dest_dir}/xray"),
     ]
 }
 
@@ -168,7 +168,7 @@ pub fn explain(problem: &Problem, config: &Config) -> String {
             "Режиму TUN нужны права администратора. Перезапустить elf-gate с правами администратора?".into()
         }
         Problem::NeedsPrivileges => format!(
-            "У Xray нет прав создавать TUN-интерфейс.\n\nОднократно выполните:\n  sudo setcap cap_net_admin+ep {LINUX_CORE_DIR}/xray\nлибо запустите  sudo elf-gate  (конфиг останется в вашей домашней папке)."
+            "У Xray нет прав создавать TUN-интерфейс.\n\nОднократно выполните:\n  sudo setcap {PROCESS_CAPS} {LINUX_CORE_DIR}/xray\nлибо запустите  sudo elf-gate  (конфиг останется в вашей домашней папке)."
         ),
         Problem::RpFilterStrict(rp) => format!(
             "Предупреждение: на интерфейсе {iface} включён строгий rp_filter (1). Трафик «напрямую» через TUN может зависать.\nПроверьте и, если нужно, выполните сами:\n  sudo sysctl -w net.ipv4.conf.all.rp_filter=2 net.ipv4.conf.{iface}.rp_filter=2\nelf-gate эти настройки не меняет.",
@@ -192,7 +192,7 @@ pub fn process_caps_warning(caps: Option<&str>, has_process_rules: bool) -> Opti
         return None;
     }
     Some(format!(
-        "Правила по процессам: у ядра есть только {}. Без cap_sys_ptrace и cap_dac_read_search Xray не видит, какой программе принадлежит соединение, если это программа другого пользователя или программа в песочнице (Chromium, Electron, Discord из Flatpak, системные службы). Такие соединения пойдут по правилу по умолчанию, а в журнале будут ошибки «no process found».\n\nЧтобы правила работали для всех программ (выполните сами; право читать чужие файлы и сокеты даётся только root-копии ядра, которую никто кроме root изменить не может):\n  sudo setcap {PROCESS_CAPS} {LINUX_CORE_DIR}/xray\nили запустите  ELF_GATE_FULL_CAPS=1 ./elf-gate-tun.sh",
+        "Правила по процессам: у ядра есть только {}. Без cap_sys_ptrace и cap_dac_read_search Xray не видит, какой программе принадлежит соединение, если это программа другого пользователя или программа в песочнице (Chromium, Electron, Discord из Flatpak, системные службы). Такие соединения пойдут по правилу по умолчанию, а в журнале будут ошибки «no process found».\n\nЧтобы правила работали для всех программ (выполните сами; право читать чужие файлы и сокеты даётся только root-копии ядра, которую никто кроме root изменить не может):\n  sudo setcap {PROCESS_CAPS} {LINUX_CORE_DIR}/xray\nили запустите  ./elf-gate-tun.sh (он выдаёт эти права сам; ELF_GATE_FULL_CAPS=0 оставляет только cap_net_admin)",
         caps.split_whitespace().last().unwrap_or(caps)
     ))
 }
@@ -243,6 +243,7 @@ pub fn build_plan(
         failover: None,
         direct_ips: Vec::new(),
         direct_domains: Vec::new(),
+        pin: std::collections::HashMap::new(),
     }
 }
 
@@ -295,6 +296,23 @@ pub async fn resolve_all(hosts: &[String]) -> Vec<IpAddr> {
             if !out.contains(&ip) {
                 out.push(ip);
             }
+        }
+    }
+    out
+}
+
+/// Host name -> address for every name that is not already an address (a complete provider
+/// config has several hops; Xray cannot resolve them through the tunnel once it is up).
+pub async fn resolve_map(hosts: &[String]) -> std::collections::HashMap<String, String> {
+    let mut set = tokio::task::JoinSet::new();
+    for h in hosts.iter().filter(|h| h.parse::<IpAddr>().is_err()) {
+        let h = h.clone();
+        set.spawn(async move { (h.clone(), resolve_server(&h, 443).await.ok()) });
+    }
+    let mut out = std::collections::HashMap::new();
+    while let Some(Ok((h, ip))) = set.join_next().await {
+        if let Some(ip) = ip {
+            out.insert(h, ip.to_string());
         }
     }
     out
@@ -505,7 +523,8 @@ mod tests {
             );
         } else {
             assert!(
-                text.contains("sudo install") && text.contains("setcap cap_net_admin+ep"),
+                text.contains("sudo install")
+                    && text.contains("setcap cap_net_admin,cap_sys_ptrace,cap_dac_read_search+ep"),
                 "{text}"
             );
             assert!(
@@ -685,7 +704,9 @@ mod tests {
         assert_eq!(cmds.len(), 4);
         assert!(cmds[1].contains("'/home/u/bin/xray'") && cmds[1].contains("-o root -g root"));
         assert!(cmds[2].contains("geoip.dat") && cmds[2].contains("geosite.dat"));
-        assert!(cmds[3].starts_with("sudo setcap cap_net_admin+ep"));
+        assert!(
+            cmds[3].starts_with("sudo setcap cap_net_admin,cap_sys_ptrace,cap_dac_read_search+ep")
+        );
         assert!(cmds.iter().all(|c| c.starts_with("sudo ")));
     }
 }

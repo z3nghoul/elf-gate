@@ -748,7 +748,11 @@ impl AppState {
                     match &s.unsupported {
                         Some(reason) => {
                             let msg = format!("«{}»: {reason}", s.name);
-                            self.popup = Some(Popup::Error(msg));
+                            self.popup = Some(if s.info_only {
+                                Popup::Notice(msg)
+                            } else {
+                                Popup::Error(msg)
+                            });
                         }
                         None => {
                             let id = s.id;
@@ -815,6 +819,13 @@ impl AppState {
             self.status = Some("Выберите сервер (не группу)".into());
             return;
         };
+        if server.full.is_some() {
+            self.status = Some(
+                "У готового конфига провайдера fp не меняется (цепочка переносится как есть)"
+                    .into(),
+            );
+            return;
+        }
         if !server.is_supported() || !matches!(server.security, Security::Tls | Security::Reality) {
             self.status = Some("fp применим только к серверам с TLS или Reality".into());
             return;
@@ -844,8 +855,11 @@ impl AppState {
             self.status = Some("Выберите сервер (не группу)".into());
             return;
         };
-        if !server.is_supported() {
-            self.status = Some("Роль можно назначить только поддерживаемому серверу".into());
+        if !server.is_supported() || server.full.is_some() {
+            self.status = Some(
+                "Роль можно назначить только серверу из ссылки (не готовому конфигу провайдера)"
+                    .into(),
+            );
             return;
         }
         let selected = match server.role {
@@ -870,8 +884,12 @@ impl AppState {
             self.status = Some("Выберите сервер (не группу)".into());
             return;
         };
-        if !server.is_supported() || !matches!(server.security, Security::Tls | Security::Reality) {
-            self.status = Some("Фрагментация применима только к серверам с TLS или Reality".into());
+        if server.full.is_some()
+            || !server.is_supported()
+            || !matches!(server.security, Security::Tls | Security::Reality)
+        {
+            self.status =
+                Some("Фрагментация применима только к серверам из ссылки с TLS или Reality".into());
             return;
         }
         let (id, on) = (server.id, !server.fragment);

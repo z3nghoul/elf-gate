@@ -23,6 +23,7 @@ pub enum SettingId {
     TunnelDns,
     AutoConnect,
     Autostart,
+    Hwid,
     Theme,
     SubUa(String),
     SubHours(String),
@@ -128,6 +129,11 @@ impl AppState {
                 "Запускать при входе в систему".into(),
                 onoff(self.autostart),
             ),
+            (
+                SettingId::Hwid,
+                "HWID этого устройства".into(),
+                c.device.hwid.clone(),
+            ),
             (SettingId::Theme, "Тема".into(), c.ui.theme.clone()),
         ];
         for s in &c.subscriptions {
@@ -172,6 +178,13 @@ impl AppState {
                 PingMode::Tcp => PingMode::Url,
                 PingMode::Url => PingMode::Tcp,
             }),
+            SettingId::Hwid => {
+                self.popup = Some(Popup::Notice(format!(
+                    "HWID: {}\n\nЭто идентификатор устройства для панели подписок (заголовок x-hwid). Каждая подписка, которую вы загрузили с ним, занимает один слот устройств у провайдера; он одинаков при каждом запуске и для всех подписок. Менять его не нужно.",
+                    c.device.hwid
+                )));
+                return;
+            }
             SettingId::Theme => Setting::Theme(cycle(&["dark", "light"], &c.ui.theme)),
             SettingId::LogLevel => Setting::LogLevel(cycle(&LOG_LEVELS, &c.core.log_level)),
             other => {

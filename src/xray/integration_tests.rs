@@ -451,7 +451,7 @@ async fn client_reaches_http_server_through_local_vless_server() {
 // ---------------------------------------------------------------------------
 
 fn dummy_client(xray: &Path) -> (CoreConfig, Value) {
-    let server = parse_link(&format!("vless://{UUID}@127.0.0.1:1?security=none#dummy")).unwrap();
+    let server = parse_link(&format!("vless://{UUID}@127.0.0.1:2?security=none#dummy")).unwrap();
     let core_cfg = CoreConfig {
         xray_path: xray.to_string_lossy().into_owned(),
         socks_port: free_port(),
@@ -1074,4 +1074,28 @@ async fn statsquery_counts_traffic_through_the_proxy_outbound() {
     // (The uplink counter of a short request can still read 0 when it is queried.)
     assert!(c.proxy_down > 0 && c.direct_down == 0, "{c:?}");
     core.stop().await;
+}
+
+/// Complete provider configs (chains, a balancer) become configs that Xray accepts, with the
+/// provider's gRPC and fragment outbounds carried over untouched.
+#[test]
+fn provider_chain_configs_pass_xray_test() {
+    use crate::model::fullconfig::parse_entry;
+    use crate::model::fullconfig::tests::fixtures;
+    let xray = require_xray!();
+    let tmp = TempDir::new("fullconfig");
+    for (name, entry) in fixtures() {
+        let server = parse_entry(&entry).unwrap();
+        let cfg = config::build(&server, &CoreConfig::default()).unwrap();
+        let (ok, text) = xray_test(&xray, &cfg, tmp.path(), name);
+        assert!(ok, "{name}: {text}");
+        // And in TUN with every name pinned to an address.
+        let mut plan = config::Plan::proxy_default();
+        for h in server.all_hosts() {
+            plan.pin.insert(h, "203.0.113.10".into());
+        }
+        let cfg = config::build_with(&server, &CoreConfig::default(), &plan).unwrap();
+        let (ok, text) = xray_test(&xray, &cfg, tmp.path(), &format!("{name}-pinned"));
+        assert!(ok, "{name} pinned: {text}");
+    }
 }

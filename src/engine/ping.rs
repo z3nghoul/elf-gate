@@ -147,6 +147,7 @@ impl Engine {
     fn fp_search_wanted(&self, id: u64) -> Option<Server> {
         let server = self.server_by_id(id)?;
         if !matches!(server.security, Security::Tls | Security::Reality)
+            || server.full.is_some()
             || !server.is_supported()
             || server.link.is_empty()
         {

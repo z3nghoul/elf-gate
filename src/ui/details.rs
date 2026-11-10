@@ -57,7 +57,22 @@ fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
     if let Some(note) = s.deprecated_transport() {
         lines.push(Line::from(Span::styled(note, th.warn())));
     }
-    lines.push(field("Адрес:", s.host_port(), th));
+    if let Some(f) = &s.full {
+        lines.push(field(
+            "Цепочка:",
+            format!("готовый конфиг провайдера, узлов: {}", f.hops),
+            th,
+        ));
+    }
+    lines.push(field(
+        if s.full.is_some() {
+            "Первый узел:"
+        } else {
+            "Адрес:"
+        },
+        s.host_port(),
+        th,
+    ));
     opt(&mut lines, "UUID:", &s.uuid, th);
     opt(&mut lines, "Flow:", &s.flow, th);
     if s.flow.contains("vision") {

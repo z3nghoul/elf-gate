@@ -9,8 +9,12 @@ use crate::storage::{CachedSubscription, SubscriptionCache, SubscriptionConfig};
 use std::time::Instant;
 
 /// Downloads and parses a subscription (off the UI thread).
-pub(super) async fn download(url: &str, user_agent: &str) -> Result<Box<SubUpdate>, String> {
-    let fetched = fetch::fetch(url, user_agent).await?;
+pub(super) async fn download(
+    url: &str,
+    user_agent: &str,
+    device: &crate::net::device::DeviceInfo,
+) -> Result<Box<SubUpdate>, String> {
+    let fetched = fetch::fetch(url, user_agent, device).await?;
     let parsed = parse_body(&fetched.body).map_err(|e| e.to_string())?;
     Ok(Box::new(SubUpdate {
         servers: parsed.servers,
@@ -62,6 +66,11 @@ impl Engine {
             });
         }
         groups
+    }
+
+    /// How this installation introduces itself to subscription panels.
+    fn device(&self) -> crate::net::device::DeviceInfo {
+        crate::net::device::DeviceInfo::current(&self.config.device.hwid)
     }
 
     pub(super) fn save_subscription_cache(&mut self) {
@@ -121,8 +130,9 @@ impl Engine {
             return false;
         }
         let tx = self.tx.clone();
+        let device = self.device();
         tokio::spawn(async move {
-            let result = download(&sc.url, &sc.user_agent).await;
+            let result = download(&sc.url, &sc.user_agent, &device).await;
             let _ = tx.send(BgEvent::SubFetched {
                 name: sc.name,
                 result,
@@ -257,8 +267,9 @@ impl Engine {
         self.status("Загрузка подписки...");
         let tx = self.tx.clone();
         let user_agent = fetch::DEFAULT_USER_AGENT.to_string();
+        let device = self.device();
         tokio::spawn(async move {
-            let result = download(&url, &user_agent).await;
+            let result = download(&url, &user_agent, &device).await;
             let _ = tx.send(BgEvent::SubAdded {
                 url,
                 user_agent,
@@ -482,6 +493,66 @@ mod tests {
         let storage = Storage::new(&d);
         assert!(storage.load().unwrap().subscriptions.is_empty());
         assert!(storage.load_subscriptions().is_empty());
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[tokio::test]
+    async fn a_json_subscription_gives_chain_servers_and_notices_and_survives_the_cache() {
+        use crate::model::fullconfig::tests::{balanced, chain_dialer};
+        let d = dir("json");
+        let mut a = app_in(&d);
+        let body = serde_json::to_string(&serde_json::json!([
+            { "remarks": "⬇ Обход глушилок ⬇", "outbounds": [{ "tag": "direct", "protocol": "freedom" }] },
+            chain_dialer(),
+            balanced()
+        ]))
+        .unwrap();
+        let parsed = crate::parser::subscription::parse_body(&body).unwrap();
+        let update = Box::new(SubUpdate {
+            servers: parsed.servers,
+            skipped: parsed.skipped,
+            info: None,
+            title: Some("Panel".into()),
+        });
+        a.on_sub_added("https://panel.example/sub".into(), "ua".into(), Ok(update));
+        let g = &a.subs[0];
+        assert_eq!(g.servers.len(), 3);
+        assert!(g.servers[0].info_only && g.servers[1].full.is_some());
+
+        // A title is a notice, not an error, and never starts anything.
+        let title = g.servers[0].id;
+        a.handle_cmd(Cmd::Connect(title));
+        assert!(matches!(a.alerts().last(), Some(Alert::Notice(_))));
+        assert_eq!(a.conn, Conn::Disconnected);
+
+        // The whole chain is in the cache file and comes back as a chain.
+        let storage = Storage::new(&d);
+        let (tx, _rx) = unbounded_channel();
+        let b = Engine::build(tx, storage.load().unwrap(), Some(storage), false);
+        assert_eq!(b.subs[0].servers[1].full.as_ref().unwrap().hops, 2);
+        // The interface copy has no chain contents.
+        let view = a.view();
+        assert!(view.groups[0].servers[1]
+            .full
+            .as_ref()
+            .unwrap()
+            .outbounds
+            .is_empty());
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[tokio::test]
+    async fn the_hwid_is_made_once_and_kept() {
+        let d = dir("hwid");
+        let a = app_in(&d);
+        let first = a.config.device.hwid.clone();
+        assert_eq!(first.len(), 16);
+        let storage = Storage::new(&d);
+        let saved = storage.load().unwrap();
+        assert_eq!(saved.device.hwid, first, "written to config.toml");
+        let (tx, _rx) = unbounded_channel();
+        let b = Engine::build(tx, saved, Some(storage), false);
+        assert_eq!(b.config.device.hwid, first, "the same on the next run");
         let _ = std::fs::remove_dir_all(d);
     }
 }

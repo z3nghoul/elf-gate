@@ -109,9 +109,31 @@ pub struct Server {
     /// What the number measures.
     #[serde(default)]
     pub ping_kind: PingKind,
+    /// The server is a complete provider config (a chain of outbounds), not a share link.
+    #[serde(default)]
+    pub full: Option<super::fullconfig::FullConfig>,
+    /// A row that only informs (a section title, a notice, a placeholder): not a server.
+    #[serde(default)]
+    pub info_only: bool,
 }
 
 impl Server {
+    /// A row the provider put into the list to say something.
+    pub fn info_only(link: &str, name: String, note: &str) -> Self {
+        let mut s = Self::unsupported(link, name, note.to_string());
+        s.info_only = true;
+        s
+    }
+
+    /// Every host name this server connects to (all hops of a chain).
+    pub fn all_hosts(&self) -> Vec<String> {
+        match &self.full {
+            Some(f) => f.hosts(),
+            None if self.address.is_empty() => Vec::new(),
+            None => vec![self.address.clone()],
+        }
+    }
+
     /// A placeholder for links we recognise but do not support (vmess, trojan, ...).
     pub fn unsupported(link: &str, name: String, reason: String) -> Self {
         Self {
@@ -135,6 +157,8 @@ impl Server {
             ping: Ping::Unknown,
             ping_at: None,
             ping_kind: PingKind::Tcp,
+            full: None,
+            info_only: false,
         }
     }
 
@@ -174,6 +198,12 @@ impl Server {
         s.link.clear();
         s.tls.public_key.clear();
         s.tls.short_id.clear();
+        if let Some(f) = &mut s.full {
+            // The chain holds keys: the interface only needs to know that there is one.
+            f.outbounds.clear();
+            f.balancers.clear();
+            f.observatory = None;
+        }
         s
     }
 

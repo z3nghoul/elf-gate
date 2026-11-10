@@ -10,16 +10,17 @@ SRC_XRAY="$DIR/bin/xray"
 DST_DIR="/usr/local/lib/elf-gate"
 DST_XRAY="$DST_DIR/xray"
 
-# Права ядра. По умолчанию только создание TUN. С ELF_GATE_FULL_CAPS=1 ещё чтение сокетов и
-# файловых дескрипторов чужих и "песочных" процессов (Chromium, Electron, Discord из Flatpak,
-# systemd-resolved): без этого правила по процессам их не видят. Оба права даются только root-копии
-# ядра, которую никто кроме root не может изменить.
-if [[ "${ELF_GATE_FULL_CAPS:-0}" == "1" ]]; then
-    CAPS="cap_net_admin,cap_sys_ptrace,cap_dac_read_search+ep"
-    WANT_CAP="cap_sys_ptrace"
-else
+# Права ядра. По умолчанию три: создание TUN, плюс чтение сокетов и файловых дескрипторов чужих и
+# "песочных" процессов (Chromium, Electron, Discord из Flatpak, systemd-resolved): без них правила по
+# процессам их не видят, а в журнале десятки ошибок "no process found" в минуту (проверено на практике).
+# Права даются только root-копии ядра, которую никто кроме root не может изменить.
+# ELF_GATE_FULL_CAPS=0 - отказаться и оставить только cap_net_admin.
+if [[ "${ELF_GATE_FULL_CAPS:-1}" == "0" ]]; then
     CAPS="cap_net_admin+ep"
     WANT_CAP="cap_net_admin"
+else
+    CAPS="cap_net_admin,cap_sys_ptrace,cap_dac_read_search+ep"
+    WANT_CAP="cap_sys_ptrace"
 fi
 
 if [[ $EUID -eq 0 ]]; then

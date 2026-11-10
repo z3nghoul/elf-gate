@@ -23,9 +23,13 @@ impl Engine {
         let Some((_, key)) = self.server_key_of(id) else {
             return;
         };
-        let supported = self.server_by_id(id).is_some_and(Server::is_supported);
+        let supported = self
+            .server_by_id(id)
+            .is_some_and(|s| s.is_supported() && s.full.is_none());
         if !supported {
-            self.status("Роль можно назначить только поддерживаемому серверу");
+            self.status(
+                "Роль можно назначить только серверу из ссылки (не готовому конфигу провайдера)",
+            );
             return;
         }
         let mut displaced = Vec::new();
@@ -69,6 +73,7 @@ impl Engine {
         };
         let applicable = self.server_by_id(id).is_some_and(|s| {
             s.is_supported()
+                && s.full.is_none()
                 && matches!(
                     s.security,
                     crate::model::server::Security::Tls | crate::model::server::Security::Reality

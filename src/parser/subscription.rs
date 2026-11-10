@@ -9,7 +9,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SubscriptionError {
-    #[error("подписка в формате JSON не поддерживается (нужен список ссылок, возможно в base64)")]
+    #[error(
+        "подписка в формате JSON не распознана (ожидается массив конфигов Xray или список ссылок)"
+    )]
     Json,
     #[error("в подписке нет ни одной ссылки на сервер")]
     Empty,
@@ -47,17 +49,40 @@ fn looks_like_links(text: &str) -> bool {
     text.lines().any(|l| l.trim().contains("://"))
 }
 
+/// A JSON subscription: an array of complete Xray configs (or one config).
+fn parse_json(text: &str) -> Result<Parsed, SubscriptionError> {
+    let value: serde_json::Value =
+        serde_json::from_str(text).map_err(|_| SubscriptionError::Json)?;
+    let entries: Vec<serde_json::Value> = match value {
+        serde_json::Value::Array(a) => a,
+        obj @ serde_json::Value::Object(_) => vec![obj],
+        _ => return Err(SubscriptionError::Json),
+    };
+    let mut servers = Vec::new();
+    let mut skipped = 0;
+    for e in entries.iter().filter(|e| e.is_object()) {
+        match crate::model::fullconfig::parse_entry(e) {
+            Ok(s) => servers.push(s),
+            Err(_) => skipped += 1,
+        }
+    }
+    if !servers.iter().any(|s| !s.info_only) && servers.is_empty() {
+        return Err(SubscriptionError::Empty);
+    }
+    Ok(Parsed { servers, skipped })
+}
+
 pub fn parse_body(body: &str) -> Result<Parsed, SubscriptionError> {
     let trimmed = body.trim_start_matches('\u{feff}').trim();
     if trimmed.starts_with('{') || trimmed.starts_with('[') {
-        return Err(SubscriptionError::Json);
+        return parse_json(trimmed);
     }
     let text = if looks_like_links(trimmed) {
         trimmed.to_string()
     } else {
         match decode_base64(trimmed) {
             Some(t) if t.trim_start().starts_with('{') || t.trim_start().starts_with('[') => {
-                return Err(SubscriptionError::Json)
+                return parse_json(t.trim());
             }
             Some(t) => t,
             None => trimmed.to_string(),
@@ -127,13 +152,14 @@ mod tests {
     }
 
     #[test]
-    fn json_is_a_clear_error_plain_or_base64() {
+    fn broken_json_is_a_clear_error_plain_or_base64() {
         assert_eq!(
-            parse_body("{\"outbounds\": []}").unwrap_err(),
+            parse_body("{\"outbounds\": [").unwrap_err(),
             SubscriptionError::Json
         );
-        let b = STANDARD.encode("[{\"a\":1}]");
+        let b = STANDARD.encode("[1, 2");
         assert_eq!(parse_body(&b).unwrap_err(), SubscriptionError::Json);
+        assert_eq!(parse_body("[]").unwrap_err(), SubscriptionError::Empty);
     }
 
     #[test]

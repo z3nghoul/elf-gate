@@ -137,6 +137,8 @@ pub struct Engine {
     failed_at: HashMap<String, Instant>,
     autostart_on: bool,
     caps_warned: bool,
+    /// The core lacks the capabilities for process detection: its "no process found" lines are hidden.
+    hide_process_errors: bool,
     /// Polls the core's traffic counters while it runs.
     stats_task: Option<tokio::task::JoinHandle<()>>,
     last_counters: Option<(crate::xray::stats::Counters, Instant)>,
@@ -253,6 +255,7 @@ impl Engine {
             failed_at: HashMap::new(),
             autostart_on: false,
             caps_warned: false,
+            hide_process_errors: false,
             stats_task: None,
             last_counters: None,
             next_id,
@@ -263,6 +266,10 @@ impl Engine {
             #[cfg(test)]
             sent: Vec::new(),
         };
+        if engine.config.device.hwid.is_empty() {
+            engine.config.device.hwid = crate::net::device::generate_hwid();
+            engine.save_config();
+        }
         engine.log(
             Level::Info,
             if mock {
@@ -366,6 +373,9 @@ impl Engine {
     fn push_log(&mut self, line: LogLine) {
         // The core repeats the same complaint for every connection: show it once, count the
         // rest, and report the count when the burst ends (or every ten seconds).
+        if self.hide_process_errors && is_process_noise(&line.text) {
+            return;
+        }
         if line.text.starts_with("[xray") {
             let key = dedupe_key(&line.text);
             let now = Instant::now();
@@ -742,7 +752,11 @@ impl Engine {
         };
         if let Some(reason) = &server.unsupported {
             let msg = format!("«{}»: {reason}", server.name);
-            self.error_alert(msg);
+            if server.info_only {
+                self.alert(Alert::Notice(msg));
+            } else {
+                self.error_alert(msg);
+            }
             return;
         }
         self.connect(id);
@@ -1236,6 +1250,13 @@ fn dedupe_key(text: &str) -> String {
         }
     }
     out
+}
+
+/// The core's complaints about not finding the process of a connection.
+fn is_process_noise(text: &str) -> bool {
+    text.contains("no process found")
+        || text.contains("not found in /proc/net")
+        || text.contains("find local process name")
 }
 
 fn short(text: &str) -> String {
