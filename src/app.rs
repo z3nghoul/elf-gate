@@ -124,6 +124,9 @@ pub enum LinkState {
     Down(String),
 }
 
+/// How long a status message stays in the status line.
+pub const STATUS_LIFETIME: std::time::Duration = std::time::Duration::from_secs(6);
+
 pub struct AppState {
     // ---- mirror of the background process's view ----
     pub subs: Vec<Subscription>,
@@ -155,6 +158,8 @@ pub struct AppState {
     /// Height of the log viewport at the last render (for paging and clamping).
     pub log_view_h: usize,
     pub status: Option<String>,
+    /// When the status text was set: it disappears by itself after [`STATUS_LIFETIME`].
+    status_since: Option<std::time::Instant>,
     pub should_quit: bool,
     pub rules_cursor: usize,
     pub settings_cursor: usize,
@@ -198,6 +203,7 @@ impl AppState {
             log_scroll: 0,
             log_view_h: 10,
             status: None,
+            status_since: None,
             should_quit: false,
             rules_cursor: 0,
             settings_cursor: 0,
@@ -275,10 +281,27 @@ impl AppState {
                 self.pending_alerts.push_back(a);
                 self.show_next_alert();
             }
-            Update::Status(s) => self.status = Some(s),
+            Update::Status(s) => self.set_status(s),
             Update::Bye => {
                 self.link = LinkState::Down(crate::t!("app.link_stopped"));
             }
+        }
+    }
+
+    /// A short message in the status line (it expires, so it never outlives its news).
+    pub(crate) fn set_status(&mut self, text: String) {
+        self.status = Some(text);
+        self.status_since = Some(std::time::Instant::now());
+    }
+
+    /// Clears the status text once it is old enough.
+    pub(crate) fn expire_status(&mut self) {
+        if self
+            .status_since
+            .is_some_and(|t| t.elapsed() >= STATUS_LIFETIME)
+        {
+            self.status = None;
+            self.status_since = None;
         }
     }
 
@@ -468,7 +491,8 @@ impl AppState {
     pub fn handle_event(&mut self, ev: Event) {
         match ev {
             Event::Key(k) => self.handle_key(k),
-            Event::Resize | Event::Tick => {}
+            Event::Tick => self.expire_status(),
+            Event::Resize => {}
             Event::Link(l) => self.on_link(l),
         }
     }
@@ -658,7 +682,7 @@ impl AppState {
             SortPing => {
                 self.sorted_by_ping = !self.sorted_by_ping;
                 self.selected = 0;
-                self.status = Some(if self.sorted_by_ping {
+                self.set_status(if self.sorted_by_ping {
                     crate::t!("status.sort_ping")
                 } else {
                     crate::t!("status.sort_original")
@@ -741,7 +765,7 @@ impl AppState {
         let next = !self.privacy();
         // At once, without waiting for the answer: a screenshot must not catch the old state.
         self.config.ui.privacy_mode = next;
-        self.status = Some(if next {
+        self.set_status(if next {
             crate::t!("status.privacy_on")
         } else {
             crate::t!("status.privacy_off")
@@ -920,12 +944,12 @@ impl AppState {
             .find(|g| g.name == name)
             .map_or(0, |g| g.servers.iter().filter(|s| s.hidden).count());
         if count == 0 {
-            self.status = Some(crate::t!("status.no_hidden"));
+            self.set_status(crate::t!("status.no_hidden"));
             return;
         }
         if !self.show_hidden.remove(&name) {
             self.show_hidden.insert(name);
-            self.status = Some(crate::t!("status.hidden_shown", count = count));
+            self.set_status(crate::t!("status.hidden_shown", count = count));
         }
         self.clamp_selection();
     }
@@ -957,15 +981,15 @@ impl AppState {
 
     fn open_fingerprint_menu(&mut self) {
         let Some(server) = self.selected_server() else {
-            self.status = Some(crate::t!("status.pick_server"));
+            self.set_status(crate::t!("status.pick_server"));
             return;
         };
         if server.full.is_some() {
-            self.status = Some(crate::t!("status.fp_full"));
+            self.set_status(crate::t!("status.fp_full"));
             return;
         }
         if !server.is_supported() || !matches!(server.security, Security::Tls | Security::Reality) {
-            self.status = Some(crate::t!("status.fp_tls_only"));
+            self.set_status(crate::t!("status.fp_tls_only"));
             return;
         }
         let from_link = if server.tls.fingerprint.is_empty() {
@@ -990,11 +1014,11 @@ impl AppState {
 
     fn open_role_menu(&mut self) {
         let Some(server) = self.selected_server() else {
-            self.status = Some(crate::t!("status.pick_server"));
+            self.set_status(crate::t!("status.pick_server"));
             return;
         };
         if !server.is_supported() || server.full.is_some() {
-            self.status = Some(crate::t!("status.role_link_only"));
+            self.set_status(crate::t!("status.role_link_only"));
             return;
         }
         let selected = match server.role {
@@ -1016,14 +1040,14 @@ impl AppState {
 
     fn toggle_fragment(&mut self) {
         let Some(server) = self.selected_server() else {
-            self.status = Some(crate::t!("status.pick_server"));
+            self.set_status(crate::t!("status.pick_server"));
             return;
         };
         if server.full.is_some()
             || !server.is_supported()
             || !matches!(server.security, Security::Tls | Security::Reality)
         {
-            self.status = Some(crate::t!("status.fragment_tls_only"));
+            self.set_status(crate::t!("status.fragment_tls_only"));
             return;
         }
         let (id, on) = (server.id, !server.fragment);
@@ -1129,7 +1153,7 @@ impl AppState {
         match self.current_rule_item() {
             Some(RuleItem::Rule(i)) => self.send(Cmd::DeleteRule(i)),
             Some(RuleItem::Preset(_)) => {
-                self.status = Some(crate::t!("status.preset_undeletable"));
+                self.set_status(crate::t!("status.preset_undeletable"));
             }
             None => {}
         }
