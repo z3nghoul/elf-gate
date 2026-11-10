@@ -5,6 +5,21 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
+/// `PROXY`, or `TUN include` / `TUN exclude`.
+fn mode_label(app: &AppState) -> String {
+    match app.mode {
+        crate::app::Mode::Proxy => mode_name(app.mode).to_string(),
+        crate::app::Mode::Tun => format!(
+            "{} {}",
+            mode_name(app.mode),
+            match app.config.mode.routing {
+                crate::model::rule::RoutingMode::Exclude => "exclude",
+                crate::model::rule::RoutingMode::Include => "include",
+            }
+        ),
+    }
+}
+
 pub fn format_bytes(n: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut v = n as f64;
@@ -48,7 +63,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         Span::styled("● ", dot_style),
         Span::styled(text, th.text()),
         sep.clone(),
-        Span::styled(mode_name(app.mode), th.title()),
+        Span::styled(mode_label(app), th.title()),
     ];
     if app.proxy_active {
         spans.push(Span::styled(" sys-proxy", th.good()));

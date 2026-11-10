@@ -4,8 +4,8 @@
 /// `cfg!` (not `#[cfg]`) keeps the code compiled and linted in every build.
 pub const SHOW_MOCK_DATA: bool = cfg!(debug_assertions);
 
-/// Flipped to `true` when the real TUN mode lands (stage 5.2).
-pub const TUN_AVAILABLE: bool = false;
+/// The real TUN mode exists (stage 5.2).
+pub const TUN_AVAILABLE: bool = true;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

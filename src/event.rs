@@ -49,6 +49,13 @@ pub enum BgEvent {
     CoreFailed {
         id: u64,
         error: String,
+        /// The core could not start for lack of rights (TUN): the UI explains how to get them.
+        needs_privileges: bool,
+    },
+    /// Result of the connection check through the local proxy.
+    Health {
+        id: u64,
+        result: Result<std::time::Duration, String>,
     },
     /// A background stop finished; the core ports are free again.
     CoreStopped,

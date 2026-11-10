@@ -86,6 +86,16 @@ expression: "config_for(&format!(\"vless://{UUID}@de.example.com:443?flow=xtls-r
     "domainStrategy": "IPIfNonMatch",
     "rules": [
       {
+        "domain": [
+          "full:connectivitycheck.gstatic.com"
+        ],
+        "inboundTag": [
+          "socks-in"
+        ],
+        "outboundTag": "proxy",
+        "type": "field"
+      },
+      {
         "ip": [
           "geoip:private"
         ],

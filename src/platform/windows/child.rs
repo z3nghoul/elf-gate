@@ -65,6 +65,8 @@ impl ChildGuard for Guard {
             .map_err(|_| PlatformError::Unsupported("AssignProcessToJobObject failed"))
     }
 
+    fn own_process_group(&self, _cmd: &mut tokio::process::Command) {}
+
     fn terminate(&self, child: &mut tokio::process::Child) {
         let _ = child.start_kill();
     }

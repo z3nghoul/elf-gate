@@ -134,6 +134,32 @@ put("sb_include", singbox("include"))
 put("sb_exclude", singbox("exclude"))
 put("sb_exclude_noguard", singbox("exclude", loop_guard=False))
 
+# --- DNS routing: domains of the "via VPN" rules resolve through the tunnel, others as before ---
+def dns_client(mode):
+    listed = "domain:discord.test"
+    tunnel = {"address": "203.0.113.54", "port": 53, "tag": "dns-tunnel", "skipFallback": True}
+    local = {"address": "203.0.113.53", "port": 53, "tag": "dns-local"}
+    if mode == "include":      # listed domains go through the VPN; everything else resolves locally
+        servers = [dict(tunnel, domains=[listed]), local]
+        proxy_first = [DIRECT, plain]
+    else:                      # exclude: listed domains go direct (local DNS); the rest through the tunnel
+        # the default server must not carry skipFallback, or it is never used for unlisted names
+        servers = [dict(local, domains=[listed], skipFallback=True),
+                   {k: v for k, v in tunnel.items() if k != "skipFallback"}]
+        proxy_first = [plain, DIRECT]
+    rules = [
+        {"type": "field", "inboundTag": ["tun-in"], "network": "udp", "port": "53", "outboundTag": "dns-out"},
+        {"type": "field", "inboundTag": ["dns-tunnel"], "outboundTag": "proxy"},
+        {"type": "field", "inboundTag": ["dns-local"], "outboundTag": "direct"},
+    ]
+    c = client(tun(), proxy_first + [{"tag": "dns-out", "protocol": "dns"}], rules,
+               dns={"servers": servers, "queryStrategy": "UseIPv4"})
+    return c
+
+
+put("dns_include", dns_client("include"))
+put("dns_exclude", dns_client("exclude"))
+
 # Certificate for the local TLS 1.3 "dest" that Reality borrows its handshake from.
 subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
                 "-keyout", f"{WORK}/dest.key", "-out", f"{WORK}/dest.crt", "-subj", "/CN=www.example.com",

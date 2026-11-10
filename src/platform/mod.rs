@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 #[cfg(unix)]
@@ -101,10 +102,64 @@ pub trait ChildGuard: Send + Sync {
     /// Asks the child to exit (SIGTERM on Linux, immediate kill on Windows where
     /// a windowless console process has no graceful signal).
     fn terminate(&self, child: &mut tokio::process::Child);
+    /// Makes the child leader of its own process group (Linux), so the supervisor and the
+    /// core it starts can be found together later. No-op on Windows (Job Object).
+    fn own_process_group(&self, cmd: &mut tokio::process::Command);
+}
+
+/// The person who started elf-gate through `sudo` (Linux). Config and state then belong to
+/// them, not to root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvokingUser {
+    pub name: String,
+    pub home: PathBuf,
+    pub uid: u32,
+    pub gid: u32,
 }
 
 pub trait Privileges: Send + Sync {
+    /// root on Linux, an elevated (administrator) token on Windows.
     fn is_elevated(&self) -> bool;
+    /// `Some` only when running as root through `sudo`.
+    fn invoking_user(&self) -> Option<InvokingUser>;
+    /// Gives a file that root created back to the invoking user (no-op otherwise).
+    fn chown_to_invoking_user(&self, path: &Path) -> Result<(), PlatformError>;
+    /// Windows: starts this program again with administrator rights (UAC prompt) and `args`.
+    fn relaunch_elevated(&self, args: &[String]) -> Result<(), PlatformError>;
+}
+
+/// The strictest `rp_filter` that applies to the default route's interface (Linux).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RpFilter {
+    pub interface: String,
+    pub value: u8,
+}
+
+/// Facts about the machine that decide whether and how TUN mode can run. Everything that
+/// touches the OS is here, so the decision logic in `tun` stays testable with a mock.
+pub trait TunHost: Send + Sync {
+    /// `/dev/net/tun` exists (Linux); always true on Windows.
+    fn tun_device_present(&self) -> bool;
+    /// Windows: `wintun.dll` is missing next to the core. Never on Linux.
+    fn wintun_missing(&self, core_dir: &Path) -> bool;
+    /// Linux: the binary is owned by root and nobody else can modify it or its folders.
+    /// Anything running with extra privileges must come from such a place.
+    fn trusted_binary(&self, path: &Path) -> Result<(), String>;
+    /// Can this core create the TUN device? `None` when it cannot be told in advance.
+    fn core_can_create_tun(&self, core: &Path) -> Option<bool>;
+    /// Strict reverse-path filtering breaks "direct" traffic through the tunnel (Linux).
+    fn rp_filter(&self) -> Option<RpFilter>;
+    /// Upstream resolvers of the system (never loopback stubs).
+    fn system_dns(&self) -> Vec<String>;
+    fn ipv6_enabled(&self) -> bool;
+    fn interface_exists(&self, name: &str) -> bool;
+    /// Names of running programs as the core sees them (real file name, no `.exe`).
+    fn running_processes(&self) -> Vec<String>;
+    /// Stops a core left over from a crashed run, if `pid` is still one of `names`.
+    fn kill_stale(&self, pid: u32, names: &[&str]) -> bool;
+    /// Capabilities get lost when a parent dies, so a capability-carrying core needs a
+    /// supervisor that stops it (Linux, not root).
+    fn needs_supervisor(&self) -> bool;
 }
 
 pub trait ShutdownSignals: Send + Sync {
@@ -126,6 +181,24 @@ pub fn child_guard() -> Box<dyn ChildGuard> {
 
 pub fn privileges() -> Box<dyn Privileges> {
     Box::new(imp::privileges::Elevation)
+}
+
+/// Entry of the hidden `--supervise` mode (Linux only); the return value is the exit code.
+pub fn run_supervisor(args: &[String]) -> i32 {
+    #[cfg(unix)]
+    {
+        linux::supervise::run(args)
+    }
+    #[cfg(windows)]
+    {
+        let _ = args;
+        eprintln!("--supervise is not used on Windows (a Job Object ties the core to elf-gate)");
+        2
+    }
+}
+
+pub fn tun_host() -> Box<dyn TunHost> {
+    Box::new(imp::tun::Host)
 }
 
 pub fn shutdown_signals() -> Box<dyn ShutdownSignals> {

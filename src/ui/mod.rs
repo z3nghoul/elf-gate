@@ -50,7 +50,7 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
             logs::render(f, bottom, app, &th);
         }
         Screen::LogsFull => logs::render(f, body, app, &th),
-        Screen::Rules => rules::render(f, body, &th),
+        Screen::Rules => rules::render(f, body, app, &th),
         Screen::Settings => settings::render(f, body, &th),
         Screen::Help => help::render(f, body, &th),
     }
@@ -59,13 +59,12 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests_support {
     use super::*;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
-    use tokio::sync::mpsc::unbounded_channel;
 
-    fn draw(w: u16, h: u16, app: &mut AppState) -> String {
+    pub fn draw(w: u16, h: u16, app: &mut AppState) -> String {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
         term.draw(|f| render(f, app)).unwrap();
         let buf = term.backend().buffer().clone();
@@ -73,6 +72,16 @@ mod tests {
             .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    fn draw(w: u16, h: u16, app: &mut AppState) -> String {
+        tests_support::draw(w, h, app)
     }
 
     #[tokio::test]

@@ -22,6 +22,10 @@ impl ChildGuard for Guard {
         Ok(())
     }
 
+    fn own_process_group(&self, cmd: &mut tokio::process::Command) {
+        cmd.process_group(0);
+    }
+
     fn terminate(&self, child: &mut tokio::process::Child) {
         if let Some(pid) = child.id() {
             let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);

@@ -44,7 +44,7 @@ pub fn root_cause(output: &str) -> String {
         .to_string()
 }
 
-/// Generates the server's config and runs `xray run -test` on it.
+/// Generates the server's plain proxy config and runs `xray run -test` on it.
 pub async fn check(core: &CoreConfig, server: &Server, run_dir: &Path) -> Verdict {
     let cfg = match config::build(server, core) {
         Ok(c) => c,
@@ -54,7 +54,12 @@ pub async fn check(core: &CoreConfig, server: &Server, run_dir: &Path) -> Verdic
         Ok(b) => b,
         Err(e) => return Verdict::Unavailable(e.to_string()),
     };
+    check_config(&binary, &cfg, run_dir).await
+}
 
+/// Runs `xray run -test` on any ready-made config (TUN configs included: `-test` does not
+/// create the interface, so no privileges are needed).
+pub async fn check_config(binary: &Path, cfg: &serde_json::Value, run_dir: &Path) -> Verdict {
     let file = run_dir.join(format!(
         "check-{}-{}.json",
         std::process::id(),
@@ -64,7 +69,7 @@ pub async fn check(core: &CoreConfig, server: &Server, run_dir: &Path) -> Verdic
         std::fs::create_dir_all(run_dir)?;
         std::fs::write(
             &file,
-            serde_json::to_vec_pretty(&cfg).map_err(std::io::Error::other)?,
+            serde_json::to_vec_pretty(cfg).map_err(std::io::Error::other)?,
         )
     };
     if let Err(e) = write() {
@@ -72,7 +77,7 @@ pub async fn check(core: &CoreConfig, server: &Server, run_dir: &Path) -> Verdic
     }
 
     let guard = platform::child_guard();
-    let mut cmd = Command::new(&binary);
+    let mut cmd = Command::new(binary);
     cmd.args(["run", "-test", "-c"])
         .arg(&file)
         .stdin(Stdio::null())

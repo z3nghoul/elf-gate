@@ -157,8 +157,20 @@ fn describe(status: std::process::ExitStatus) -> String {
 }
 
 /// A running Xray process.
+/// How to start the core beyond the defaults.
+#[derive(Debug, Clone, Default)]
+pub struct StartOptions {
+    /// Use this binary instead of `xray_path` (TUN mode runs a privileged copy).
+    pub binary: Option<PathBuf>,
+    /// Run it under the capability supervisor (`elf-gate --supervise`, Linux).
+    pub supervised: bool,
+    /// Wait for this network interface to appear (TUN mode).
+    pub interface: Option<String>,
+}
+
 pub struct Core {
     child: Child,
+    supervised: bool,
     guard: Box<dyn ChildGuard>,
     tail: Arc<Mutex<VecDeque<String>>>,
     readers: Vec<JoinHandle<()>>,
@@ -175,13 +187,27 @@ impl fmt::Debug for Core {
 impl Core {
     /// Writes the config, starts Xray and waits until the socks port accepts connections.
     /// Output lines go to `log_tx` as `BgEvent::Log`.
+    #[cfg(test)]
     pub async fn start(
         core: &CoreConfig,
         config: &Value,
         run_dir: &Path,
         log_tx: BgTx,
     ) -> Result<Self, CoreError> {
-        let binary = resolve_binary(&core.xray_path)?;
+        Self::start_with(core, config, run_dir, log_tx, &StartOptions::default()).await
+    }
+
+    pub async fn start_with(
+        core: &CoreConfig,
+        config: &Value,
+        run_dir: &Path,
+        log_tx: BgTx,
+        opts: &StartOptions,
+    ) -> Result<Self, CoreError> {
+        let binary = match &opts.binary {
+            Some(b) => b.clone(),
+            None => resolve_binary(&core.xray_path)?,
+        };
         check_ports(core)?;
 
         let config_path = run_dir.join("xray.json");
@@ -196,7 +222,19 @@ impl Core {
         })?;
 
         let guard = platform::child_guard();
-        let mut cmd = Command::new(&binary);
+        let mut cmd = if opts.supervised {
+            // A capability-carrying core outlives a killed elf-gate unless something stops it:
+            // this process re-runs elf-gate as a tiny supervisor around the core.
+            let me = env::current_exe().map_err(|e| CoreError::Spawn(e.to_string()))?;
+            let mut c = Command::new(me);
+            c.arg("--supervise").arg(&binary);
+            c
+        } else {
+            Command::new(&binary)
+        };
+        if opts.supervised {
+            guard.own_process_group(&mut cmd);
+        }
         cmd.arg("run")
             .arg("-c")
             .arg(&config_path)
@@ -227,12 +265,23 @@ impl Core {
         }
         let mut this = Core {
             child,
+            supervised: opts.supervised,
             guard,
             tail,
             readers,
         };
 
-        let deadline = Instant::now() + STARTUP_TIMEOUT;
+        // TUN mode needs the interface as well; creating it takes a little longer.
+        let tun_host = opts
+            .interface
+            .as_ref()
+            .map(|name| (name.clone(), platform::tun_host()));
+        let deadline = Instant::now()
+            + if tun_host.is_some() {
+                STARTUP_TIMEOUT * 2
+            } else {
+                STARTUP_TIMEOUT
+            };
         loop {
             if this.try_exit().is_some() {
                 // Let the readers flush the last lines so the error carries the reason.
@@ -290,7 +339,18 @@ impl Core {
     pub async fn stop(mut self) {
         if self.child.try_wait().ok().flatten().is_none() {
             self.guard.terminate(&mut self.child);
-            if timeout(STOP_TIMEOUT, self.child.wait()).await.is_err() {
+            // The supervisor gives the core its own grace period before killing it.
+            let grace = if self.supervised {
+                STOP_TIMEOUT * 2
+            } else {
+                STOP_TIMEOUT
+            };
+            if timeout(grace, self.child.wait()).await.is_err() {
+                if let Some(pid) = self.child.id() {
+                    // Takes the supervisor and the core together (same process group).
+                    platform::tun_host()
+                        .kill_stale(pid, &["xray", "xray.exe", "elf-gate", "elf-gate.exe"]);
+                }
                 let _ = self.child.kill().await;
             }
         }

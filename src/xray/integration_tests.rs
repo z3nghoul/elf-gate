@@ -530,6 +530,8 @@ struct Rig {
     controller: Arc<ProxyController>,
     core_cfg: CoreConfig,
     _tmp: TempDir,
+    /// The "VPS": something must listen, because connecting checks the server over TCP first.
+    _vps: StdListener,
 }
 
 /// An app with one manual server pointing at a dead loopback port (the core starts fine,
@@ -549,8 +551,7 @@ fn rig(xray: &Path, tag: &str, set_system_proxy: bool) -> Rig {
             set_system_proxy,
             ..ProxyConfig::default()
         },
-        servers: Vec::new(),
-        overrides: Vec::new(),
+        ..Config::default()
     };
     let desktop = Arc::new(MockProxy::with_user_settings(&[
         ("enabled", "1"),
@@ -565,7 +566,11 @@ fn rig(xray: &Path, tag: &str, set_system_proxy: bool) -> Rig {
     let mut app = AppState::with_config(tx.clone(), config, None)
         .with_run_dir(tmp.path().join("run"))
         .with_proxy(ProxyHandle::spawn(controller.clone(), tx));
-    app.submit_input(format!("vless://{UUID}@127.0.0.1:1?security=none#local"));
+    let vps = StdListener::bind("127.0.0.1:0").unwrap();
+    let vps_port = vps.local_addr().unwrap().port();
+    app.submit_input(format!(
+        "vless://{UUID}@127.0.0.1:{vps_port}?security=none#local"
+    ));
     assert!(app.popup.is_none(), "{:?}", app.popup);
     app.selected = app.rows().len() - 1; // the manual server
     Rig {
@@ -575,6 +580,7 @@ fn rig(xray: &Path, tag: &str, set_system_proxy: bool) -> Rig {
         controller,
         core_cfg,
         _tmp: tmp,
+        _vps: vps,
     }
 }
 

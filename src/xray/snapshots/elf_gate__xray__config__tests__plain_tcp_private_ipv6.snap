@@ -78,6 +78,16 @@ expression: "config_for(&format!(\"vless://{UUID}@[fd00::1]:2053?type=tcp#v6\"))
     "domainStrategy": "IPIfNonMatch",
     "rules": [
       {
+        "domain": [
+          "full:connectivitycheck.gstatic.com"
+        ],
+        "inboundTag": [
+          "socks-in"
+        ],
+        "outboundTag": "proxy",
+        "type": "field"
+      },
+      {
         "ip": [
           "geoip:private"
         ],

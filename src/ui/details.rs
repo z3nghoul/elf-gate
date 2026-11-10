@@ -84,6 +84,29 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     let lines = match app.selected_row() {
         Some(Row::Server(i, j)) => {
             let mut l = server_lines(&app.subs[i].servers[j], th);
+            if app.conn == crate::app::Conn::Connected(app.subs[i].servers[j].id) {
+                match &app.health {
+                    crate::app::HealthState::Checking => {
+                        l.push(field("Проверка:", "идёт...".into(), th));
+                    }
+                    crate::app::HealthState::Ok(d) => {
+                        l.push(Line::from(vec![
+                            Span::styled(format!("{:<13}", "Проверка:"), th.muted()),
+                            Span::styled(
+                                format!("трафик идёт через сервер ({} мс)", d.as_millis()),
+                                th.good(),
+                            ),
+                        ]));
+                    }
+                    crate::app::HealthState::Failed(e) => {
+                        l.push(Line::from(Span::styled(
+                            format!("Проверка не прошла: {e}"),
+                            th.bad(),
+                        )));
+                    }
+                    crate::app::HealthState::Unknown => {}
+                }
+            }
             if let Some(hint) = app.fp_hint() {
                 l.push(Line::from(Span::styled(hint, th.warn())));
             }

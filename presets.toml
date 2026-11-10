@@ -1,0 +1,60 @@
+# Built-in routing presets (embedded with include_str!). Edit freely; user rules live in
+# config.toml and are never mixed into this file.
+#
+# routing = "include": the preset lists what goes THROUGH the VPN (everything else direct).
+# routing = "exclude": the preset lists what goes DIRECT (everything else through the VPN).
+# Process names have no ".exe": Xray strips it, so one name works on Windows and Linux.
+# NOTE: process names are matched case-sensitively against the real file name after symlinks
+# are resolved (docs/tun-research.md). Linux names must be checked against the installed client.
+
+[[preset]]
+id = "discord-only"
+title = "Только Discord через VPN"
+routing = "include"
+processes_windows = ["Discord", "DiscordPTB", "DiscordCanary"]
+processes_linux = ["Discord", "DiscordPTB", "DiscordCanary", "vesktop"]
+domains = ["discord.com", "discord.gg", "discordapp.com", "discordapp.net", "discord.media", "discordcdn.com"]
+
+[[preset]]
+id = "games-direct"
+title = "Игры и лаунчеры напрямую"
+routing = "exclude"
+processes_windows = ["steam", "steamwebhelper", "EpicGamesLauncher", "RobloxPlayerBeta", "javaw"]
+processes_linux = ["steam", "steamwebhelper", "java"]
+domains = ["steampowered.com", "steamcontent.com", "steamserver.net", "steamstatic.com", "epicgames.com", "roblox.com", "rbxcdn.com"]
+
+[[preset]]
+id = "torrents-direct"
+title = "Торрент-клиенты напрямую"
+routing = "exclude"
+processes_windows = ["qbittorrent", "utorrent", "BitTorrent", "transmission-qt"]
+processes_linux = ["qbittorrent", "transmission-gtk", "transmission-qt", "deluge"]
+
+[[preset]]
+id = "ru-direct"
+title = "Российские сайты напрямую"
+routing = "exclude"
+geosite = ["category-ru"]
+geoip = ["ru"]
+
+[[preset]]
+id = "ua-direct"
+title = "Украинские сайты напрямую"
+routing = "exclude"
+geosite = ["category-ua"]
+geoip = ["ua"]
+
+[[preset]]
+id = "local-direct"
+title = "Локальная сеть напрямую"
+routing = "exclude"
+geoip = ["private"]
+always = true   # applies in both routing modes
+
+[[preset]]
+id = "block-quic"
+title = "Блокировать UDP 443 (QUIC)"
+routing = "exclude"
+block_udp443 = true
+always = true
+note = "При flow=xtls-rprx-vision Xray уже блокирует UDP/443 сам; правило нужно для остальных серверов."

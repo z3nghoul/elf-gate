@@ -1,4 +1,5 @@
 pub mod config;
+pub mod geodata;
 #[cfg(test)]
 mod integration_tests;
 pub mod process;

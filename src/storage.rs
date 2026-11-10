@@ -1,3 +1,4 @@
+use crate::model::rule::{RoutingMode, Rule, TrafficMode};
 use crate::platform::ProxySnapshot;
 use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
@@ -10,8 +11,19 @@ const APP_DIR: &str = "elf-gate";
 const CONFIG_FILE: &str = "config.toml";
 const STATE_FILE: &str = "state.json";
 
-/// Configuration directory: `%APPDATA%\elf-gate` on Windows, `~/.config/elf-gate` on Linux.
+/// Under `sudo` the config belongs to the user who ran it, not to root.
+fn invoking_home() -> Option<PathBuf> {
+    crate::platform::privileges()
+        .invoking_user()
+        .map(|u| u.home)
+}
+
+/// Configuration directory: `%APPDATA%\elf-gate` on Windows, `~/.config/elf-gate` on Linux
+/// (the invoking user's, when started through `sudo`).
 pub fn config_dir() -> PathBuf {
+    if let Some(home) = invoking_home() {
+        return home.join(".config").join(APP_DIR);
+    }
     BaseDirs::new()
         .map(|d| d.config_dir().join(APP_DIR))
         .unwrap_or_else(|| PathBuf::from(APP_DIR))
@@ -20,6 +32,9 @@ pub fn config_dir() -> PathBuf {
 /// State directory (logs, run files): `~/.local/state/elf-gate` on Linux,
 /// the same folder as the config on Windows.
 pub fn state_dir() -> PathBuf {
+    if let Some(home) = invoking_home() {
+        return home.join(".local").join("state").join(APP_DIR);
+    }
     BaseDirs::new()
         .and_then(|d| d.state_dir().map(|s| s.join(APP_DIR)))
         .unwrap_or_else(config_dir)
@@ -90,6 +105,65 @@ impl Default for ProxyConfig {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ModeConfig {
+    pub traffic: TrafficMode,
+    pub routing: RoutingMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct TunConfig {
+    /// Xray used in TUN mode on Linux. It must be a root-owned copy that users cannot modify
+    /// (it gets `cap_net_admin`); empty means "same as `core.xray_path`" (Windows).
+    pub xray_path: String,
+    /// Interface name (Linux limits it to 15 characters).
+    pub name: String,
+    /// Public resolver that "through the VPN" domains are resolved with, via the tunnel.
+    pub tunnel_dns: String,
+    /// Upstream resolvers for names that resolve locally; empty = use the system's.
+    pub local_dns: Vec<String>,
+}
+
+impl Default for TunConfig {
+    fn default() -> Self {
+        Self {
+            xray_path: if cfg!(windows) {
+                String::new()
+            } else {
+                "/usr/local/lib/elf-gate/xray".into()
+            },
+            name: "elfgate0".into(),
+            tunnel_dns: "1.1.1.1".into(),
+            local_dns: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct PresetsConfig {
+    pub enabled: Vec<String>,
+}
+
+impl Default for PresetsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: vec!["local-direct".into()],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct UiConfig {
+    /// `"<group>/<name>"` of the server connected last (used by `--tun`).
+    pub last_server: Option<String>,
+    /// The "enable the discord-only preset?" question was asked once.
+    pub tun_intro_done: bool,
+}
+
 /// A server added by hand; stored as its original link.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ServerEntry {
@@ -109,9 +183,14 @@ pub struct ServerOverride {
 #[serde(default)]
 pub struct Config {
     pub core: CoreConfig,
+    pub mode: ModeConfig,
     pub proxy: ProxyConfig,
+    pub tun: TunConfig,
+    pub presets: PresetsConfig,
+    pub ui: UiConfig,
     pub servers: Vec<ServerEntry>,
     pub overrides: Vec<ServerOverride>,
+    pub rules: Vec<Rule>,
 }
 
 /// Set while we have changed the system proxy; holds what to put back.
@@ -121,11 +200,20 @@ pub struct ProxyState {
     pub address: String,
 }
 
+/// Set while a TUN core runs, so a crashed run can be cleaned up at the next start.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TunState {
+    /// The core process (or its supervisor on Linux).
+    pub pid: u32,
+    pub interface: String,
+}
+
 /// Service state that must survive a crash (`state.json`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct State {
     pub proxy: Option<ProxyState>,
+    pub tun: Option<TunState>,
 }
 
 #[derive(Debug, Clone)]
@@ -213,6 +301,36 @@ impl Storage {
     }
 }
 
+/// Gives files that root created under `sudo` back to the invoking user (best effort),
+/// walking up to, but not including, their home directory.
+pub fn fix_owner(path: &Path) {
+    let privileges = crate::platform::privileges();
+    let Some(user) = privileges.invoking_user() else {
+        return;
+    };
+    let mut current = Some(path);
+    while let Some(p) = current {
+        if !p.starts_with(&user.home) || p == user.home {
+            break;
+        }
+        let _ = privileges.chown_to_invoking_user(p);
+        current = p.parent();
+    }
+}
+
+/// Same for everything below `dir` (logs are created lazily by the logger).
+pub fn fix_owner_tree(dir: &Path) {
+    fix_owner(dir);
+    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            fix_owner_tree(&p);
+        } else {
+            fix_owner(&p);
+        }
+    }
+}
+
 fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -221,7 +339,9 @@ fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
     fs::write(&tmp, text)?;
-    fs::rename(&tmp, path)
+    fs::rename(&tmp, path)?;
+    fix_owner(path);
+    Ok(())
 }
 
 #[cfg(test)]

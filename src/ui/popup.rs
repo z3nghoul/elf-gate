@@ -17,7 +17,7 @@ fn centered(area: Rect, w: u16, h: u16) -> Rect {
 
 pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     let Some(popup) = &app.popup else { return };
-    let w = area.width.saturating_sub(10).clamp(30, 70);
+    let w = area.width.saturating_sub(6).clamp(30, 96);
     let (title, lines, border) = match popup {
         Popup::Select {
             title,
@@ -43,7 +43,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             )));
             (title.clone(), lines, th.border(true))
         }
-        Popup::Input { title, buf } => (
+        Popup::Input { title, buf, .. } => (
             title.clone(),
             vec![
                 Line::from(Span::styled(format!("{buf}_"), th.text())),
@@ -61,6 +61,18 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             ],
             th.border(true),
         ),
+        Popup::Notice(msg) => {
+            let mut lines: Vec<Line> = msg
+                .lines()
+                .map(|l| Line::from(Span::styled(l.to_string(), th.warn())))
+                .collect();
+            lines.push(Line::default());
+            lines.push(Line::from(Span::styled(
+                "любая клавиша - закрыть",
+                th.muted(),
+            )));
+            ("Внимание".to_string(), lines, th.warn())
+        }
         Popup::Error(msg) => {
             let mut lines: Vec<Line> = msg
                 .lines()
@@ -74,7 +86,13 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             ("Ошибка".to_string(), lines, th.bad())
         }
     };
-    let h = (lines.len() as u16 + 2).clamp(7, area.height.saturating_sub(2));
+    // Count wrapped lines, not just newlines: install commands are long.
+    let inner = w.saturating_sub(2).max(1);
+    let wrapped: u16 = lines
+        .iter()
+        .map(|l| (l.width() as u16).div_ceil(inner).max(1))
+        .sum();
+    let h = (wrapped + 2).clamp(7, area.height.saturating_sub(2));
     let rect = centered(area, w, h);
     f.render_widget(Clear, rect);
     f.render_widget(

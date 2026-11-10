@@ -4,12 +4,14 @@ mod build_info;
 mod event;
 mod mock;
 mod model;
+mod net;
 mod parser;
 // Stage 1 ships only empty platform implementations; they get used from stage 3 on.
 #[allow(dead_code)]
 mod platform;
 mod storage;
 mod sysproxy;
+mod tun;
 mod ui;
 mod xray;
 
@@ -76,6 +78,7 @@ async fn run(
     storage: Storage,
     proxy: Arc<ProxyController>,
     notes: Vec<String>,
+    tun_from_cli: bool,
 ) -> Result<()> {
     let (mut events, tx) = EventLoop::new();
     if build_info::SHOW_MOCK_DATA {
@@ -83,11 +86,17 @@ async fn run(
     }
     let mut app = AppState::with_config(tx.clone(), config, Some(storage))
         .with_run_dir(storage::state_dir().join("run"))
-        .with_proxy(ProxyHandle::spawn(proxy, tx));
+        .with_proxy(ProxyHandle::spawn(proxy, tx))
+        .with_state_store(StateStore::default_location());
+    // Stop a core a crashed run left behind (a TUN would still be up).
+    app.startup_tun_cleanup();
     for note in notes {
         app.log(event::Level::Warning, note);
     }
     app.start_background_checks();
+    if tun_from_cli {
+        app.start_tun_from_cli();
+    }
 
     while !app.should_quit {
         terminal.draw(|f| ui::render(f, &mut app))?;
@@ -144,9 +153,12 @@ async fn main() -> Result<()> {
     }
 
     let mut terminal = setup_terminal()?;
-    let result = run(&mut terminal, config, storage, proxy, notes).await;
+    let tun_from_cli = std::env::args().any(|a| a == "--tun");
+    let result = run(&mut terminal, config, storage, proxy, notes, tun_from_cli).await;
     restore_terminal();
     sysproxy::emergency_restore();
+    // Under sudo the logger created files as root: give them back to the user.
+    storage::fix_owner_tree(&storage::state_dir());
     if let Err(e) = &result {
         tracing::error!("fatal: {e:#}");
     }

@@ -2,19 +2,26 @@ use crate::action::{map_key, Action};
 use crate::build_info;
 use crate::event::{now_hms, BgEvent, BgTx, Event, Level, LogLine};
 use crate::mock::{self, Lcg};
+use crate::model::rule::{builtin_presets, Rule, RuleKind};
 use crate::model::server::{Ping, Security, Server, Transport, FINGERPRINTS};
 use crate::model::subscription::Subscription;
 use crate::parser;
-use crate::platform::ProxyAddr;
-use crate::storage::{Config, ServerEntry, ServerOverride, Storage};
+use crate::platform::{ProxyAddr, TunHost};
+use crate::storage::{Config, ServerEntry, ServerOverride, StateStore, Storage};
 use crate::sysproxy::{ProxyCmd, ProxyHandle};
+use crate::xray::process::Core;
 use crate::xray::validate::{self, Verdict};
-use crate::xray::{self, process::Core};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
+
+mod rules;
+mod session;
+
+pub use rules::RuleItem;
 
 pub const LOG_CAPACITY: usize = 2000;
 /// Name of the group holding servers added by hand (persisted in `config.toml`).
@@ -36,11 +43,7 @@ pub enum Screen {
     LogsFull,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    Proxy,
-    Tun,
-}
+pub use crate::model::rule::TrafficMode as Mode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Conn {
@@ -55,17 +58,41 @@ pub enum ConfirmKind {
     Quit,
     DeleteServer(u64),
     DeleteGroup(usize),
+    /// First TUN start: offer the discord-only preset, then connect to this server.
+    PresetOffer(u64),
+    /// Windows: restart elf-gate with administrator rights.
+    RestartElevated,
+    /// Rules changed while connected: restart the core to apply them.
+    ApplyRules(u64),
+}
+
+/// What a text input popup is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputPurpose {
+    /// A share link (or subscription URL).
+    Link,
+    /// The value of a new routing rule.
+    Rule(RuleKind),
+}
+
+/// The connection check after the core started.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HealthState {
+    Unknown,
+    Checking,
+    Ok(Duration),
+    Failed(String),
 }
 
 /// What a selection popup applies its choice to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectKind {
     Fingerprint(u64),
+    /// Which kind of rule to add.
+    NewRuleKind,
+    /// Pick a running program for a process rule.
+    RuleProcess,
 }
-
-/// Core warnings/errors within this window count as "connections are failing".
-const FAILURE_WINDOW: Duration = Duration::from_secs(30);
-const FAILURE_THRESHOLD: usize = 3;
 
 #[derive(Debug, Clone)]
 pub enum Popup {
@@ -78,12 +105,15 @@ pub enum Popup {
     Input {
         title: String,
         buf: String,
+        purpose: InputPurpose,
     },
     Confirm {
         text: String,
         kind: ConfirmKind,
     },
     Error(String),
+    /// Information the user should read but that is not a failure.
+    Notice(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,8 +142,15 @@ pub struct AppState {
     pub down_bytes: u64,
     pub status: Option<String>,
     pub should_quit: bool,
-    /// Times of recent core warnings/errors, for the "try fp=firefox" hint.
-    core_failures: VecDeque<Instant>,
+    /// Result of the connection check through the local proxy.
+    pub health: HealthState,
+    /// What the current connection runs in (the mode may be toggled meanwhile).
+    pub conn_mode: Mode,
+    /// A TUN core is running.
+    pub tun_active: bool,
+    tun_host: Arc<dyn TunHost>,
+    state_store: Option<StateStore>,
+    pub rules_cursor: usize,
     pub config: Config,
     storage: Option<Storage>,
     /// The running Xray process, if any.
@@ -185,7 +222,7 @@ impl AppState {
             list_state: ListState::default(),
             focus: Focus::Servers,
             screen: Screen::Main,
-            mode: Mode::Proxy,
+            mode: config.mode.traffic,
             conn: Conn::Disconnected,
             popup: None,
             filter: String::new(),
@@ -197,7 +234,12 @@ impl AppState {
             down_bytes: 0,
             status: None,
             should_quit: false,
-            core_failures: VecDeque::new(),
+            health: HealthState::Unknown,
+            conn_mode: config.mode.traffic,
+            tun_active: false,
+            tun_host: Arc::from(crate::platform::tun_host()),
+            state_store: None,
+            rules_cursor: 0,
             config,
             storage,
             core: None,
@@ -237,6 +279,17 @@ impl AppState {
         self
     }
 
+    pub fn with_state_store(mut self, store: StateStore) -> Self {
+        self.state_store = Some(store);
+        self
+    }
+
+    #[cfg(test)]
+    pub fn with_tun_host(mut self, host: Arc<dyn TunHost>) -> Self {
+        self.tun_host = host;
+        self
+    }
+
     pub fn with_proxy(mut self, handle: ProxyHandle) -> Self {
         self.proxy = Some(handle);
         self
@@ -251,13 +304,20 @@ impl AppState {
         }
         if let Some(core) = self.core.take() {
             core.stop().await;
+            if let Some(store) = &self.state_store {
+                crate::tun::mark_down(store);
+            }
+            self.tun_active = false;
         }
     }
 
     /// Points the system proxy at the local core, if the user wants that and it can work.
     fn request_proxy_on(&mut self) {
         let Some(handle) = &self.proxy else { return };
-        if !self.config.proxy.set_system_proxy || self.mode != Mode::Proxy || self.proxy_requested {
+        if !self.config.proxy.set_system_proxy
+            || self.conn_mode != Mode::Proxy
+            || self.proxy_requested
+        {
             return;
         }
         let core = &self.config.core;
@@ -411,10 +471,7 @@ impl AppState {
 
     fn on_bg(&mut self, ev: BgEvent) {
         match ev {
-            BgEvent::Log(line) => {
-                self.note_core_failure(&line);
-                self.push_log(line);
-            }
+            BgEvent::Log(line) => self.push_log(line),
             BgEvent::Ping { id, result } => {
                 if let Some(s) = self
                     .subs
@@ -438,29 +495,21 @@ impl AppState {
             BgEvent::CoreStarted { id, core } => {
                 self.busy = false;
                 if self.conn == Conn::Connecting(id) {
-                    let pid = core.pid().map(|p| p.to_string()).unwrap_or_default();
-                    self.core = Some(*core);
-                    self.conn = Conn::Connected(id);
-                    self.request_proxy_on();
-                    let name = self.server_by_id(id).map(|s| s.name.clone());
-                    self.log(
-                        Level::Info,
-                        format!("connected to {} (xray pid {pid})", name.unwrap_or_default()),
-                    );
+                    self.on_core_started(id, *core);
                 } else {
                     // The user cancelled while the core was starting.
                     self.spawn_stop(*core);
                 }
             }
-            BgEvent::CoreFailed { id, error } => {
+            BgEvent::CoreFailed {
+                id,
+                error,
+                needs_privileges,
+            } => {
                 self.busy = false;
-                self.log(Level::Error, format!("[Error] {error}"));
-                if self.conn == Conn::Connecting(id) {
-                    self.conn = Conn::Error("не удалось запустить ядро".into());
-                    self.popup = Some(Popup::Error(error));
-                    self.request_proxy_off();
-                }
+                self.on_core_failed(id, error, needs_privileges);
             }
+            BgEvent::Health { id, result } => self.on_health(id, result),
             BgEvent::CoreStopped => self.busy = false,
             BgEvent::ProxyChanged { active, error } => match error {
                 None => {
@@ -545,7 +594,8 @@ impl AppState {
                 match key.code {
                     KeyCode::Esc => return,
                     KeyCode::Enter => {
-                        self.apply_selection(kind, selected);
+                        let option = options.get(selected).cloned().unwrap_or_default();
+                        self.apply_selection(kind, selected, option);
                         return;
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
@@ -561,9 +611,16 @@ impl AppState {
                     kind,
                 });
             }
-            Popup::Input { title, mut buf } => match key.code {
+            Popup::Input {
+                title,
+                mut buf,
+                purpose,
+            } => match key.code {
                 KeyCode::Esc => {}
-                KeyCode::Enter => self.submit_input(buf),
+                KeyCode::Enter => match purpose {
+                    InputPurpose::Link => self.submit_input(buf),
+                    InputPurpose::Rule(kind) => self.submit_rule(kind, buf),
+                },
                 code => {
                     match code {
                         KeyCode::Backspace => {
@@ -574,17 +631,23 @@ impl AppState {
                         }
                         _ => {}
                     }
-                    self.popup = Some(Popup::Input { title, buf });
+                    self.popup = Some(Popup::Input {
+                        title,
+                        buf,
+                        purpose,
+                    });
                 }
             },
             Popup::Confirm { text, kind } => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Char('д') | KeyCode::Enter => {
                     self.confirm(kind)
                 }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('н') | KeyCode::Esc => {}
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('н') | KeyCode::Esc => {
+                    self.decline(kind)
+                }
                 _ => self.popup = Some(Popup::Confirm { text, kind }),
             },
-            Popup::Error(_) => {}
+            Popup::Error(_) | Popup::Notice(_) => {}
         }
     }
 
@@ -593,11 +656,16 @@ impl AppState {
     pub(crate) fn handle_action(&mut self, action: Action) {
         use Action::*;
         // Server-list actions only make sense on the main screen.
+        let on_rules = self.screen == Screen::Rules;
         let main_only = matches!(
             action,
-            Enter | Delete | Add | Filter | PingAll | SortPing | UpdateSubs | Fingerprint
-        );
+            Enter | Filter | PingAll | SortPing | UpdateSubs | Fingerprint
+        ) || (matches!(action, Delete | Add) && !on_rules);
         if main_only && self.screen != Screen::Main {
+            return;
+        }
+        // These two exist only on the rules screen.
+        if matches!(action, Toggle | RoutingMode) && !on_rules {
             return;
         }
         match action {
@@ -631,12 +699,20 @@ impl AppState {
                 }
             }
             Add => {
-                self.popup = Some(Popup::Input {
-                    title: "Ссылка на сервер или подписку".into(),
-                    buf: String::new(),
-                })
+                if self.screen == Screen::Rules {
+                    self.rules_add_menu();
+                } else {
+                    self.popup = Some(Popup::Input {
+                        title: "Ссылка на сервер или подписку".into(),
+                        buf: String::new(),
+                        purpose: InputPurpose::Link,
+                    })
+                }
             }
+            Delete if on_rules => self.rules_delete(),
             Delete => self.ask_delete(),
+            Toggle => self.rules_toggle(),
+            RoutingMode => self.rules_toggle_routing(),
             Rules => self.toggle_screen(Screen::Rules),
             Settings => self.toggle_screen(Screen::Settings),
             Logs => self.toggle_screen(Screen::LogsFull),
@@ -687,7 +763,9 @@ impl AppState {
     }
 
     fn navigate(&mut self, delta: isize) {
-        if self.logs_active() {
+        if self.screen == Screen::Rules {
+            self.rules_move(delta);
+        } else if self.logs_active() {
             self.scroll_logs(delta < 0, 1);
         } else if self.servers_active() {
             self.move_selection(delta);
@@ -744,80 +822,7 @@ impl AppState {
         self.clamp_selection();
     }
 
-    fn connect(&mut self, id: u64) {
-        if self.busy {
-            self.status = Some("Подождите: ядро запускается или останавливается".into());
-            return;
-        }
-        let Some(server) = self.server_by_id(id).cloned() else {
-            return;
-        };
-        self.up_bytes = 0;
-        self.down_bytes = 0;
-        self.conn = Conn::Connecting(id);
-        let old = self.core.take();
-
-        if server.link.is_empty() {
-            // Mock server (stage 1 demo data): no real process.
-            self.log(Level::Info, format!("connecting to {} (mock)", server.name));
-            if let Some(old) = old {
-                self.spawn_stop(old);
-            }
-            // Mock rule: servers whose last ping failed refuse the connection.
-            let ok = !matches!(server.ping, Ping::Timeout | Ping::Error);
-            mock::spawn_connect(self.tx.clone(), id, ok);
-            return;
-        }
-
-        self.log(Level::Info, format!("starting core for {}", server.name));
-        self.busy = true;
-        let tx = self.tx.clone();
-        let core_cfg = self.config.core.clone();
-        let run_dir = self.run_dir.clone();
-        tokio::spawn(async move {
-            if let Some(old) = old {
-                old.stop().await;
-            }
-            // Ask Xray first, so a refused config is reported with Xray's own words
-            // and the server is greyed out.
-            let verdict = validate::check(&core_cfg, &server, &run_dir).await;
-            let started = match verdict {
-                Verdict::Rejected(reason) => {
-                    let _ = tx.send(BgEvent::ServerRejected {
-                        id,
-                        reason: reason.clone(),
-                    });
-                    Err(format!("Xray отверг конфиг сервера: {reason}"))
-                }
-                Verdict::Accepted | Verdict::Unavailable(_) => {
-                    match xray::config::build(&server, &core_cfg) {
-                        Ok(cfg) => Core::start(&core_cfg, &cfg, &run_dir, tx.clone())
-                            .await
-                            .map_err(|e| e.to_string()),
-                        Err(e) => Err(e.to_string()),
-                    }
-                }
-            };
-            let ev = match started {
-                Ok(core) => BgEvent::CoreStarted {
-                    id,
-                    core: Box::new(core),
-                },
-                Err(error) => BgEvent::CoreFailed { id, error },
-            };
-            let _ = tx.send(ev);
-        });
-    }
-
-    /// Stops a core in the background; `busy` stays set until it is done.
-    fn spawn_stop(&mut self, core: Core) {
-        self.busy = true;
-        let tx = self.tx.clone();
-        tokio::spawn(async move {
-            core.stop().await;
-            let _ = tx.send(BgEvent::CoreStopped);
-        });
-    }
+    // `connect` and `spawn_stop` live in app/session.rs
 
     fn disconnect(&mut self) {
         if self.conn == Conn::Disconnected {
@@ -837,6 +842,10 @@ impl AppState {
         let Some(core) = &mut self.core else { return };
         let Some(info) = core.try_exit() else { return };
         self.core = None;
+        self.tun_active = false;
+        if let Some(store) = &self.state_store {
+            crate::tun::mark_down(store);
+        }
         self.request_proxy_off();
         self.conn = Conn::Error("ядро завершилось".into());
         self.log(
@@ -856,20 +865,23 @@ impl AppState {
     }
 
     fn toggle_mode(&mut self) {
-        if self.mode == Mode::Proxy && !build_info::TUN_AVAILABLE {
-            self.status = Some("Режим TUN в этой версии недоступен".into());
-            return;
-        }
-        self.mode = match self.mode {
+        let next = match self.mode {
             Mode::Proxy => Mode::Tun,
             Mode::Tun => Mode::Proxy,
         };
+        if next == Mode::Tun && !build_info::TUN_AVAILABLE {
+            self.status = Some("Режим TUN в этой версии недоступен".into());
+            return;
+        }
+        self.mode = next;
+        self.config.mode.traffic = next;
+        self.save_config();
         self.log(Level::Info, format!("mode: {}", mode_name(self.mode)));
         if self.mode == Mode::Tun {
-            // TUN needs no system proxy (stage 5 brings the real TUN mode).
+            // TUN needs no system proxy.
             self.request_proxy_off();
         }
-        // Switching the mode while connected restarts the connection.
+        // Switching the mode while connected restarts the connection in the new mode.
         if let Conn::Connected(id) | Conn::Connecting(id) = self.conn {
             self.connect(id);
         }
@@ -918,6 +930,12 @@ impl AppState {
     fn confirm(&mut self, kind: ConfirmKind) {
         match kind {
             ConfirmKind::Quit => self.should_quit = true,
+            ConfirmKind::PresetOffer(id) => {
+                self.accept_discord_preset();
+                self.connect(id);
+            }
+            ConfirmKind::RestartElevated => self.restart_elevated(),
+            ConfirmKind::ApplyRules(id) => self.connect(id),
             ConfirmKind::DeleteServer(id) => {
                 self.drop_connection_if(|c| c == id);
                 let mut removed_links = Vec::new();
@@ -995,7 +1013,7 @@ impl AppState {
         });
     }
 
-    fn apply_selection(&mut self, kind: SelectKind, index: usize) {
+    fn apply_selection(&mut self, kind: SelectKind, index: usize, option: String) {
         match kind {
             SelectKind::Fingerprint(id) => {
                 let fp = index
@@ -1004,6 +1022,8 @@ impl AppState {
                     .map(|f| f.to_string());
                 self.set_fingerprint(id, fp);
             }
+            SelectKind::NewRuleKind => self.rules_kind_chosen(index),
+            SelectKind::RuleProcess => self.rules_process_chosen(index, option),
         }
     }
 
@@ -1026,7 +1046,6 @@ impl AppState {
                 fp: fp.clone(),
             });
         }
-        self.core_failures.clear();
         self.log(
             Level::Info,
             format!(
@@ -1044,42 +1063,25 @@ impl AppState {
         }
     }
 
-    /// Remembers core warnings/errors; a burst of them hints at a blocked handshake.
-    fn note_core_failure(&mut self, line: &LogLine) {
-        let from_core = line.text.starts_with("[xray");
-        let noise = line.text.contains("deprecated") || line.text.contains(" started");
-        if from_core && line.level != Level::Info && !noise {
-            self.core_failures.push_back(Instant::now());
-        }
-        self.prune_failures();
-    }
-
-    fn prune_failures(&mut self) {
-        while self
-            .core_failures
-            .front()
-            .is_some_and(|t| t.elapsed() > FAILURE_WINDOW)
-        {
-            self.core_failures.pop_front();
-        }
-    }
-
-    /// Shown in the details pane when the core runs but keeps logging failures while a
-    /// fingerprint other than `firefox` is in use.
+    /// Shown in the details pane when the connection check fails although the server answers
+    /// over TCP (the check only starts after a successful TCP probe).
     pub fn fp_hint(&self) -> Option<&'static str> {
         let Conn::Connected(id) = self.conn else {
             return None;
         };
+        if !matches!(self.health, HealthState::Failed(_)) {
+            return None;
+        }
         let server = self.server_by_id(id)?;
-        let recent = self
-            .core_failures
-            .iter()
-            .filter(|t| t.elapsed() <= FAILURE_WINDOW)
-            .count();
         let fp_matters =
             matches!(server.security, Security::Tls | Security::Reality) && !server.link.is_empty();
-        (fp_matters && recent >= FAILURE_THRESHOLD && server.effective_fingerprint() != "firefox")
-            .then_some("Соединения не проходят? Попробуйте fp=firefox (клавиша f)")
+        Some(
+            if fp_matters && server.effective_fingerprint() != "firefox" {
+                "Сервер доступен, но запрос через него не прошёл. Попробуйте fp=firefox (клавиша f)"
+            } else {
+                "Сервер доступен, но трафик не проходит. Проверьте ключ, SNI, shortId и порт на сервере"
+            },
+        )
     }
 
     /// Greys the server out and keeps Xray's error text for the details pane.
@@ -1486,57 +1488,6 @@ mod tests {
         assert!(a.status.as_deref().unwrap().contains("TLS или Reality"));
     }
 
-    fn core_warning(text: &str) -> BgEvent {
-        BgEvent::Log(LogLine {
-            time: "00:00:00".into(),
-            level: Level::Warning,
-            text: text.into(),
-        })
-    }
-
-    #[tokio::test]
-    async fn burst_of_core_failures_suggests_firefox() {
-        let (mut a, id) = app_with_reality();
-        a.conn = Conn::Connected(id);
-        assert_eq!(a.fp_hint(), None);
-        for _ in 0..2 {
-            a.on_bg(core_warning(
-                "[xray] [Warning] proxy/vless/outbound: connection ends > EOF",
-            ));
-        }
-        assert_eq!(a.fp_hint(), None, "two failures are not a pattern yet");
-        a.on_bg(core_warning(
-            "[xray:err] [Warning] reality: failed to read server hello",
-        ));
-        assert!(a.fp_hint().unwrap().contains("fp=firefox"));
-
-        // Notices and non-core lines do not count; firefox already in use needs no hint.
-        a.set_fingerprint(id, Some("firefox".into()));
-        a.conn = Conn::Connected(id);
-        for _ in 0..5 {
-            a.on_bg(core_warning("[xray] [Warning] proxy: something failed"));
-        }
-        assert_eq!(a.fp_hint(), None);
-    }
-
-    #[tokio::test]
-    async fn failure_hint_ignores_noise_and_expires() {
-        let (mut a, id) = app_with_reality();
-        a.conn = Conn::Connected(id);
-        for _ in 0..5 {
-            a.on_bg(core_warning("[xray] [Warning] core: Xray 26.11.9 started"));
-            a.on_bg(core_warning(
-                "[xray] [Warning] The feature gRPC is deprecated",
-            ));
-            a.on_bg(core_warning("some mock log line"));
-        }
-        assert_eq!(a.fp_hint(), None);
-
-        let old = Instant::now() - Duration::from_secs(120);
-        a.core_failures.extend([old, old, old, old]);
-        assert_eq!(a.fp_hint(), None, "old failures expire");
-    }
-
     fn release_app() -> AppState {
         let (tx, _rx) = unbounded_channel();
         AppState::build(tx, Config::default(), None, false)
@@ -1572,13 +1523,5 @@ mod tests {
         a.submit_input("https://example.com/sub".into());
         assert!(matches!(a.popup, Some(Popup::Error(_))));
         assert_eq!(a.subs.len(), groups, "no mock subscription may appear");
-    }
-
-    #[tokio::test]
-    async fn tun_mode_is_refused_until_it_exists() {
-        let mut a = app();
-        a.handle_action(Action::ToggleMode);
-        assert_eq!(a.mode, Mode::Proxy);
-        assert!(a.status.as_deref().unwrap().contains("TUN"));
     }
 }

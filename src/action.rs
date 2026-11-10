@@ -22,6 +22,10 @@ pub enum Action {
     Logs,
     Filter,
     Fingerprint,
+    /// Rules screen: enable or disable the selected rule or preset.
+    Toggle,
+    /// Rules screen: switch between `exclude` and `include`.
+    RoutingMode,
     Help,
     Back,
     FocusNext,
@@ -196,6 +200,20 @@ pub const BINDINGS: &[Binding] = &[
         desc: "сменить TLS fingerprint выбранного сервера",
         action: Action::Fingerprint,
         keys: &[(KeyCode::Char('f'), N)],
+        hidden: false,
+    },
+    Binding {
+        label: "Space",
+        desc: "экран правил: включить или выключить правило",
+        action: Action::Toggle,
+        keys: &[(KeyCode::Char(' '), N)],
+        hidden: false,
+    },
+    Binding {
+        label: "m",
+        desc: "экран правил: режим маршрутизации exclude / include",
+        action: Action::RoutingMode,
+        keys: &[(KeyCode::Char('m'), N)],
         hidden: false,
     },
     Binding {

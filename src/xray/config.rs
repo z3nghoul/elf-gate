@@ -1,5 +1,6 @@
 //! Builds the Xray JSON configuration from a server and the core settings.
 
+use crate::model::rule::{EffectiveRules, RoutingMode, TrafficMode};
 use crate::model::server::{Security, Server, Transport};
 use crate::storage::CoreConfig;
 use serde_json::{json, Map, Value};
@@ -18,7 +19,19 @@ fn put(map: &mut Map<String, Value>, key: &str, value: &str) {
     }
 }
 
-fn stream_settings(s: &Server) -> Value {
+/// `fallback`: the server's domain name when the config dials a pre-resolved IP instead, so
+/// TLS and HTTP-level host names still say what they said in the link.
+fn stream_settings(s: &Server, fallback: Option<&str>) -> Value {
+    let sni = if s.tls.sni.is_empty() {
+        fallback.unwrap_or("")
+    } else {
+        &s.tls.sni
+    };
+    let host = if s.params.host.is_empty() {
+        fallback.unwrap_or("")
+    } else {
+        &s.params.host
+    };
     let mut stream = Map::new();
     let network = match s.transport {
         Transport::Tcp => "tcp",
@@ -35,7 +48,7 @@ fn stream_settings(s: &Server) -> Value {
         Security::Tls => {
             stream.insert("security".into(), json!("tls"));
             let mut tls = Map::new();
-            put(&mut tls, "serverName", &s.tls.sni);
+            put(&mut tls, "serverName", sni);
             put(&mut tls, "fingerprint", s.effective_fingerprint());
             if !s.tls.alpn.is_empty() {
                 tls.insert("alpn".into(), json!(s.tls.alpn));
@@ -48,7 +61,7 @@ fn stream_settings(s: &Server) -> Value {
         Security::Reality => {
             stream.insert("security".into(), json!("reality"));
             let mut r = Map::new();
-            put(&mut r, "serverName", &s.tls.sni);
+            put(&mut r, "serverName", sni);
             // Reality requires a fingerprint; chrome is the common default.
             let fp = if s.effective_fingerprint().is_empty() {
                 "chrome"
@@ -74,7 +87,7 @@ fn stream_settings(s: &Server) -> Value {
             let mut ws = Map::new();
             ws.insert("path".into(), json!(path_or_root));
             // `headers.Host` is deprecated in Xray 26.x in favour of `host`.
-            put(&mut ws, "host", &s.params.host);
+            put(&mut ws, "host", host);
             stream.insert("wsSettings".into(), Value::Object(ws));
         }
         Transport::Grpc => {
@@ -90,7 +103,7 @@ fn stream_settings(s: &Server) -> Value {
         Transport::Xhttp => {
             let mut x = Map::new();
             x.insert("path".into(), json!(path_or_root));
-            put(&mut x, "host", &s.params.host);
+            put(&mut x, "host", host);
             put(&mut x, "mode", &s.params.mode);
             stream.insert("xhttpSettings".into(), Value::Object(x));
         }
@@ -98,7 +111,13 @@ fn stream_settings(s: &Server) -> Value {
     Value::Object(stream)
 }
 
-fn proxy_outbound(s: &Server) -> Value {
+fn is_ip(addr: &str) -> bool {
+    addr.parse::<std::net::IpAddr>().is_ok()
+}
+
+/// `address_override`: a pre-resolved IP of the server (TUN mode resolves it before the
+/// tunnel exists, so Xray never has to resolve it through the tunnel).
+fn proxy_outbound(s: &Server, address_override: Option<&str>) -> Value {
     let mut user = Map::new();
     user.insert("id".into(), json!(s.uuid));
     let encryption = if s.encryption.is_empty() {
@@ -108,22 +127,141 @@ fn proxy_outbound(s: &Server) -> Value {
     };
     user.insert("encryption".into(), json!(encryption));
     put(&mut user, "flow", &s.flow);
+    let fallback = (address_override.is_some() && !is_ip(&s.address)).then_some(s.address.as_str());
     json!({
         "tag": "proxy",
         "protocol": "vless",
         "settings": {
             "vnext": [{
-                "address": s.address,
+                "address": address_override.unwrap_or(&s.address),
                 "port": s.port,
                 "users": [Value::Object(user)],
             }]
         },
-        "streamSettings": stream_settings(s),
+        "streamSettings": stream_settings(s, fallback),
     })
 }
 
-/// Server + settings -> Xray configuration.
+/// What differs between the plain proxy config and a TUN config.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TunPlan {
+    pub name: String,
+    pub ipv6: bool,
+    /// Windows-only leak protection (WFP filters) is added.
+    pub windows: bool,
+    /// Resolver for "through the VPN" names; reached through the tunnel.
+    pub tunnel_dns: String,
+    /// The system's upstream resolvers, for names that resolve locally. Empty disables DNS routing.
+    pub local_dns: Vec<String>,
+}
+
+/// Everything beyond server and core settings that shapes the config.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Plan {
+    pub traffic: TrafficMode,
+    pub routing: RoutingMode,
+    pub rules: EffectiveRules,
+    pub tun: Option<TunPlan>,
+    pub vps_ip: Option<String>,
+}
+
+impl Plan {
+    /// Plain local proxy, no user rules: what the application did before TUN existed.
+    pub fn proxy_default() -> Self {
+        Plan {
+            traffic: TrafficMode::Proxy,
+            routing: RoutingMode::Exclude,
+            rules: EffectiveRules {
+                always_direct_ips: vec!["geoip:private".into()],
+                ..EffectiveRules::default()
+            },
+            tun: None,
+            vps_ip: None,
+        }
+    }
+
+    /// Domains that should resolve through the tunnel (include) or locally (exclude) need
+    /// DNS routing; it also needs somewhere to resolve the rest.
+    fn dns_routing(&self) -> Option<(&TunPlan, &[String])> {
+        let tun = self.tun.as_ref()?;
+        (!self.rules.domains.is_empty() && !tun.local_dns.is_empty())
+            .then_some((tun, self.rules.domains.as_slice()))
+    }
+}
+
+fn tun_inbound(t: &TunPlan, sniffing: &Value) -> Value {
+    let mut gateway = vec!["198.18.0.1/16".to_string()];
+    let mut routes = vec!["0.0.0.0/0".to_string()];
+    if t.ipv6 {
+        gateway.push("fdfe:dcba:9876::1/64".into());
+        routes.push("::/0".into());
+    }
+    let mut settings = json!({
+        "name": t.name,
+        "mtu": 1500,
+        "gateway": gateway,
+        "autoSystemRoutingTable": routes,
+        // Binds Xray's own connections to the physical interface: no routing loop.
+        "autoOutboundsInterface": "auto",
+    });
+    if t.windows {
+        settings["desc"] = json!("elf-gate");
+        // Block traffic of an IP version that has no route into the tunnel (a leak).
+        settings["autoSystemWfpBlockLeak"] = json!(["misconfigtun"]);
+    }
+    json!({
+        "tag": "tun-in",
+        "protocol": "tun",
+        "settings": settings,
+        "sniffing": sniffing,
+    })
+}
+
+fn dns_section(plan: &Plan, t: &TunPlan, listed: &[String]) -> (Value, Vec<Value>) {
+    let tunnel = json!({ "address": t.tunnel_dns, "port": 53, "tag": "dns-tunnel" });
+    let locals: Vec<Value> = t
+        .local_dns
+        .iter()
+        .enumerate()
+        .map(|(i, a)| json!({ "address": a, "port": 53, "tag": format!("dns-local-{i}") }))
+        .collect();
+    // The listed names use one resolver exclusively; every other name uses the other side.
+    let restrict = |mut server: Value| {
+        server["domains"] = json!(listed);
+        server["skipFallback"] = json!(true);
+        server
+    };
+    let servers: Vec<Value> = match plan.routing {
+        RoutingMode::Include => std::iter::once(restrict(tunnel)).chain(locals).collect(),
+        RoutingMode::Exclude => locals
+            .into_iter()
+            .map(restrict)
+            .chain(std::iter::once(tunnel))
+            .collect(),
+    };
+    let local_tags: Vec<String> = (0..t.local_dns.len())
+        .map(|i| format!("dns-local-{i}"))
+        .collect();
+    let rules = vec![
+        // The system resolver's queries reach Xray through the tunnel; answer them with the
+        // built-in DNS, which picks the resolver by name.
+        json!({ "type": "field", "inboundTag": ["tun-in"], "network": "udp", "port": "53", "outboundTag": "dns-out" }),
+        json!({ "type": "field", "inboundTag": ["dns-tunnel"], "outboundTag": "proxy" }),
+        json!({ "type": "field", "inboundTag": local_tags, "outboundTag": "direct" }),
+    ];
+    (
+        json!({ "servers": servers, "queryStrategy": "UseIP" }),
+        rules,
+    )
+}
+
+/// Server + settings -> Xray configuration (plain local proxy, no user rules).
 pub fn build(server: &Server, core: &CoreConfig) -> Result<Value, ConfigError> {
+    build_with(server, core, &Plan::proxy_default())
+}
+
+/// Server + settings + routing plan -> Xray configuration.
+pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Value, ConfigError> {
     if let Some(reason) = &server.unsupported {
         return Err(ConfigError::Unsupported(
             server.name.clone(),
@@ -134,39 +272,92 @@ pub fn build(server: &Server, core: &CoreConfig) -> Result<Value, ConfigError> {
         "enabled": true,
         "destOverride": ["http", "tls", "quic"],
     });
-    Ok(json!({
+    let mut inbounds = vec![
+        json!({
+            "tag": "socks-in",
+            "listen": "127.0.0.1",
+            "port": core.socks_port,
+            "protocol": "socks",
+            "settings": { "auth": "noauth", "udp": true, "ip": "127.0.0.1" },
+            "sniffing": sniffing,
+        }),
+        json!({
+            "tag": "http-in",
+            "listen": "127.0.0.1",
+            "port": core.http_port,
+            "protocol": "http",
+            "settings": {},
+            "sniffing": sniffing,
+        }),
+    ];
+    if let Some(t) = &plan.tun {
+        inbounds.push(tun_inbound(t, &sniffing));
+    }
+
+    let mut outbounds = vec![
+        proxy_outbound(server, plan.vps_ip.as_deref()),
+        json!({ "tag": "direct", "protocol": "freedom" }),
+        json!({ "tag": "block", "protocol": "blackhole" }),
+    ];
+
+    let mut rules: Vec<Value> = Vec::new();
+    let mut dns = None;
+    if let Some((t, listed)) = plan.dns_routing() {
+        let (section, dns_rules) = dns_section(plan, t, listed);
+        dns = Some(section);
+        outbounds.push(json!({ "tag": "dns-out", "protocol": "dns" }));
+        rules.extend(dns_rules);
+    }
+    // The connection check must test the VPN itself, whatever the user's rules say.
+    rules.push(json!({
+        "type": "field",
+        "inboundTag": ["socks-in"],
+        "domain": [format!("full:{}", crate::net::health::HEALTH_HOST)],
+        "outboundTag": "proxy",
+    }));
+    if plan.rules.block_udp443 {
+        rules.push(
+            json!({ "type": "field", "network": "udp", "port": "443", "outboundTag": "block" }),
+        );
+    }
+    if !plan.rules.always_direct_ips.is_empty() {
+        rules.push(
+            json!({ "type": "field", "ip": plan.rules.always_direct_ips, "outboundTag": "direct" }),
+        );
+    }
+    // `exclude`: listed things stay direct, the rest uses the VPN (the first outbound).
+    // `include`: listed things use the VPN, the rest stays direct.
+    let target = match plan.routing {
+        RoutingMode::Exclude => "direct",
+        RoutingMode::Include => "proxy",
+    };
+    // Process names only mean something for traffic that comes from this machine's apps
+    // through the TUN; in proxy mode they stay inactive.
+    if plan.tun.is_some() && !plan.rules.processes.is_empty() {
+        rules.push(
+            json!({ "type": "field", "process": plan.rules.processes, "outboundTag": target }),
+        );
+    }
+    if !plan.rules.domains.is_empty() {
+        rules.push(json!({ "type": "field", "domain": plan.rules.domains, "outboundTag": target }));
+    }
+    if !plan.rules.ips.is_empty() {
+        rules.push(json!({ "type": "field", "ip": plan.rules.ips, "outboundTag": target }));
+    }
+    if plan.routing == RoutingMode::Include {
+        rules.push(json!({ "type": "field", "network": "tcp,udp", "outboundTag": "direct" }));
+    }
+
+    let mut config = json!({
         "log": { "loglevel": core.log_level },
-        "inbounds": [
-            {
-                "tag": "socks-in",
-                "listen": "127.0.0.1",
-                "port": core.socks_port,
-                "protocol": "socks",
-                "settings": { "auth": "noauth", "udp": true, "ip": "127.0.0.1" },
-                "sniffing": sniffing,
-            },
-            {
-                "tag": "http-in",
-                "listen": "127.0.0.1",
-                "port": core.http_port,
-                "protocol": "http",
-                "settings": {},
-                "sniffing": sniffing,
-            },
-        ],
-        "outbounds": [
-            proxy_outbound(server),
-            { "tag": "direct", "protocol": "freedom" },
-            { "tag": "block", "protocol": "blackhole" },
-        ],
-        "routing": {
-            "domainStrategy": "IPIfNonMatch",
-            "rules": [
-                // User rules are added in stage 7.
-                { "type": "field", "ip": ["geoip:private"], "outboundTag": "direct" },
-            ],
-        },
-    }))
+        "inbounds": inbounds,
+        "outbounds": outbounds,
+        "routing": { "domainStrategy": "IPIfNonMatch", "rules": rules },
+    });
+    if let Some(dns) = dns {
+        config["dns"] = dns;
+    }
+    Ok(config)
 }
 
 #[cfg(test)]
@@ -288,5 +479,329 @@ mod tests {
         ));
         let user = &cfg["outbounds"][0]["settings"]["vnext"][0]["users"][0];
         assert_eq!(user["encryption"], enc);
+    }
+
+    // ---------------------------------------------------------------- TUN / rules
+
+    use crate::model::rule::{builtin_presets, effective_rules, Rule, RuleKind};
+
+    fn tun_plan(windows: bool, ipv6: bool) -> TunPlan {
+        TunPlan {
+            name: "elfgate0".into(),
+            ipv6,
+            windows,
+            tunnel_dns: "1.1.1.1".into(),
+            local_dns: vec!["192.168.1.1".into()],
+        }
+    }
+
+    /// OS-independent on purpose (`windows = false`), so snapshots match on every CI runner.
+    pub(super) fn plan_for(
+        routing: RoutingMode,
+        presets: &[&str],
+        rules: &[Rule],
+        tun: bool,
+    ) -> Plan {
+        let ids: Vec<String> = presets.iter().map(|s| s.to_string()).collect();
+        let mut effective = effective_rules(routing, rules, &ids, &builtin_presets(), false);
+        // Fixed, OS-independent data set (what Xray's bundled files contain), so the snapshots
+        // do not depend on which .dat files the machine has.
+        let geo =
+            crate::xray::geodata::Geo::from_codes(&["CATEGORY-RU", "DISCORD"], &["RU", "PRIVATE"]);
+        crate::xray::geodata::drop_missing(&mut effective, &geo);
+        Plan {
+            traffic: if tun {
+                TrafficMode::Tun
+            } else {
+                TrafficMode::Proxy
+            },
+            routing,
+            rules: effective,
+            tun: tun.then(|| tun_plan(false, true)),
+            vps_ip: None,
+        }
+    }
+
+    fn server() -> Server {
+        parse_link(&format!(
+            "vless://{UUID}@de.example.com:443?security=reality&sni=www.microsoft.com&fp=chrome&pbk=4GObrWHDR0TyD84iQ06z24v4YBxQ69vxeG1MCqOyFlI&sid=ab12cd34&flow=xtls-rprx-vision#DE"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn every_preset_in_both_routing_modes_snapshot() {
+        for preset in builtin_presets() {
+            for (mode, tag) in [
+                (RoutingMode::Exclude, "exclude"),
+                (RoutingMode::Include, "include"),
+            ] {
+                let plan = plan_for(mode, &[preset.id.as_str()], &[], true);
+                let cfg = build_with(&server(), &CoreConfig::default(), &plan).unwrap();
+                insta::assert_json_snapshot!(format!("preset_{}_{tag}", preset.id), cfg);
+            }
+        }
+    }
+
+    #[test]
+    fn plain_proxy_plan_equals_the_classic_config() {
+        let a = build(&server(), &CoreConfig::default()).unwrap();
+        let plan = Plan {
+            tun: None,
+            ..plan_for(RoutingMode::Exclude, &["local-direct"], &[], false)
+        };
+        let b = build_with(&server(), &CoreConfig::default(), &plan).unwrap();
+        assert_eq!(a, b);
+        assert!(a["inbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["protocol"] != "tun"));
+    }
+
+    #[test]
+    fn tun_inbound_has_routes_interface_binding_and_ipv6_switch() {
+        let mut plan = plan_for(RoutingMode::Exclude, &["local-direct"], &[], true);
+        let cfg = build_with(&server(), &CoreConfig::default(), &plan).unwrap();
+        let tun = cfg["inbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["protocol"] == "tun")
+            .unwrap();
+        assert_eq!(tun["settings"]["name"], "elfgate0");
+        assert_eq!(tun["settings"]["autoOutboundsInterface"], "auto");
+        assert_eq!(
+            tun["settings"]["autoSystemRoutingTable"],
+            json!(["0.0.0.0/0", "::/0"])
+        );
+        assert!(
+            tun["settings"].get("autoSystemWfpBlockLeak").is_none(),
+            "Windows-only"
+        );
+        // The local socks inbound stays: the health check goes through it.
+        assert!(cfg["inbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["tag"] == "socks-in"));
+
+        plan.tun = Some(tun_plan(false, false));
+        let cfg = build_with(&server(), &CoreConfig::default(), &plan).unwrap();
+        let tun = cfg["inbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["protocol"] == "tun")
+            .unwrap();
+        assert_eq!(
+            tun["settings"]["autoSystemRoutingTable"],
+            json!(["0.0.0.0/0"])
+        );
+        assert_eq!(tun["settings"]["gateway"].as_array().unwrap().len(), 1);
+
+        plan.tun = Some(tun_plan(true, true));
+        let cfg = build_with(&server(), &CoreConfig::default(), &plan).unwrap();
+        let tun = cfg["inbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["protocol"] == "tun")
+            .unwrap();
+        assert_eq!(
+            tun["settings"]["autoSystemWfpBlockLeak"],
+            json!(["misconfigtun"])
+        );
+        assert_eq!(tun["settings"]["desc"], "elf-gate");
+    }
+
+    #[test]
+    fn process_rules_apply_in_tun_mode_only() {
+        let rules = [Rule::new(RuleKind::Process, "Discord")];
+        let has_process_rule = |tun: bool, mode| {
+            let cfg = build_with(
+                &server(),
+                &CoreConfig::default(),
+                &plan_for(mode, &["local-direct"], &rules, tun),
+            )
+            .unwrap();
+            cfg["routing"]["rules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r.get("process").is_some())
+        };
+        assert!(has_process_rule(true, RoutingMode::Include));
+        assert!(has_process_rule(true, RoutingMode::Exclude));
+        assert!(
+            !has_process_rule(false, RoutingMode::Include),
+            "inactive in proxy mode"
+        );
+    }
+
+    #[test]
+    fn include_mode_sends_listed_things_to_the_vpn_and_the_rest_direct() {
+        let rules = [
+            Rule::new(RuleKind::Process, "Discord"),
+            Rule::new(RuleKind::Domain, "discord.com"),
+        ];
+        let cfg = build_with(
+            &server(),
+            &CoreConfig::default(),
+            &plan_for(RoutingMode::Include, &["local-direct"], &rules, true),
+        )
+        .unwrap();
+        let r = cfg["routing"]["rules"].as_array().unwrap();
+        let process = r.iter().find(|r| r.get("process").is_some()).unwrap();
+        assert_eq!(process["outboundTag"], "proxy");
+        let last = r.last().unwrap();
+        assert_eq!(last["outboundTag"], "direct");
+        assert_eq!(last["network"], "tcp,udp");
+        // Local network is direct before anything else matches.
+        let first_non_dns = r.iter().find(|r| r.get("ip").is_some()).unwrap();
+        assert_eq!(first_non_dns["ip"], json!(["geoip:private"]));
+    }
+
+    #[test]
+    fn exclude_mode_sends_listed_things_direct_and_has_no_catch_all() {
+        let rules = [Rule::new(RuleKind::Process, "steam")];
+        let cfg = build_with(
+            &server(),
+            &CoreConfig::default(),
+            &plan_for(RoutingMode::Exclude, &["local-direct"], &rules, true),
+        )
+        .unwrap();
+        let r = cfg["routing"]["rules"].as_array().unwrap();
+        assert_eq!(
+            r.iter().find(|r| r.get("process").is_some()).unwrap()["outboundTag"],
+            "direct"
+        );
+        assert!(r
+            .iter()
+            .all(|r| r.get("network") != Some(&json!("tcp,udp"))));
+        assert_eq!(
+            cfg["outbounds"][0]["tag"], "proxy",
+            "the first outbound is the default: the VPN"
+        );
+    }
+
+    #[test]
+    fn dns_routing_exists_only_with_domains_and_a_local_resolver() {
+        let with = |mode, rules: &[Rule]| {
+            build_with(
+                &server(),
+                &CoreConfig::default(),
+                &plan_for(mode, &["local-direct"], rules, true),
+            )
+            .unwrap()
+        };
+        assert!(
+            with(RoutingMode::Include, &[Rule::new(RuleKind::Process, "x")])
+                .get("dns")
+                .is_none()
+        );
+
+        let cfg = with(
+            RoutingMode::Include,
+            &[Rule::new(RuleKind::Domain, "discord.com")],
+        );
+        let servers = cfg["dns"]["servers"].as_array().unwrap();
+        assert_eq!(servers[0]["tag"], "dns-tunnel");
+        assert_eq!(servers[0]["domains"], json!(["domain:discord.com"]));
+        assert_eq!(servers[0]["skipFallback"], true);
+        assert_eq!(
+            servers[1]["address"], "192.168.1.1",
+            "unlisted names resolve locally"
+        );
+        assert!(servers[1].get("domains").is_none());
+        assert!(cfg["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["tag"] == "dns-out"));
+        assert_eq!(cfg["routing"]["rules"][0]["outboundTag"], "dns-out");
+
+        let cfg = with(
+            RoutingMode::Exclude,
+            &[Rule::new(RuleKind::Domain, "example.ru")],
+        );
+        let servers = cfg["dns"]["servers"].as_array().unwrap();
+        assert_eq!(
+            servers[0]["tag"], "dns-local-0",
+            "exclude: listed names resolve locally"
+        );
+        assert_eq!(servers[0]["domains"], json!(["domain:example.ru"]));
+        assert_eq!(servers[1]["tag"], "dns-tunnel");
+        assert!(
+            servers[1].get("skipFallback").is_none(),
+            "the default server must stay usable for unlisted names"
+        );
+
+        let mut plan = plan_for(
+            RoutingMode::Include,
+            &["local-direct"],
+            &[Rule::new(RuleKind::Domain, "discord.com")],
+            true,
+        );
+        plan.tun.as_mut().unwrap().local_dns.clear();
+        let cfg = build_with(&server(), &CoreConfig::default(), &plan).unwrap();
+        assert!(
+            cfg.get("dns").is_none(),
+            "no local resolver known: do not hijack DNS"
+        );
+    }
+
+    #[test]
+    fn pre_resolved_vps_ip_keeps_the_domain_as_sni_and_host() {
+        let mut plan = plan_for(RoutingMode::Exclude, &["local-direct"], &[], true);
+        plan.vps_ip = Some("203.0.113.9".into());
+        let tls = parse_link(&format!(
+            "vless://{UUID}@vpn.example.com:443?security=tls&type=ws&path=%2Fws#t"
+        ))
+        .unwrap();
+        let cfg = build_with(&tls, &CoreConfig::default(), &plan).unwrap();
+        let out = &cfg["outbounds"][0];
+        assert_eq!(out["settings"]["vnext"][0]["address"], "203.0.113.9");
+        assert_eq!(
+            out["streamSettings"]["tlsSettings"]["serverName"],
+            "vpn.example.com"
+        );
+        assert_eq!(
+            out["streamSettings"]["wsSettings"]["host"],
+            "vpn.example.com"
+        );
+
+        // An explicit sni in the link wins over the fallback.
+        let reality = format!("vless://{UUID}@vpn.example.com:443?security=reality&sni=www.microsoft.com&pbk=K&sid=ab#r");
+        let cfg = build_with(
+            &parse_link(&reality).unwrap(),
+            &CoreConfig::default(),
+            &plan,
+        )
+        .unwrap();
+        assert_eq!(
+            cfg["outbounds"][0]["streamSettings"]["realitySettings"]["serverName"],
+            "www.microsoft.com"
+        );
+        // Without an override nothing changes.
+        let plain = build(&tls, &CoreConfig::default()).unwrap();
+        assert_eq!(
+            plain["outbounds"][0]["settings"]["vnext"][0]["address"],
+            "vpn.example.com"
+        );
+    }
+
+    #[test]
+    fn quic_block_preset_adds_a_udp_443_block_rule() {
+        let cfg = build_with(
+            &server(),
+            &CoreConfig::default(),
+            &plan_for(RoutingMode::Exclude, &["block-quic"], &[], true),
+        )
+        .unwrap();
+        let r = cfg["routing"]["rules"].as_array().unwrap();
+        assert!(r
+            .iter()
+            .any(|r| r["network"] == "udp" && r["port"] == "443" && r["outboundTag"] == "block"));
     }
 }
