@@ -36,6 +36,30 @@ pub fn format_bytes(n: u64) -> String {
 }
 
 pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
+    use crate::app::LinkState;
+    match &app.link {
+        LinkState::Connecting => {
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "Подключение к фоновой части...",
+                    th.warn(),
+                ))),
+                area,
+            );
+            return;
+        }
+        LinkState::Down(why) => {
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    format!("Нет связи с фоновой частью: {why}. Повторяю..."),
+                    th.bad(),
+                ))),
+                area,
+            );
+            return;
+        }
+        LinkState::Up => {}
+    }
     let (dot_style, text) = match &app.conn {
         Conn::Disconnected => (th.muted(), "Отключено".to_string()),
         Conn::Connecting(id) => (

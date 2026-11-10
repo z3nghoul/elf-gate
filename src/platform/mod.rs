@@ -287,3 +287,40 @@ mod bypass_tests {
         assert!(out.contains(&"::1".to_string()) && out.contains(&"localhost".to_string()));
     }
 }
+
+// ---------------------------------------------------------------- local IPC
+
+/// A connected local IPC stream (unix socket or named pipe).
+pub trait IpcStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin> IpcStream for T {}
+pub type BoxStream = Box<dyn IpcStream>;
+
+pub type AcceptFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<BoxStream>> + Send + 'a>>;
+
+/// The listening side; owning it is the "one background process per user" lock.
+pub trait IpcListener: Send {
+    fn accept(&mut self) -> AcceptFuture<'_>;
+}
+
+#[derive(Debug, Error)]
+pub enum IpcBindError {
+    #[error("фоновая часть уже запущена")]
+    AlreadyRunning,
+    #[error("не удалось создать канал связи: {0}")]
+    Other(String),
+}
+
+pub fn ipc_bind() -> Result<Box<dyn IpcListener>, IpcBindError> {
+    imp::ipc::bind()
+}
+
+/// Connects to the running background process.
+pub async fn ipc_connect() -> std::io::Result<BoxStream> {
+    imp::ipc::connect().await
+}
+
+/// Starts a program fully detached: no console window, not tied to our terminal or lifetime.
+pub fn spawn_detached(program: &Path, args: &[String]) -> Result<(), PlatformError> {
+    imp::ipc::spawn_detached(program, args)
+}

@@ -1,17 +1,19 @@
+//! `elf-gate`: the interface. The VPN itself lives in the background process (`elf-gated`),
+//! which this program starts when needed and talks to over a local link.
+
 use anyhow::Result;
-use elf_gate::app::AppState;
-use elf_gate::{build_info, event, mock, platform, storage, sysproxy, ui};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use event::EventLoop;
+use elf_gate::app::AppState;
+use elf_gate::event::EventLoop;
+use elf_gate::ipc::{self, Spawn};
+use elf_gate::proto::Cmd;
+use elf_gate::{build_info, daemon, platform, storage, ui};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::{self, Stdout};
-use std::sync::Arc;
-use storage::{Config, StateStore, Storage};
-use sysproxy::{ProxyController, ProxyHandle};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
@@ -43,9 +45,7 @@ fn install_panic_hook() {
     std::panic::set_hook(Box::new(move |info| {
         restore_terminal();
         tracing::error!("panic: {info}");
-        // Never leave the user with a dead system proxy. (The core dies with us through
-        // the platform child guard; stage 5 adds TUN cleanup here.)
-        sysproxy::emergency_restore();
+        // The VPN lives in the background process: a crash here changes nothing for it.
         previous(info);
     }));
 }
@@ -56,34 +56,14 @@ fn setup_terminal() -> Result<Term> {
     Ok(Terminal::new(CrosstermBackend::new(io::stdout()))?)
 }
 
-async fn run(
-    terminal: &mut Term,
-    config: Config,
-    storage: Storage,
-    proxy: Arc<ProxyController>,
-    notes: Vec<String>,
-    tun_from_cli: bool,
-) -> Result<()> {
-    let (mut events, tx) = EventLoop::new();
-    if build_info::SHOW_MOCK_DATA {
-        mock::spawn_log_generator(tx.clone());
-    }
-    let mut app = AppState::with_config(tx.clone(), config, Some(storage))
-        .with_run_dir(storage::state_dir().join("run"))
-        .with_proxy(ProxyHandle::spawn(proxy, tx))
-        .with_state_store(StateStore::default_location())
-        .with_check_cache(storage::state_dir().join("check-cache.json"));
-    // Stop a core a crashed run left behind (a TUN would still be up).
-    app.startup_tun_cleanup();
-    for note in notes {
-        app.log(event::Level::Warning, note);
-    }
-    app.start_background_checks();
+async fn run(terminal: &mut Term, tun_from_cli: bool) -> Result<()> {
+    let (mut events, link_tx) = EventLoop::new();
+    let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel::<Cmd>();
+    let mut app = AppState::new(cmd_tx.clone());
     if tun_from_cli {
-        app.start_tun_from_cli();
-    } else {
-        app.auto_connect();
+        let _ = cmd_tx.send(Cmd::ConnectLastInTun);
     }
+    tokio::spawn(ipc::run_link(link_tx, cmd_rx, Spawn::default_for_current_exe()));
 
     while !app.should_quit {
         terminal.draw(|f| ui::render(f, &mut app))?;
@@ -92,67 +72,30 @@ async fn run(
             None => break,
         }
     }
-    app.shutdown().await;
     Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let first_arg = std::env::args().nth(1);
-    if first_arg.as_deref() == Some("--supervise") {
-        // Hidden mode: a tiny process that keeps a privileged core tied to elf-gate
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--supervise") {
+        // Hidden mode: a tiny process that keeps a privileged core tied to its parent
         // (the kernel drops the parent-death signal for binaries with capabilities).
-        let rest: Vec<String> = std::env::args().skip(2).collect();
-        std::process::exit(platform::run_supervisor(&rest));
+        std::process::exit(platform::run_supervisor(&args[1..]));
     }
-    if std::env::args()
-        .skip(1)
-        .any(|a| a == "--version" || a == "-V")
-    {
+    if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("{}", build_info::version_line());
         return Ok(());
     }
+    if args.iter().any(|a| a == "--background") {
+        std::process::exit(daemon::run(&args).await);
+    }
     let _log_guard = init_logging();
     install_panic_hook();
-    // Load before touching the terminal: a broken config must be reported, not overwritten.
-    let storage = Storage::default_location();
-    let config = match storage.load() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("elf-gate: {e}");
-            std::process::exit(1);
-        }
-    };
-
-    // System proxy: undo what a previous crashed run may have left behind, then make sure
-    // every exit path (panic, SIGTERM/SIGHUP, console close) restores it.
-    let proxy = Arc::new(ProxyController::new(
-        platform::system_proxy(),
-        StateStore::default_location(),
-    ));
-    let mut notes = Vec::new();
-    match proxy.recover() {
-        Ok(Some(note)) => notes.push(note),
-        Ok(None) => {}
-        Err(e) => notes.push(format!("не удалось восстановить системный прокси: {e}")),
-    }
-    sysproxy::set_global(proxy.clone());
-    let signals = platform::shutdown_signals().install(Box::new(|| {
-        sysproxy::emergency_restore();
-        restore_terminal();
-        std::process::exit(0);
-    }));
-    if let Err(e) = signals {
-        notes.push(format!("обработчик завершения не установлен: {e}"));
-    }
-
     let mut terminal = setup_terminal()?;
-    let tun_from_cli = std::env::args().any(|a| a == "--tun");
-    let result = run(&mut terminal, config, storage, proxy, notes, tun_from_cli).await;
+    let tun = args.iter().any(|a| a == "--tun");
+    let result = run(&mut terminal, tun).await;
     restore_terminal();
-    sysproxy::emergency_restore();
-    // Under sudo the logger created files as root: give them back to the user.
-    storage::fix_owner_tree(&storage::state_dir());
     if let Err(e) = &result {
         tracing::error!("fatal: {e:#}");
     }
