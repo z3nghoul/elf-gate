@@ -78,6 +78,20 @@ pub fn parse_resolv_conf(text: &str) -> Vec<String> {
 }
 
 /// Default route interface from `/proc/net/route` (the lowest metric among 0.0.0.0/0).
+/// The same, but never `exclude` (the tunnel's own default route has the lowest metric while it is up).
+pub fn physical_default_interface(route_table: &str, exclude: &str) -> Option<String> {
+    route_table
+        .lines()
+        .skip(1)
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            (f.len() >= 8 && f[1] == "00000000" && f[7] == "00000000" && f[0] != exclude)
+                .then(|| (f[6].parse::<u32>().unwrap_or(u32::MAX), f[0].to_string()))
+        })
+        .min()
+        .map(|(_, iface)| iface)
+}
+
 pub fn default_interface(route_table: &str) -> Option<String> {
     route_table
         .lines()
@@ -170,6 +184,10 @@ impl TunHost for Host {
             .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
     }
 
+    fn physical_interface(&self, exclude: &str) -> Option<String> {
+        physical_default_interface(&fs::read_to_string("/proc/net/route").ok()?, exclude)
+    }
+
     fn rp_filter(&self) -> Option<RpFilter> {
         let iface = default_interface(&fs::read_to_string("/proc/net/route").ok()?)?;
         let read = |p: String| read_trim(&p)?.parse::<u8>().ok();
@@ -254,6 +272,27 @@ mod tests {
         assert_eq!(
             parse_resolv_conf("nameserver 2001:db8::53\n"),
             ["2001:db8::53"]
+        );
+    }
+
+    #[test]
+    fn the_physical_interface_skips_the_tunnels_own_default_route() {
+        let table =
+            "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n\
+            elfgate0\t00000000\t0100000A\t0003\t0\t0\t1\t00000000\t0\t0\t0\n\
+            wlan0\t00000000\t0101A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0\n";
+        assert_eq!(
+            default_interface(table).as_deref(),
+            Some("elfgate0"),
+            "plain: the tunnel wins"
+        );
+        assert_eq!(
+            physical_default_interface(table, "elfgate0").as_deref(),
+            Some("wlan0")
+        );
+        assert_eq!(
+            physical_default_interface(table, "wlan0").as_deref(),
+            Some("elfgate0")
         );
     }
 

@@ -163,6 +163,16 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                     }
                     crate::app::HealthState::Unknown => {}
                 }
+                if app.process_unresolved > 0 {
+                    l.push(field(
+                        "Без процесса:",
+                        format!(
+                            "не определён процесс: {} соединений",
+                            app.process_unresolved
+                        ),
+                        th,
+                    ));
+                }
             }
             if let Some(hint) = app.fp_hint() {
                 l.push(Line::from(Span::styled(hint, th.warn())));

@@ -38,6 +38,7 @@ pub(crate) fn view_with(links: &[&str]) -> View {
         health: HealthState::Unknown,
         config: Config::default(),
         traffic: Traffic::default(),
+        process_unresolved: 0,
         tray: false,
         autostart: false,
         mock: false,
@@ -558,4 +559,15 @@ async fn an_empty_subscription_can_be_selected_and_deleted() {
     a.handle_action(Action::Delete);
     press(&mut a, KeyCode::Char('y'));
     assert_eq!(sent(&mut rx), vec![Cmd::DeleteGroup(MANUAL_GROUP.into())]);
+}
+
+#[tokio::test]
+async fn the_details_count_connections_without_a_known_process() {
+    let (mut a, _rx) = app_with(&[REALITY]);
+    a.conn = Conn::Connected(1);
+    a.process_unresolved = 37;
+    let out = crate::ui::tests_support::draw(110, 30, &mut a);
+    assert!(out.contains("не определён процесс: 37 соединений"), "{out}");
+    a.process_unresolved = 0;
+    assert!(!crate::ui::tests_support::draw(110, 30, &mut a).contains("не определён процесс"));
 }

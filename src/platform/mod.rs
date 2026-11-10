@@ -150,6 +150,9 @@ pub trait TunHost: Send + Sync {
     /// Linux: the file capabilities of the core as `getcap` prints them (`None`: unknown or not
     /// applicable). Process rules need more than `cap_net_admin` for other users' programs.
     fn core_capabilities(&self, core: &Path) -> Option<String>;
+    /// The default-route interface that is NOT the tunnel (`exclude`): where a socket must be
+    /// bound to reach the network around the tunnel. `None` when unknown or unsupported.
+    fn physical_interface(&self, exclude: &str) -> Option<String>;
     /// Strict reverse-path filtering breaks "direct" traffic through the tunnel (Linux).
     fn rp_filter(&self) -> Option<RpFilter>;
     /// Upstream resolvers of the system (never loopback stubs).
@@ -163,6 +166,20 @@ pub trait TunHost: Send + Sync {
     /// Capabilities get lost when a parent dies, so a capability-carrying core needs a
     /// supervisor that stops it (Linux, not root).
     fn needs_supervisor(&self) -> bool;
+}
+
+/// Opens a TCP connection through one network interface only (around the tunnel).
+/// `Unsupported` where the platform backend cannot do it (the caller then does not measure).
+pub async fn connect_via(
+    addr: std::net::SocketAddr,
+    interface: &str,
+) -> std::io::Result<tokio::net::TcpStream> {
+    imp::net::connect_via(addr, interface).await
+}
+
+/// Can a socket be bound to this interface here (and by us, without privileges)?
+pub fn can_bind_interface(interface: &str) -> bool {
+    imp::net::can_bind(interface)
 }
 
 /// "Start with the system": a desktop autostart entry (Linux) or a `Run` value (Windows).

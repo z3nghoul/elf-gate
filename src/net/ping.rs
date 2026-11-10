@@ -46,10 +46,36 @@ fn millis(d: Duration) -> u32 {
     d.as_millis().min(u128::from(u32::MAX)) as u32
 }
 
-async fn connect_once(host: &str, port: u16, limit: Duration) -> Result<Duration, Ping> {
+async fn connect_once(
+    host: &str,
+    port: u16,
+    limit: Duration,
+    interface: Option<&str>,
+) -> Result<Duration, Ping> {
     let started = Instant::now();
-    match tokio::time::timeout(limit, TcpStream::connect((host, port))).await {
+    let connect = async {
+        match interface {
+            None => TcpStream::connect((host, port)).await,
+            Some(iface) => {
+                let addr = tokio::net::lookup_host((host, port))
+                    .await?
+                    .next()
+                    .ok_or_else(|| std::io::Error::other("no address"))?;
+                crate::platform::connect_via(addr, iface).await
+            }
+        }
+    };
+    match tokio::time::timeout(limit, connect).await {
         Ok(Ok(_)) => Ok(started.elapsed()),
+        // Cannot bind to the interface: say "unknown", never a number that is not a measurement.
+        Ok(Err(e))
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::Unsupported | std::io::ErrorKind::PermissionDenied
+            ) && interface.is_some() =>
+        {
+            Err(Ping::Unknown)
+        }
         Ok(Err(_)) => Err(Ping::Error),
         Err(_) => Err(Ping::Timeout),
     }
@@ -59,15 +85,22 @@ async fn connect_once(host: &str, port: u16, limit: Duration) -> Result<Duration
 /// the first packets are slow and say nothing about the path) that is thrown away, then
 /// `SAMPLES` measured ones; the median is the result.
 pub async fn tcp_ping(host: &str, port: u16, limit: Duration) -> Ping {
+    tcp_ping_via(host, port, limit, None).await
+}
+
+/// The same through one interface only. While the TUN is up a plain connect enters the tunnel,
+/// whose stack answers the handshake itself within a couple of milliseconds: that says nothing
+/// about the server. Bound to the physical interface the packets go around the tunnel.
+pub async fn tcp_ping_via(host: &str, port: u16, limit: Duration, interface: Option<&str>) -> Ping {
     let _permit = TCP_PERMITS.acquire().await.ok();
-    let warmup = connect_once(host, port, limit).await;
+    let warmup = connect_once(host, port, limit, interface).await;
     let mut samples = Vec::new();
     let mut failure = warmup.err();
     for i in 0..SAMPLES {
         if i > 0 {
             tokio::time::sleep(Duration::from_millis(80)).await;
         }
-        match connect_once(host, port, limit).await {
+        match connect_once(host, port, limit, interface).await {
             Ok(d) => samples.push(d),
             Err(f) => failure = Some(f),
         }

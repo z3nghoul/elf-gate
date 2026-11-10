@@ -189,15 +189,6 @@ impl Engine {
                 self.show_problem(problem);
                 return;
             }
-            // With reduced capabilities process detection fails for many programs by design: the
-            // core's complaints about it are hidden (one notice is shown instead, below).
-            self.hide_process_errors = preflight
-                .setup
-                .as_ref()
-                .and_then(|s| self.tun_host.core_capabilities(&s.core))
-                .is_some_and(|c| {
-                    !(c.contains("cap_sys_ptrace") && c.contains("cap_dac_read_search"))
-                });
             if !self.caps_warned {
                 let rules = crate::model::rule::effective_rules(
                     self.config.mode.routing,
@@ -224,6 +215,7 @@ impl Engine {
         }
 
         self.traffic = Traffic::default();
+        self.process_unresolved = 0;
         self.health = HealthState::Unknown;
         self.conn = Conn::Connecting(id);
         self.conn_mode = mode;
@@ -934,40 +926,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn process_detection_noise_is_hidden_only_when_the_capabilities_are_reduced() {
-        let dir = temp_dir("noise");
-        let noise = || {
+    async fn process_detection_noise_never_reaches_the_screen_and_is_counted_unless_verbose() {
+        let noise = |n: u32| {
             BgEvent::Log(LogLine {
+                time: "t".into(),
+                level: Level::Error,
+                text: format!("[xray:err] [Error] app/router: Unables to find local process name: common/net: no process found for inode {n}"),
+            })
+        };
+        let other = BgEvent::Log(LogLine {
             time: "t".into(),
-            level: Level::Error,
-            text: "[xray:err] [Error] app/router: Unables to find local process name: common/net: no process found for inode 9616".into(),
-        })
-        };
-        let host = MockTunHost {
-            caps: Some("/x/xray cap_net_admin=ep".into()),
-            ..MockTunHost::healthy()
-        };
-        let (mut a, id) = tun_app(host, true, &dir);
-        a.config.ui.tun_intro_done = true;
-        a.connect(id);
-        a.on_bg(noise());
-        assert!(
-            !a.logged("no process found"),
-            "hidden with reduced capabilities"
+            level: Level::Warning,
+            text: "[xray:err] [Warning] connection for 203.0.113.9:443 not found in /proc/net/tcp"
+                .into(),
+        });
+        let (tx, _rx) = unbounded_channel();
+        let mut a = Engine::build(tx, Config::default(), None, false);
+        for n in 0..300 {
+            a.on_bg(noise(n));
+        }
+        a.on_bg(other);
+        assert!(!a.logged("no process found") && !a.logged("not found in /proc/net"));
+        assert_eq!(a.process_unresolved, 301, "counted, not shown");
+        assert_eq!(
+            a.view().process_unresolved,
+            301,
+            "the details show the count"
         );
 
-        let full = MockTunHost {
-            caps: Some("/x/xray cap_net_admin,cap_dac_read_search,cap_sys_ptrace=ep".into()),
-            ..MockTunHost::healthy()
-        };
-        let (mut b, id) = tun_app(full, true, &dir);
-        b.config.ui.tun_intro_done = true;
-        b.connect(id);
-        b.on_bg(noise());
-        assert!(
-            b.logged("no process found"),
-            "with full capabilities an error would be a real one"
-        );
-        let _ = std::fs::remove_dir_all(dir);
+        // The detailed core log brings the lines back as they are.
+        a.config.core.verbose_log = true;
+        a.on_bg(noise(1));
+        assert!(a.logged("no process found"));
     }
 }

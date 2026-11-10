@@ -2,6 +2,7 @@ pub mod autostart;
 pub mod child;
 pub mod device;
 pub mod ipc;
+pub mod net;
 pub mod privileges;
 pub mod proxy;
 pub mod signals;
