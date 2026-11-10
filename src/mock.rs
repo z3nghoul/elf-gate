@@ -2,7 +2,7 @@
 //! parsing, fetching and the Xray process exist (stages 2-6).
 
 use crate::event::{BgEvent, BgTx, Level, LogLine};
-use crate::model::server::{Ping, Security, Server, Transport};
+use crate::model::server::{Ping, Security, Server, TlsParams, Transport, TransportParams};
 use crate::model::subscription::{Subscription, SubscriptionInfo};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -41,13 +41,21 @@ pub fn make_server(id: u64, name: &str, host: &str, sec: Security, tr: Transport
         name: name.to_string(),
         address: host.to_string(),
         port: 443,
+        uuid: "00000000-0000-4000-8000-000000000000".into(),
+        flow: String::new(),
         security: sec,
         transport: tr,
-        sni: if sec == Security::None {
-            String::new()
-        } else {
-            "www.example.com".into()
+        tls: TlsParams {
+            sni: if sec == Security::None {
+                String::new()
+            } else {
+                "www.example.com".into()
+            },
+            ..TlsParams::default()
         },
+        params: TransportParams::default(),
+        link: String::new(),
+        unsupported: None,
         ping: Ping::Unknown,
     }
 }
