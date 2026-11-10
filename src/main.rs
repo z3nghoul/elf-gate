@@ -1,5 +1,6 @@
 mod action;
 mod app;
+mod build_info;
 mod event;
 mod mock;
 mod model;
@@ -77,7 +78,9 @@ async fn run(
     notes: Vec<String>,
 ) -> Result<()> {
     let (mut events, tx) = EventLoop::new();
-    mock::spawn_log_generator(tx.clone());
+    if build_info::SHOW_MOCK_DATA {
+        mock::spawn_log_generator(tx.clone());
+    }
     let mut app = AppState::with_config(tx.clone(), config, Some(storage))
         .with_run_dir(storage::state_dir().join("run"))
         .with_proxy(ProxyHandle::spawn(proxy, tx));
@@ -99,6 +102,13 @@ async fn run(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::args()
+        .skip(1)
+        .any(|a| a == "--version" || a == "-V")
+    {
+        println!("{}", build_info::version_line());
+        return Ok(());
+    }
     let _log_guard = init_logging();
     install_panic_hook();
     // Load before touching the terminal: a broken config must be reported, not overwritten.

@@ -194,4 +194,19 @@ mod tests {
             Some("firefox")
         );
     }
+
+    #[tokio::test]
+    async fn empty_list_shows_the_add_hint_and_hides_demo_numbers() {
+        let (tx, _rx) = unbounded_channel();
+        let mut app = AppState::build(tx, crate::storage::Config::default(), None, false);
+        let out = draw(MIN_WIDTH, MIN_HEIGHT, &mut app);
+        println!("{out}");
+        assert!(out.contains("Нажмите a, чтобы добавить сервер"), "{out}");
+        assert!(out.contains("Нет серверов"), "details pane hint: {out}");
+        assert!(
+            !out.contains("up 0 B"),
+            "no fake traffic counters in release: {out}"
+        );
+        assert!(!out.contains("mock"), "{out}");
+    }
 }

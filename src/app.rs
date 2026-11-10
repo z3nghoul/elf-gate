@@ -1,4 +1,5 @@
 use crate::action::{map_key, Action};
+use crate::build_info;
 use crate::event::{now_hms, BgEvent, BgTx, Event, Level, LogLine};
 use crate::mock::{self, Lcg};
 use crate::model::server::{Ping, Security, Server, Transport, FINGERPRINTS};
@@ -122,6 +123,8 @@ pub struct AppState {
     proxy_requested: bool,
     /// The worker reported the system proxy as switched on.
     pub proxy_active: bool,
+    /// Demo data and fake numbers are enabled (debug builds).
+    pub mock: bool,
     /// A core start or stop is in flight; new connect requests wait for it.
     busy: bool,
     run_dir: PathBuf,
@@ -134,13 +137,22 @@ impl AppState {
     /// In-memory state with default config and no persistence (tests).
     #[cfg(test)]
     pub fn new(tx: BgTx) -> Self {
-        Self::with_config(tx, Config::default(), None)
+        Self::build(tx, Config::default(), None, true)
     }
 
     pub fn with_config(tx: BgTx, config: Config, storage: Option<Storage>) -> Self {
+        Self::build(tx, config, storage, build_info::SHOW_MOCK_DATA)
+    }
+
+    /// `mock`: demo servers, fake pings and traffic (debug builds only, see `build_info`).
+    pub(crate) fn build(tx: BgTx, config: Config, storage: Option<Storage>, mock: bool) -> Self {
         let mut next_id = 0;
-        // Subscriptions are still mock data until stage 6.
-        let mut subs = mock::subscriptions(&mut next_id);
+        // Subscriptions are still mock data until stage 6, and only in debug builds.
+        let mut subs = if mock {
+            mock::subscriptions(&mut next_id)
+        } else {
+            Vec::new()
+        };
         let mut load_errors = Vec::new();
         let mut manual = Vec::new();
         for entry in &config.servers {
@@ -192,6 +204,7 @@ impl AppState {
             proxy: None,
             proxy_requested: false,
             proxy_active: false,
+            mock,
             busy: false,
             run_dir: std::env::temp_dir().join("elf-gate-run"),
             next_id,
@@ -200,7 +213,11 @@ impl AppState {
         };
         app.log(
             Level::Info,
-            "elf-gate started (subscriptions are mock data)",
+            if mock {
+                "elf-gate started (debug build: subscriptions are mock data)"
+            } else {
+                "elf-gate started"
+            },
         );
         for e in load_errors {
             app.log(Level::Warning, format!("skipped saved server, {e}"));
@@ -339,10 +356,14 @@ impl AppState {
     // ---------- logs ----------
 
     pub fn log(&mut self, level: Level, text: impl Into<String>) {
+        let text = text.into();
+        // Application lines (never the core's traffic log) also go to the log file,
+        // so a tester can attach it to a bug report.
+        tracing::info!(target: "app", "{text}");
         self.push_log(LogLine {
             time: now_hms(),
             level,
-            text: text.into(),
+            text,
         });
     }
 
@@ -382,7 +403,7 @@ impl AppState {
 
     fn on_tick(&mut self) {
         self.poll_core();
-        if matches!(self.conn, Conn::Connected(_)) {
+        if self.mock && matches!(self.conn, Conn::Connected(_)) {
             self.up_bytes += self.rng.next() % 2_000;
             self.down_bytes += self.rng.next() % 20_000;
         }
@@ -602,8 +623,12 @@ impl AppState {
             PingAll => self.ping_all(),
             SortPing => self.sort_by_ping(),
             UpdateSubs => {
-                self.status = Some("Обновление подписок...".into());
-                mock::spawn_update_subs(self.tx.clone());
+                if self.mock {
+                    self.status = Some("Обновление подписок...".into());
+                    mock::spawn_update_subs(self.tx.clone());
+                } else {
+                    self.status = Some("Подписки пока не поддерживаются в этой версии".into());
+                }
             }
             Add => {
                 self.popup = Some(Popup::Input {
@@ -831,6 +856,10 @@ impl AppState {
     }
 
     fn toggle_mode(&mut self) {
+        if self.mode == Mode::Proxy && !build_info::TUN_AVAILABLE {
+            self.status = Some("Режим TUN в этой версии недоступен".into());
+            return;
+        }
         self.mode = match self.mode {
             Mode::Proxy => Mode::Tun,
             Mode::Tun => Mode::Proxy,
@@ -847,6 +876,10 @@ impl AppState {
     }
 
     fn ping_all(&mut self) {
+        if !self.mock {
+            self.status = Some("Пинг серверов пока не поддерживается в этой версии".into());
+            return;
+        }
         for sub in &mut self.subs {
             for s in sub.servers.iter_mut().filter(|s| s.is_supported()) {
                 s.ping = Ping::Pending;
@@ -1117,7 +1150,13 @@ impl AppState {
     pub(crate) fn submit_input(&mut self, text: String) {
         let text = text.trim().to_string();
         if text.starts_with("http://") || text.starts_with("https://") {
-            // Real subscription import arrives in stage 6; for now add a mock group.
+            if !self.mock {
+                self.popup = Some(Popup::Error(
+                    "Подписки пока не поддерживаются в этой версии.\nДобавьте ссылку на отдельный сервер.".into(),
+                ));
+                return;
+            }
+            // Real subscription import arrives in stage 6; debug builds add a mock group.
             let mut servers = Vec::new();
             for n in 1..=3 {
                 self.next_id += 1;
@@ -1496,5 +1535,50 @@ mod tests {
         let old = Instant::now() - Duration::from_secs(120);
         a.core_failures.extend([old, old, old, old]);
         assert_eq!(a.fp_hint(), None, "old failures expire");
+    }
+
+    fn release_app() -> AppState {
+        let (tx, _rx) = unbounded_channel();
+        AppState::build(tx, Config::default(), None, false)
+    }
+
+    #[tokio::test]
+    async fn release_build_starts_with_an_empty_server_list() {
+        let a = release_app();
+        assert!(a.subs.is_empty(), "no mock servers in a release build");
+        assert!(a.rows().is_empty());
+        assert_eq!(a.logs.len(), 1);
+        assert_eq!(a.logs[0].text, "elf-gate started");
+    }
+
+    #[tokio::test]
+    async fn release_build_has_no_fake_traffic_pings_or_subscriptions() {
+        let mut a = release_app();
+        a.submit_input("vless://u@10.0.0.5:443?security=none#Real".into());
+        a.conn = Conn::Connected(1);
+        for _ in 0..10 {
+            a.on_tick();
+        }
+        assert_eq!((a.up_bytes, a.down_bytes), (0, 0));
+
+        a.handle_action(Action::PingAll);
+        assert!(a.status.as_deref().unwrap().contains("Пинг"));
+        assert_eq!(a.subs[0].servers[0].ping, Ping::Unknown);
+
+        a.handle_action(Action::UpdateSubs);
+        assert!(a.status.as_deref().unwrap().contains("Подписки"));
+
+        let groups = a.subs.len();
+        a.submit_input("https://example.com/sub".into());
+        assert!(matches!(a.popup, Some(Popup::Error(_))));
+        assert_eq!(a.subs.len(), groups, "no mock subscription may appear");
+    }
+
+    #[tokio::test]
+    async fn tun_mode_is_refused_until_it_exists() {
+        let mut a = app();
+        a.handle_action(Action::ToggleMode);
+        assert_eq!(a.mode, Mode::Proxy);
+        assert!(a.status.as_deref().unwrap().contains("TUN"));
     }
 }

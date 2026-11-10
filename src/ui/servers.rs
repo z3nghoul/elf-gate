@@ -3,7 +3,7 @@ use crate::model::server::Ping;
 use crate::ui::theme::Theme;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, List, ListItem};
+use ratatui::widgets::{Block, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
@@ -14,6 +14,22 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
     };
 
     let rows = app.rows();
+    if rows.is_empty() && app.filter.is_empty() {
+        // First run: nothing to select yet, so tell the user what to do.
+        let text = "Список серверов пуст.\n\nНажмите a, чтобы добавить сервер.\n(ссылка на сервер, а не на подписку)";
+        f.render_widget(
+            Paragraph::new(text)
+                .style(th.text())
+                .wrap(Wrap { trim: false })
+                .block(
+                    Block::bordered()
+                        .title(Span::styled(" Серверы ", th.title()))
+                        .border_style(th.border(focused)),
+                ),
+            area,
+        );
+        return;
+    }
     let items: Vec<ListItem> = rows
         .iter()
         .map(|row| match *row {

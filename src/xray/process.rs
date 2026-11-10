@@ -28,7 +28,7 @@ const TAIL_LINES: usize = 20;
 
 #[derive(Debug, Error)]
 pub enum CoreError {
-    #[error("ядро Xray не найдено: «{0}». Проверьте xray_path в config.toml")]
+    #[error("ядро Xray не найдено: «{0}». Положите его рядом с elf-gate или укажите xray_path в config.toml")]
     BinaryNotFound(String),
     #[error("порт {port} ({what}) уже занят другой программой")]
     PortBusy { port: u16, what: &'static str },
@@ -42,9 +42,25 @@ pub enum CoreError {
     NotReady { port: u16, secs: u64 },
 }
 
-/// Resolves `xray_path`: a path with directories must be an existing file; a bare
-/// name is looked up in `PATH`.
+/// Resolves `xray_path`. A path with directories must be an existing file. A bare name
+/// (the default) is looked up next to the elf-gate executable first, so a user who unpacks
+/// both files into one folder needs no configuration, and then in `PATH`.
 pub fn resolve_binary(xray_path: &str) -> Result<PathBuf, CoreError> {
+    let exe_dir = env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    resolve_binary_in(
+        xray_path,
+        exe_dir.as_deref(),
+        env::var_os("PATH").as_deref(),
+    )
+}
+
+fn resolve_binary_in(
+    xray_path: &str,
+    exe_dir: Option<&Path>,
+    path_var: Option<&std::ffi::OsStr>,
+) -> Result<PathBuf, CoreError> {
     let not_found = || CoreError::BinaryNotFound(xray_path.to_string());
     if xray_path.trim().is_empty() {
         return Err(not_found());
@@ -61,10 +77,14 @@ pub fn resolve_binary(xray_path: &str) -> Result<PathBuf, CoreError> {
     } else {
         format!("{xray_path}{}", env::consts::EXE_SUFFIX)
     };
-    env::var_os("PATH")
+    let beside_exe = exe_dir.map(|d| d.join(&name));
+    let on_path = path_var
         .into_iter()
-        .flat_map(|paths| env::split_paths(&paths).collect::<Vec<_>>())
-        .map(|dir| dir.join(&name))
+        .flat_map(|paths| env::split_paths(paths).collect::<Vec<_>>())
+        .map(|dir| dir.join(&name));
+    beside_exe
+        .into_iter()
+        .chain(on_path)
         .find(|candidate| candidate.is_file())
         .ok_or_else(not_found)
 }
@@ -289,8 +309,31 @@ mod tests {
         for p in ["", "/definitely/not/here/xray", "no-such-xray-binary-xyz"] {
             let err = resolve_binary(p).unwrap_err();
             assert!(matches!(err, CoreError::BinaryNotFound(_)), "{p}");
-            assert!(err.to_string().contains("xray_path"));
+            assert!(err.to_string().contains("рядом с elf-gate"));
         }
+    }
+
+    #[test]
+    fn bare_name_is_found_next_to_the_executable_before_path() {
+        let base = std::env::temp_dir().join(format!("elf-gate-resolve-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (beside, on_path) = (base.join("app"), base.join("pathdir"));
+        std::fs::create_dir_all(&beside).unwrap();
+        std::fs::create_dir_all(&on_path).unwrap();
+        let name = format!("xray{}", env::consts::EXE_SUFFIX);
+        std::fs::write(on_path.join(&name), b"x").unwrap();
+        let path_var = env::join_paths([&on_path]).unwrap();
+
+        // Only in PATH: found there.
+        let found = resolve_binary_in("xray", Some(&beside), Some(&path_var)).unwrap();
+        assert_eq!(found, on_path.join(&name));
+        // Also next to the executable: that one wins.
+        std::fs::write(beside.join(&name), b"x").unwrap();
+        let found = resolve_binary_in("xray", Some(&beside), Some(&path_var)).unwrap();
+        assert_eq!(found, beside.join(&name));
+        // Neither: a clear error.
+        assert!(resolve_binary_in("nothing-here", Some(&beside), Some(&path_var)).is_err());
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]

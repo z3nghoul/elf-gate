@@ -53,17 +53,20 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     if app.proxy_active {
         spans.push(Span::styled(" sys-proxy", th.good()));
     }
-    spans.extend([
-        sep.clone(),
-        Span::styled(
-            format!(
-                "up {}  down {}",
-                format_bytes(app.up_bytes),
-                format_bytes(app.down_bytes)
+    // Real traffic statistics arrive in stage 8; until then only the demo build shows numbers.
+    if app.mock {
+        spans.extend([
+            sep.clone(),
+            Span::styled(
+                format!(
+                    "up {}  down {}",
+                    format_bytes(app.up_bytes),
+                    format_bytes(app.down_bytes)
+                ),
+                th.text(),
             ),
-            th.text(),
-        ),
-    ]);
+        ]);
+    }
     if let Some(msg) = &app.status {
         spans.push(sep.clone());
         spans.push(Span::styled(msg.clone(), th.warn()));

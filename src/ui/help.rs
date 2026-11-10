@@ -1,4 +1,5 @@
 use crate::action::BINDINGS;
+use crate::build_info;
 use crate::ui::theme::Theme;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
@@ -16,6 +17,11 @@ pub fn render(f: &mut Frame, area: Rect, th: &Theme) {
             ])
         })
         .collect();
+    lines.push(Line::default());
+    lines.push(Line::from(Span::styled(
+        build_info::version_line(),
+        th.muted(),
+    )));
     lines.push(Line::default());
     lines.push(Line::from(vec![
         Span::styled(format!("{:<18}", "[устар.]"), th.warn()),
