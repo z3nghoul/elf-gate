@@ -162,7 +162,7 @@ impl Checker {
         self.cache.lock().unwrap().flush();
     }
 
-    async fn version_of(&self, binary: &Path) -> Option<String> {
+    pub async fn version_of(&self, binary: &Path) -> Option<String> {
         if let Some(v) = self.versions.lock().unwrap().get(binary) {
             return Some(v.clone());
         }

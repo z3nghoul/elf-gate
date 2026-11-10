@@ -79,6 +79,7 @@ async fn start_core(
         binary: setup.as_ref().map(|s| s.core.clone()),
         supervised: setup.as_ref().is_some_and(|s| s.supervised),
         interface: setup.as_ref().map(|s| s.interface.clone()),
+        config_name: None,
     };
     let core = Core::start_with(core_cfg, &cfg, run_dir, tx.clone(), &opts)
         .await
@@ -302,6 +303,11 @@ impl AppState {
                     format!("[Warning] connection check failed: {e}"),
                 );
                 self.health = HealthState::Failed(e);
+                // The server answers over TCP but nothing passes: another fingerprint may help.
+                // (Not in TUN mode: a temporary core's own traffic would enter the tunnel.)
+                if self.conn_mode == Mode::Proxy {
+                    self.on_fp_suspect(id);
+                }
             }
         }
     }

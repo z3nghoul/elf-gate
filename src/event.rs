@@ -39,6 +39,18 @@ pub enum BgEvent {
         id: u64,
         result: Ping,
     },
+    /// A URL ping failed although the server answers over TCP: another fingerprint may help.
+    FpSuspect {
+        id: u64,
+    },
+    /// The automatic fingerprint search for server `id` finished.
+    FpSearched {
+        id: u64,
+        xray_version: Option<String>,
+        found: Option<String>,
+        /// Nothing was tried: the search already ran with this Xray version.
+        skipped: bool,
+    },
     /// Mock connection (servers without a real link).
     Connected(u64),
     /// The Xray process for server `id` is up and listening.

@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod ping;
 mod rules;
 mod session;
 mod subs;
@@ -171,6 +172,8 @@ pub struct AppState {
     checker: Arc<Checker>,
     /// Subscriptions being downloaded right now (by name).
     updating: HashSet<String>,
+    /// Servers whose fingerprint search is running.
+    fp_searching: HashSet<u64>,
     last_auto_check: Option<Instant>,
     /// When a subscription's update last failed (not retried for ten minutes).
     failed_at: HashMap<String, Instant>,
@@ -272,6 +275,7 @@ impl AppState {
             run_dir: std::env::temp_dir().join("elf-gate-run"),
             checker: Checker::new(None),
             updating: HashSet::new(),
+            fp_searching: HashSet::new(),
             last_auto_check: None,
             failed_at: HashMap::new(),
             next_id,
@@ -568,6 +572,13 @@ impl AppState {
                     self.popup = Some(Popup::Error(reason));
                 }
             }
+            BgEvent::FpSuspect { id } => self.on_fp_suspect(id),
+            BgEvent::FpSearched {
+                id,
+                xray_version,
+                found,
+                skipped,
+            } => self.on_fp_searched(id, xray_version, found, skipped),
             BgEvent::SubFetched { name, result } => self.on_sub_fetched(name, result),
             BgEvent::SubAdded {
                 url,
@@ -911,19 +922,6 @@ impl AppState {
         // Switching the mode while connected restarts the connection in the new mode.
         if let Conn::Connected(id) | Conn::Connecting(id) = self.conn {
             self.connect(id);
-        }
-    }
-
-    fn ping_all(&mut self) {
-        if !self.mock {
-            self.status = Some("Пинг серверов пока не поддерживается в этой версии".into());
-            return;
-        }
-        for sub in &mut self.subs {
-            for s in sub.servers.iter_mut().filter(|s| s.is_supported()) {
-                s.ping = Ping::Pending;
-                mock::spawn_ping(self.tx.clone(), s.id);
-            }
         }
     }
 
@@ -1553,8 +1551,8 @@ mod tests {
         assert_eq!((a.up_bytes, a.down_bytes), (0, 0));
 
         a.handle_action(Action::PingAll);
-        assert!(a.status.as_deref().unwrap().contains("Пинг"));
-        assert_eq!(a.subs[0].servers[0].ping, Ping::Unknown);
+        // A real server gets a real (TCP) ping, never a fake number.
+        assert_eq!(a.subs[0].servers[0].ping, Ping::Pending);
 
         a.handle_action(Action::UpdateSubs);
         assert!(a.status.as_deref().unwrap().contains("Нет подписок"));

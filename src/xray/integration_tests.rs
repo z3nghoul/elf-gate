@@ -782,3 +782,78 @@ async fn repeated_checks_come_from_the_cache_and_a_new_version_drops_it() {
     raw.use_version("Xray 0.0.0-other");
     assert_eq!(raw.lookup(&config_key(&cfg)), None);
 }
+
+/// The URL ping starts a throw-away core, measures a request through its socks port and
+/// cleans up after itself. (The target is on loopback, which the default rules send direct, so
+/// this checks the probe machinery; the chain itself is covered by the test above.)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn url_ping_runs_a_temporary_core_and_cleans_up() {
+    use crate::model::server::Ping;
+    use crate::net::ping::url_ping;
+    use crate::storage::PingConfig;
+    let xray = require_xray!();
+    let tmp = TempDir::new("urlping");
+    let server_port = free_port();
+    let _server = spawn_server(
+        &xray,
+        &json!({
+            "inbounds": [{
+                "listen": "127.0.0.1", "port": server_port, "protocol": "vless",
+                "settings": { "clients": [{ "id": UUID }], "decryption": "none" },
+                "streamSettings": { "network": "tcp", "security": "none" }
+            }],
+            "outbounds": [{ "protocol": "freedom" }]
+        }),
+        tmp.path(),
+    );
+    assert!(wait_port(server_port, true, 10).await);
+    let http = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let http_port = http.local_addr().unwrap().port();
+    tokio::spawn(serve_http(http));
+
+    let server = parse_link(&format!(
+        "vless://{UUID}@127.0.0.1:{server_port}?security=none&type=tcp#local"
+    ))
+    .unwrap();
+    let core = CoreConfig {
+        xray_path: xray.display().to_string(),
+        ..CoreConfig::default()
+    };
+    let run_dir = tmp.path().join("run");
+    let cfg = |url: String| PingConfig {
+        url,
+        timeout_ms: 4000,
+        ..PingConfig::default()
+    };
+
+    let (ok, suspect) = url_ping(
+        &xray,
+        &core,
+        &server,
+        &cfg(format!("http://127.0.0.1:{http_port}/")),
+        &run_dir,
+    )
+    .await;
+    assert!(matches!(ok, Ping::Ms(_)), "{ok:?}");
+    assert!(!suspect);
+
+    // A URL that cannot be reached while the server itself answers over TCP: the caller is
+    // told to try other fingerprints.
+    let closed = free_port();
+    let (bad, suspect) = url_ping(
+        &xray,
+        &core,
+        &server,
+        &cfg(format!("http://127.0.0.1:{closed}/")),
+        &run_dir,
+    )
+    .await;
+    assert!(matches!(bad, Ping::Error | Ping::Timeout), "{bad:?}");
+    assert!(suspect, "TCP works, URL does not");
+
+    // No probe config files are left behind.
+    let leftovers: Vec<_> = std::fs::read_dir(&run_dir)
+        .map(|d| d.flatten().map(|e| e.file_name()).collect())
+        .unwrap_or_default();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}

@@ -166,6 +166,9 @@ pub struct StartOptions {
     pub supervised: bool,
     /// Wait for this network interface to appear (TUN mode).
     pub interface: Option<String>,
+    /// File name for the config inside `run_dir` (default `xray.json`); temporary cores use
+    /// their own name so they never overwrite the main core's file.
+    pub config_name: Option<String>,
 }
 
 pub struct Core {
@@ -210,7 +213,7 @@ impl Core {
         };
         check_ports(core)?;
 
-        let config_path = run_dir.join("xray.json");
+        let config_path = run_dir.join(opts.config_name.as_deref().unwrap_or("xray.json"));
         let write = || -> io::Result<()> {
             std::fs::create_dir_all(run_dir)?;
             let text = serde_json::to_vec_pretty(config).map_err(io::Error::other)?;
