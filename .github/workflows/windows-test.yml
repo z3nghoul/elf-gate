@@ -2,7 +2,7 @@ name: Windows test build
 
 # Builds elf-gate-windows-test.zip for a human tester: release exe, Xray with a verified
 # checksum, readable instructions. Run it by hand (Actions > Windows test build > Run workflow)
-# or push a tag like windows-test-1 or v0.1.0.
+# or push a tag like windows-test-1 or v1.0.0.
 on:
   workflow_dispatch:
   push:
@@ -51,6 +51,8 @@ jobs:
           Copy-Item 'target\release\elf-gate.exe' $out
           Copy-Item 'target\release\elf-gated.exe' $out
           Copy-Item 'packaging\scripts\elf-gate-tun.bat' $out
+          # elf-gate itself is AGPL-3.0: the license text travels with the binaries.
+          Copy-Item 'LICENSE' $out
           # wintun.dll is the TUN driver library the core loads (it must sit next to xray.exe).
           foreach ($f in 'xray.exe', 'geoip.dat', 'geosite.dat', 'wintun.dll') { Copy-Item (Join-Path $x $f) $out }
           # Xray is MPL-2.0: its license must travel with the binary.
@@ -79,7 +81,7 @@ jobs:
           $ver = "$versionLine`r`nXray $env:XRAY_VERSION`r`nBuilt $date`r`nGitHub run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID`r`n"
           [System.IO.File]::WriteAllText((Join-Path $out 'ВЕРСИЯ.txt'), $ver, $utf8bom)
 
-          $sums = foreach ($f in 'elf-gate.exe', 'elf-gated.exe', 'xray.exe', 'geoip.dat', 'geosite.dat', 'wintun.dll', 'LICENSE-Xray', 'LICENSE-Wintun') {
+          $sums = foreach ($f in 'elf-gate.exe', 'elf-gated.exe', 'xray.exe', 'geoip.dat', 'geosite.dat', 'wintun.dll', 'LICENSE', 'LICENSE-Xray', 'LICENSE-Wintun') {
             $h = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $out $f)).Hash.ToLower()
             "$h  $f"
           }
@@ -88,7 +90,7 @@ jobs:
       - name: Guard - no server links or stray files in the package
         run: |
           $out = 'elf-gate-windows-test'
-          $allowed = @('elf-gate.exe', 'elf-gated.exe', 'elf-gate-tun.bat', 'xray.exe', 'geoip.dat', 'geosite.dat', 'wintun.dll', 'LICENSE-Xray', 'LICENSE-Wintun',
+          $allowed = @('elf-gate.exe', 'elf-gated.exe', 'elf-gate-tun.bat', 'xray.exe', 'geoip.dat', 'geosite.dat', 'wintun.dll', 'LICENSE', 'LICENSE-Xray', 'LICENSE-Wintun',
                        'ТЕСТ-README.txt', 'ЧЕК-ЛИСТ.txt', 'ВЕРСИЯ.txt', 'SHA256SUMS.txt')
           $present = (Get-ChildItem -Path $out -Recurse -File).Name
           $unexpected = $present | Where-Object { $allowed -notcontains $_ }
