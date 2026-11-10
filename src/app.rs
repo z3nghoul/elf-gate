@@ -752,7 +752,13 @@ impl AppState {
                         }
                         None => {
                             let id = s.id;
-                            self.send(Cmd::Connect(id));
+                            // Enter on the server we are connected to switches it off.
+                            if matches!(self.conn, Conn::Connected(c) | Conn::Connecting(c) if c == id)
+                            {
+                                self.send(Cmd::Disconnect);
+                            } else {
+                                self.send(Cmd::Connect(id));
+                            }
                         }
                     }
                 }
