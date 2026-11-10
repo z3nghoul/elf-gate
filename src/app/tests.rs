@@ -629,8 +629,8 @@ async fn hotkeys_work_in_the_cyrillic_layouts_and_text_fields_take_the_character
 #[tokio::test]
 async fn confirm_dialogs_answer_to_the_y_and_n_keys_on_every_layout() {
     // (yes keys, no keys): Latin, Russian (the Y key is U+043D, the N key U+0442), Ukrainian
-    // (the same letters), and the Russian "da" for yes.
-    let yes = ['y', 'Y', '\u{43d}', '\u{41d}', '\u{434}'];
+    // (the same letters): the keys, no meaning of the letters.
+    let yes = ['y', 'Y', '\u{43d}', '\u{41d}'];
     let no = ['n', 'N', '\u{442}', '\u{422}'];
     for c in yes {
         let (mut a, _rx) = app_with(&[REALITY]);
@@ -650,10 +650,13 @@ async fn confirm_dialogs_answer_to_the_y_and_n_keys_on_every_layout() {
         assert!(!a.should_quit, "`{c}` must decline");
         assert!(a.popup.is_none());
     }
-    // Any other key keeps the question.
-    let (mut a, _rx) = app_with(&[REALITY]);
-    a.conn = Conn::Connected(1);
-    press(&mut a, KeyCode::Char('q'));
-    press(&mut a, KeyCode::Char('x'));
-    assert!(matches!(a.popup, Some(Popup::Confirm { .. })));
+    // Any other key keeps the question, the Russian "da" (the L key) included.
+    for c in ['x', '\u{434}', '\u{414}'] {
+        let (mut a, _rx) = app_with(&[REALITY]);
+        a.conn = Conn::Connected(1);
+        press(&mut a, KeyCode::Char('q'));
+        press(&mut a, KeyCode::Char(c));
+        assert!(matches!(a.popup, Some(Popup::Confirm { .. })), "{c:?}");
+        assert!(!a.should_quit);
+    }
 }
