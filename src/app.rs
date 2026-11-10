@@ -160,6 +160,8 @@ pub struct AppState {
     pub status: Option<String>,
     /// When the status text was set: it disappears by itself after [`STATUS_LIFETIME`].
     status_since: Option<std::time::Instant>,
+    /// Ctrl+L: the main loop clears the terminal before the next frame.
+    redraw_requested: bool,
     pub should_quit: bool,
     pub rules_cursor: usize,
     pub settings_cursor: usize,
@@ -204,6 +206,7 @@ impl AppState {
             log_view_h: 10,
             status: None,
             status_since: None,
+            redraw_requested: false,
             should_quit: false,
             rules_cursor: 0,
             settings_cursor: 0,
@@ -292,6 +295,11 @@ impl AppState {
     pub(crate) fn set_status(&mut self, text: String) {
         self.status = Some(text);
         self.status_since = Some(std::time::Instant::now());
+    }
+
+    /// `true` once after Ctrl+L: the terminal must be cleared and drawn from scratch.
+    pub fn take_redraw(&mut self) -> bool {
+        std::mem::take(&mut self.redraw_requested)
     }
 
     /// Clears the status text once it is old enough.
@@ -717,6 +725,7 @@ impl AppState {
             Back => self.back(),
             FocusNext => self.cycle_focus(true),
             FocusPrev => self.cycle_focus(false),
+            Redraw => self.redraw_requested = true,
             #[cfg(debug_assertions)]
             DebugPanic => panic!("debug panic requested with F12"),
         }
@@ -729,12 +738,32 @@ impl AppState {
     }
 
     /// Text for the screen: hidden addresses, ids, keys and URLs while privacy mode is on.
+    /// Text from outside as the screen may show it: emoji and pictographs are cleaned away
+    /// (they break the layout) and, in privacy mode, secrets are hidden.
     pub fn mask(&self, text: &str) -> String {
+        let text = crate::ui::text::clean(text);
         if self.privacy() {
-            crate::redact::text(text, crate::redact::Mode::Full)
+            crate::redact::text(&text, crate::redact::Mode::Full)
         } else {
-            text.to_string()
+            text
         }
+    }
+
+    /// The name of a server as the screen shows it; when nothing is left of it after cleaning,
+    /// its address (not in privacy mode) or `server N`.
+    pub fn server_title(&self, s: &Server) -> String {
+        crate::ui::text::display_name_or(&s.name, || {
+            if !self.privacy() && !s.address.is_empty() {
+                s.host_port()
+            } else {
+                crate::t!("name.server", n = s.id)
+            }
+        })
+    }
+
+    /// The name of a subscription or group as the screen shows it.
+    pub fn group_title(&self, name: &str) -> String {
+        crate::ui::text::display_name_or(name, || crate::t!("name.group"))
     }
 
     /// A server as the screen may show it.
@@ -896,17 +925,21 @@ impl AppState {
                 };
                 let (text, kind) = if s.hidden {
                     (
-                        crate::t!("confirm.unhide", name = s.name),
+                        crate::t!("confirm.unhide", name = self.server_title(s)),
                         ConfirmKind::UnhideServer(s.id),
                     )
                 } else if remote {
                     (
-                        crate::t!("confirm.hide", name = s.name, stop = stop),
+                        crate::t!("confirm.hide", name = self.server_title(s), stop = stop),
                         ConfirmKind::HideServer(s.id),
                     )
                 } else {
                     (
-                        crate::t!("confirm.delete_server", name = s.name, stop = stop),
+                        crate::t!(
+                            "confirm.delete_server",
+                            name = self.server_title(s),
+                            stop = stop
+                        ),
                         ConfirmKind::DeleteServer(s.id),
                     )
                 };
@@ -918,7 +951,7 @@ impl AppState {
                 self.popup = Some(Popup::Confirm {
                     text: crate::t!(
                         "confirm.delete_group",
-                        name = g.name,
+                        name = self.group_title(&g.name),
                         stop = if live {
                             crate::t!("confirm.live_group")
                         } else {
@@ -1005,7 +1038,7 @@ impl AppState {
             .and_then(|o| FINGERPRINTS.iter().position(|f| *f == o))
             .map_or(0, |i| i + 1);
         self.popup = Some(Popup::Select {
-            title: format!("TLS fingerprint: {}", server.name),
+            title: format!("TLS fingerprint: {}", self.server_title(server)),
             options,
             selected,
             kind: SelectKind::Fingerprint(server.id),
@@ -1027,7 +1060,7 @@ impl AppState {
             Some(ServerRole::Backup) => 2,
         };
         self.popup = Some(Popup::Select {
-            title: crate::t!("menu.role_title", name = server.name),
+            title: crate::t!("menu.role_title", name = self.server_title(server)),
             options: vec![
                 crate::t!("menu.role_none"),
                 crate::t!("menu.role_primary"),

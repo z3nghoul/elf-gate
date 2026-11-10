@@ -13,6 +13,7 @@ mod rules;
 mod servers;
 mod settings;
 mod statusbar;
+pub mod text;
 pub mod theme;
 
 use crate::app::{AppState, Screen};

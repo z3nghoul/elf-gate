@@ -42,6 +42,8 @@ Quit.desc = "закрыть интерфейс (VPN продолжает раб�
 Quit.short = "выход"
 QuitAll.desc = "выйти и остановить фоновую часть (VPN отключится)"
 QuitAll.short = "стоп"
+Redraw.desc = "перерисовать экран целиком (если терминал исказил картинку)"
+Redraw.short = "перерисовка"
 Role.desc = "роль сервера: основной / запасной (автопереключение)"
 Role.short = "роль"
 RoutingMode.desc = "экран правил: режим маршрутизации exclude / include"
@@ -315,6 +317,10 @@ rule_type_process = "Процесс: ввести имя"
 [model]
 deprecated_grpc = "Устаревший транспорт grpc: Xray помечает gRPC как deprecated и может убрать его. Рекомендуется XHTTP."
 deprecated_ws = "Устаревший транспорт ws: Xray помечает WebSocket как deprecated и может убрать его. Рекомендуется XHTTP."
+
+[name]
+group = "подписка"
+server = "сервер {n}"
 
 [net]
 bad_socks = "непонятный ответ socks"

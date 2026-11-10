@@ -42,6 +42,8 @@ Quit.desc = "close the interface (the VPN keeps running in the background)"
 Quit.short = "exit"
 QuitAll.desc = "quit and stop the background part (the VPN goes down)"
 QuitAll.short = "stop"
+Redraw.desc = "redraw the whole screen (if the terminal garbled it)"
+Redraw.short = "redraw"
 Role.desc = "server role: primary / backup (automatic failover)"
 Role.short = "role"
 RoutingMode.desc = "rules screen: routing mode exclude / include"
@@ -315,6 +317,10 @@ rule_type_process = "Process: type a name"
 [model]
 deprecated_grpc = "Deprecated transport grpc: Xray marks gRPC as deprecated and may remove it. XHTTP is recommended."
 deprecated_ws = "Deprecated transport ws: Xray marks WebSocket as deprecated and may remove it. XHTTP is recommended."
+
+[name]
+group = "subscription"
+server = "server {n}"
 
 [net]
 bad_socks = "unclear socks reply"
