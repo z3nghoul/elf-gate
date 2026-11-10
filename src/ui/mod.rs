@@ -55,9 +55,12 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
     let key_rows = hints::rows(app, (area.width as usize).saturating_sub(2))
         .len()
         .max(1) as u16;
+    let status_rows = statusbar::rows(app, &th, (area.width as usize).saturating_sub(2))
+        .len()
+        .max(1) as u16;
     let [body, status, keys] = Layout::vertical([
         Constraint::Min(3),
-        Constraint::Length(3),
+        Constraint::Length(status_rows + 2),
         Constraint::Length(key_rows + 2),
     ])
     .areas(area);
