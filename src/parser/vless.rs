@@ -131,6 +131,7 @@ pub fn parse(link: &str) -> Result<Server, ParseError> {
         unsupported,
         ping: Ping::Unknown,
         ping_at: None,
+        ping_kind: crate::model::server::PingKind::Tcp,
     })
 }
 

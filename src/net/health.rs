@@ -24,15 +24,16 @@ pub async fn check_host(
     path: &str,
     limit: Duration,
 ) -> Result<Duration, String> {
-    let started = Instant::now();
+    // The latency is the request itself (the proxy connection and the far side's dial are
+    // set up before the clock starts), so it does not jump with connection set-up.
     match timeout(limit, request(socks_port, host, path)).await {
-        Ok(Ok(())) => Ok(started.elapsed()),
+        Ok(Ok(latency)) => Ok(latency),
         Ok(Err(e)) => Err(e),
         Err(_) => Err(format!("нет ответа за {} с", limit.as_secs())),
     }
 }
 
-async fn request(socks_port: u16, host: &str, path: &str) -> Result<(), String> {
+async fn request(socks_port: u16, host: &str, path: &str) -> Result<Duration, String> {
     let io = |what: &'static str| move |e: std::io::Error| format!("{what}: {e}");
     let mut s = TcpStream::connect(("127.0.0.1", socks_port))
         .await
@@ -76,12 +77,14 @@ async fn request(socks_port: u16, host: &str, path: &str) -> Result<(), String> 
     let get = format!(
         "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nUser-Agent: elf-gate\r\n\r\n"
     );
+    let started = Instant::now();
     s.write_all(get.as_bytes()).await.map_err(io("запрос"))?;
     let mut buf = [0u8; 64];
     let n = s.read(&mut buf).await.map_err(io("ответ"))?;
+    let latency = started.elapsed();
     let line = String::from_utf8_lossy(&buf[..n]);
     if line.starts_with("HTTP/1.1 204") || line.starts_with("HTTP/1.0 204") {
-        Ok(())
+        Ok(latency)
     } else {
         let first = line.lines().next().unwrap_or("").trim();
         Err(format!(

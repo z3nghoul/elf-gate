@@ -71,6 +71,17 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                     Span::styled(format!("{name:<14}"), name_style),
                     Span::styled(format!("{tag:<8}"), th.warn()),
                     Span::styled(format!("{ping_text:>8}"), ping_style),
+                    Span::styled(
+                        format!(
+                            " {}",
+                            if s.is_supported() && s.ping_at.is_some() {
+                                s.ping_kind.short()
+                            } else {
+                                ""
+                            }
+                        ),
+                        th.muted(),
+                    ),
                 ]))
             }
         })

@@ -106,6 +106,9 @@ pub struct Server {
     /// Unix time of the last measurement (`None` = never).
     #[serde(default)]
     pub ping_at: Option<i64>,
+    /// What the number measures.
+    #[serde(default)]
+    pub ping_kind: PingKind,
 }
 
 impl Server {
@@ -131,6 +134,7 @@ impl Server {
             unsupported: Some(reason),
             ping: Ping::Unknown,
             ping_at: None,
+            ping_kind: PingKind::Tcp,
         }
     }
 
@@ -200,6 +204,31 @@ impl Transport {
             Transport::Xhttp => "xhttp",
             Transport::Grpc => "grpc",
             Transport::Ws => "ws",
+        }
+    }
+}
+
+/// What a ping value measures: they are different things and must not be mixed up.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PingKind {
+    /// Time to open a TCP connection to the server (the way there only).
+    #[default]
+    Tcp,
+    /// A request through the working tunnel (the way there and the way out).
+    Tunnel,
+}
+
+impl PingKind {
+    pub fn short(self) -> &'static str {
+        match self {
+            PingKind::Tcp => "tcp",
+            PingKind::Tunnel => "vpn",
+        }
+    }
+    pub fn long(self) -> &'static str {
+        match self {
+            PingKind::Tcp => "TCP до сервера",
+            PingKind::Tunnel => "через туннель",
         }
     }
 }

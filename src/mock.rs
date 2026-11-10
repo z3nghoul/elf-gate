@@ -55,6 +55,7 @@ pub fn make_server(id: u64, name: &str, host: &str, sec: Security, tr: Transport
         unsupported: None,
         ping: Ping::Unknown,
         ping_at: None,
+        ping_kind: crate::model::server::PingKind::Tcp,
     }
 }
 
@@ -189,7 +190,11 @@ pub fn spawn_ping(tx: BgTx, id: u64) {
             1 => Ping::Error,
             _ => Ping::Ms(20 + (rng.next() % 180) as u32),
         };
-        let _ = tx.send(BgEvent::Ping { id, result });
+        let _ = tx.send(BgEvent::Ping {
+            id,
+            result,
+            kind: crate::model::server::PingKind::Tcp,
+        });
     });
 }
 

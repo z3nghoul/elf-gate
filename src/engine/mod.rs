@@ -534,7 +534,7 @@ impl Engine {
     pub fn on_bg(&mut self, ev: BgEvent) {
         match ev {
             BgEvent::Log(line) => self.push_log(line),
-            BgEvent::Ping { id, result } => {
+            BgEvent::Ping { id, result, kind } => {
                 if let Some(s) = self
                     .subs
                     .iter_mut()
@@ -542,6 +542,7 @@ impl Engine {
                     .find(|s| s.id == id)
                 {
                     s.ping = result;
+                    s.ping_kind = kind;
                     s.ping_at = Some(crate::model::subscription::unix_now());
                 }
             }
@@ -553,6 +554,7 @@ impl Engine {
                     .find(|s| s.id == id)
                 {
                     s.ping = Ping::Ms(ms);
+                    s.ping_kind = crate::model::server::PingKind::Tunnel;
                     s.ping_at = Some(crate::model::subscription::unix_now());
                 }
             }

@@ -1,7 +1,7 @@
 //! Pinging servers and the automatic TLS fingerprint search.
 
 use super::*;
-use crate::model::server::Security;
+use crate::model::server::{PingKind, Security};
 use crate::net::ping;
 use crate::storage::PingMode;
 use crate::xray::process::resolve_binary;
@@ -107,6 +107,11 @@ impl Engine {
             let run_dir = self.run_dir.clone();
             let binary = binary.clone();
             tokio::spawn(async move {
+                let kind = if binary.is_some() {
+                    PingKind::Tunnel
+                } else {
+                    PingKind::Tcp
+                };
                 let (result, suspect) = match binary {
                     Some(bin) => ping::url_ping(&bin, &core, &server, &cfg, &run_dir).await,
                     None => (
@@ -117,6 +122,7 @@ impl Engine {
                 let _ = tx.send(BgEvent::Ping {
                     id: server.id,
                     result,
+                    kind,
                 });
                 if suspect {
                     let _ = tx.send(BgEvent::FpSuspect { id: server.id });
@@ -416,6 +422,7 @@ mod tests {
             a.on_bg(ev);
         }
         assert!(matches!(a.server_by_id(id).unwrap().ping, Ping::Ms(_)));
+        assert_eq!(a.server_by_id(id).unwrap().ping_kind, PingKind::Tcp);
         let again = a.last_auto_ping;
         a.auto_ping_tick();
         assert_eq!(a.last_auto_ping, again, "not due yet");
