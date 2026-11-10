@@ -1,41 +1,16 @@
-//! The rules screen: routing mode, presets, the user's own rules, the process picker.
+//! Routing rules and presets: the data side. (The screen, the cursor and the pickers belong
+//! to the interface.)
 
 use super::*;
 use crate::model::rule::{validate, RoutingMode};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RuleItem {
-    Preset(String),
-    Rule(usize),
-}
-
-impl AppState {
-    /// Presets first, then the user's rules, in the order the screen lists them.
-    pub fn rule_items(&self) -> Vec<RuleItem> {
-        builtin_presets()
-            .into_iter()
-            .map(|p| RuleItem::Preset(p.id))
-            .chain((0..self.config.rules.len()).map(RuleItem::Rule))
-            .collect()
-    }
-
-    fn current_rule_item(&self) -> Option<RuleItem> {
-        let items = self.rule_items();
-        items
-            .get(self.rules_cursor.min(items.len().saturating_sub(1)))
-            .cloned()
-    }
-
-    pub(super) fn rules_move(&mut self, delta: isize) {
-        let len = self.rule_items().len() as isize;
-        if len > 0 {
-            self.rules_cursor = (self.rules_cursor as isize + delta).clamp(0, len - 1) as usize;
-        }
-    }
-
-    pub(super) fn rules_toggle(&mut self) {
-        match self.current_rule_item() {
-            Some(RuleItem::Preset(id)) => {
+impl Engine {
+    pub(crate) fn rules_toggle(&mut self, item: RuleRef) {
+        match item {
+            RuleRef::Preset(id) => {
+                if !builtin_presets().iter().any(|p| p.id == id) {
+                    return;
+                }
                 let list = &mut self.config.presets.enabled;
                 if let Some(pos) = list.iter().position(|p| *p == id) {
                     list.remove(pos);
@@ -43,103 +18,32 @@ impl AppState {
                     list.push(id);
                 }
             }
-            Some(RuleItem::Rule(i)) => {
-                if let Some(rule) = self.config.rules.get_mut(i) {
-                    rule.enabled = !rule.enabled;
-                }
-            }
-            None => return,
+            RuleRef::Rule(i) => match self.config.rules.get_mut(i) {
+                Some(rule) => rule.enabled = !rule.enabled,
+                None => return,
+            },
         }
         self.rules_changed();
     }
 
-    pub(super) fn rules_delete(&mut self) {
-        match self.current_rule_item() {
-            Some(RuleItem::Rule(i)) => {
-                self.config.rules.remove(i);
-                let len = self.rule_items().len();
-                self.rules_cursor = self.rules_cursor.min(len.saturating_sub(1));
-                self.rules_changed();
-            }
-            Some(RuleItem::Preset(_)) => {
-                self.status =
-                    Some("Встроенный пресет нельзя удалить, его можно выключить (Space)".into());
-            }
-            None => {}
+    pub(crate) fn rules_delete(&mut self, i: usize) {
+        if i < self.config.rules.len() {
+            self.config.rules.remove(i);
+            self.rules_changed();
         }
     }
 
-    pub(super) fn rules_toggle_routing(&mut self) {
-        self.config.mode.routing = match self.config.mode.routing {
-            RoutingMode::Exclude => RoutingMode::Include,
-            RoutingMode::Include => RoutingMode::Exclude,
-        };
-        self.rules_changed();
+    pub(crate) fn rules_set_routing(&mut self, mode: RoutingMode) {
+        if self.config.mode.routing != mode {
+            self.config.mode.routing = mode;
+            self.rules_changed();
+        }
     }
 
-    pub(super) fn rules_add_menu(&mut self) {
-        self.popup = Some(Popup::Select {
-            title: "Новое правило".into(),
-            options: vec![
-                "Процесс: выбрать из запущенных".into(),
-                "Процесс: ввести имя".into(),
-                "Домен".into(),
-                "IP-адрес или сеть (CIDR)".into(),
-                "Набор geosite".into(),
-                "Набор geoip".into(),
-            ],
-            selected: 0,
-            kind: SelectKind::NewRuleKind,
-        });
-    }
-
-    pub(super) fn rules_kind_chosen(&mut self, index: usize) {
-        let kind = match index {
-            0 => {
-                let names = self.tun_host.running_processes();
-                if names.is_empty() {
-                    self.popup = Some(Popup::Notice(
-                        "Не удалось получить список запущенных программ. Введите имя вручную."
-                            .into(),
-                    ));
-                } else {
-                    self.popup = Some(Popup::Select {
-                        title: "Запущенные программы (имя файла, как его видит ядро)".into(),
-                        options: names,
-                        selected: 0,
-                        kind: SelectKind::RuleProcess,
-                    });
-                }
-                return;
-            }
-            1 => RuleKind::Process,
-            2 => RuleKind::Domain,
-            3 => RuleKind::Ip,
-            4 => RuleKind::Geosite,
-            _ => RuleKind::Geoip,
-        };
-        let hint = match kind {
-            RuleKind::Process => "Имя процесса (Discord, steam), регистр важен",
-            RuleKind::Domain => "Домен (example.com, с поддоменами)",
-            RuleKind::Ip => "IP или сеть (10.0.0.0/8)",
-            RuleKind::Geosite => "Набор geosite (category-ru)",
-            RuleKind::Geoip => "Набор geoip (ru)",
-        };
-        self.popup = Some(Popup::Input {
-            title: hint.into(),
-            buf: String::new(),
-            purpose: InputPurpose::Rule(kind),
-        });
-    }
-
-    pub(super) fn rules_process_chosen(&mut self, _index: usize, name: String) {
-        self.add_rule(RuleKind::Process, name);
-    }
-
-    pub(super) fn submit_rule(&mut self, kind: RuleKind, text: String) {
+    pub(crate) fn submit_rule(&mut self, kind: RuleKind, text: String) {
         match validate(kind, &text) {
             Ok(value) => self.add_rule(kind, value),
-            Err(e) => self.popup = Some(Popup::Error(format!("Правило не добавлено: {e}"))),
+            Err(e) => self.error_alert(format!("Правило не добавлено: {e}")),
         }
     }
 
@@ -150,11 +54,10 @@ impl AppState {
             .iter()
             .any(|r| r.kind == kind && r.value == value)
         {
-            self.popup = Some(Popup::Error("Такое правило уже есть".into()));
+            self.error_alert("Такое правило уже есть");
             return;
         }
         self.config.rules.push(Rule::new(kind, value));
-        self.rules_cursor = self.rule_items().len() - 1;
         self.rules_changed();
     }
 
@@ -163,12 +66,10 @@ impl AppState {
         self.save_config();
         if let (Conn::Connected(id), Some(_)) = (&self.conn, &self.core) {
             let id = *id;
-            if self.popup.is_none() {
-                self.popup = Some(Popup::Confirm {
-                    text: "Правила изменены. Перезапустить ядро, чтобы применить?".into(),
-                    kind: ConfirmKind::ApplyRules(id),
-                });
-            }
+            self.alert(Alert::Ask {
+                text: "Правила изменены. Перезапустить ядро, чтобы применить?".into(),
+                ask: Ask::ApplyRules(id),
+            });
         }
     }
 }

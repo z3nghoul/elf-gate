@@ -30,7 +30,7 @@ fn host_of(url: &str) -> String {
         .unwrap_or_else(|| "subscription".into())
 }
 
-impl AppState {
+impl Engine {
     /// Groups for `[[subscriptions]]`, filled from the cache; call from `build`.
     pub(super) fn subscription_groups(
         config: &Config,
@@ -89,7 +89,7 @@ impl AppState {
     /// `u`: update every subscription now.
     pub(super) fn update_subscriptions(&mut self) {
         if self.config.subscriptions.is_empty() {
-            self.status = Some("Нет подписок: добавьте ссылку на подписку клавишей a".into());
+            self.status("Нет подписок: добавьте ссылку на подписку клавишей a");
             return;
         }
         let names: Vec<String> = self
@@ -99,10 +99,10 @@ impl AppState {
             .map(|s| s.name.clone())
             .collect();
         let started = names.into_iter().filter(|n| self.spawn_update(n)).count();
-        self.status = Some(if started > 0 {
-            "Обновление подписок...".into()
+        self.status(if started > 0 {
+            "Обновление подписок..."
         } else {
-            "Обновление уже идёт".into()
+            "Обновление уже идёт"
         });
     }
 
@@ -177,7 +177,7 @@ impl AppState {
                     Level::Warning,
                     format!("[Warning] подписка «{name}» не обновлена: {e}"),
                 );
-                self.status = Some(format!("Подписка «{name}»: {e}"));
+                self.status(format!("Подписка «{name}»: {e}"));
             }
             Ok(update) => {
                 self.failed_at.remove(&name);
@@ -232,9 +232,8 @@ impl AppState {
                 }
             ),
         );
-        self.status = Some(format!("Подписка «{name}»: {count} серверов"));
+        self.status(format!("Подписка «{name}»: {count} серверов"));
         self.save_subscription_cache();
-        self.clamp_selection();
         // Only servers whose config changed cost a real `xray run -test`: the cache knows the rest.
         let to_check: Vec<Server> = self.subs[gi]
             .servers
@@ -248,14 +247,14 @@ impl AppState {
     /// `a` with an http(s) link: download first, add the subscription only if it works.
     pub(super) fn add_subscription_url(&mut self, url: String) {
         if self.config.subscriptions.iter().any(|s| s.url == url) {
-            self.popup = Some(Popup::Error("Эта подписка уже добавлена".into()));
+            self.error_alert("Эта подписка уже добавлена");
             return;
         }
         if url::Url::parse(&url).is_err() {
-            self.popup = Some(Popup::Error("Некорректный адрес подписки".into()));
+            self.error_alert("Некорректный адрес подписки");
             return;
         }
-        self.status = Some("Загрузка подписки...".into());
+        self.status("Загрузка подписки...");
         let tx = self.tx.clone();
         let user_agent = fetch::DEFAULT_USER_AGENT.to_string();
         tokio::spawn(async move {
@@ -281,7 +280,7 @@ impl AppState {
                     Level::Warning,
                     format!("[Warning] подписка не добавлена: {e}"),
                 );
-                self.popup = Some(Popup::Error(format!("Подписку не удалось загрузить:\n{e}")));
+                self.error_alert(format!("Подписку не удалось загрузить:\n{e}"));
                 return;
             }
         };

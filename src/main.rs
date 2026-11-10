@@ -1,22 +1,6 @@
-mod action;
-mod app;
-mod build_info;
-mod event;
-mod mock;
-mod model;
-mod net;
-mod parser;
-// Stage 1 ships only empty platform implementations; they get used from stage 3 on.
-#[allow(dead_code)]
-mod platform;
-mod storage;
-mod sysproxy;
-mod tun;
-mod ui;
-mod xray;
-
 use anyhow::Result;
-use app::AppState;
+use elf_gate::app::AppState;
+use elf_gate::{build_info, event, mock, platform, storage, sysproxy, ui};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,

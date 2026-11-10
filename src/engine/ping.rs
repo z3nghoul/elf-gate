@@ -5,7 +5,7 @@ use crate::net::ping;
 use crate::storage::PingMode;
 use crate::xray::process::resolve_binary;
 
-impl AppState {
+impl Engine {
     pub(super) fn ping_all(&mut self) {
         let real: Vec<Server> = self
             .subs
@@ -28,7 +28,7 @@ impl AppState {
         }
         if real.is_empty() {
             if !self.mock {
-                self.status = Some("Нет серверов для пинга".into());
+                self.status("Нет серверов для пинга");
             }
             return;
         }
@@ -38,13 +38,13 @@ impl AppState {
         let mut mode = self.config.ping.mode;
         if mode == PingMode::Url && tun_up {
             mode = PingMode::Tcp;
-            self.status = Some("В режиме TUN пинг по URL недоступен, измерен TCP-пинг".into());
+            self.status("В режиме TUN пинг по URL недоступен, измерен TCP-пинг");
         }
         let binary = if mode == PingMode::Url {
             match resolve_binary(&self.config.core.xray_path) {
                 Ok(b) => Some(b),
                 Err(e) => {
-                    self.status = Some(format!("Пинг по URL: {e}"));
+                    self.status(format!("Пинг по URL: {e}"));
                     return;
                 }
             }
@@ -192,7 +192,7 @@ impl AppState {
                     Level::Info,
                     format!("{name}: fp подобран автоматически: {fp}"),
                 );
-                self.status = Some(format!("{name}: подобран fp={fp}"));
+                self.status(format!("{name}: подобран fp={fp}"));
             }
             None => {
                 self.log(
@@ -201,7 +201,7 @@ impl AppState {
                         "[Warning] {name}: ни один fp не помог. Проверьте ключ, SNI, shortId и порт на сервере"
                     ),
                 );
-                self.status = Some(format!("{name}: подобрать fp не удалось"));
+                self.status(format!("{name}: подобрать fp не удалось"));
             }
         }
         let current = found.clone();

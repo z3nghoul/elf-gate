@@ -4,17 +4,7 @@
 use super::*;
 use crate::model::server::ServerRole;
 
-impl AppState {
-    /// `(group, override key)` of a server.
-    fn server_key_of(&self, id: u64) -> Option<(String, String)> {
-        self.subs.iter().find_map(|sub| {
-            sub.servers
-                .iter()
-                .find(|s| s.id == id)
-                .map(|s| (sub.name.clone(), override_key(&sub.name, s)))
-        })
-    }
-
+impl Engine {
     /// The server that backs `primary_id` up, if `primary_id` is the primary.
     pub(super) fn backup_for(&self, primary_id: u64) -> Option<Server> {
         let primary = self.server_by_id(primary_id)?;
@@ -28,43 +18,16 @@ impl AppState {
             .cloned()
     }
 
-    pub(super) fn open_role_menu(&mut self) {
-        let Some(server) = self.selected_server() else {
-            self.status = Some("Выберите сервер (не группу)".into());
-            return;
-        };
-        if !server.is_supported() {
-            self.status = Some("Роль можно назначить только поддерживаемому серверу".into());
-            return;
-        }
-        let selected = match server.role {
-            None => 0,
-            Some(ServerRole::Primary) => 1,
-            Some(ServerRole::Backup) => 2,
-        };
-        self.popup = Some(Popup::Select {
-            title: format!("Роль сервера: {}", server.name),
-            options: vec![
-                "нет".into(),
-                "основной (всегда первым)".into(),
-                "запасной (если основной недоступен)".into(),
-            ],
-            selected,
-            kind: SelectKind::Role(server.id),
-        });
-    }
-
-    /// `index`: 0 none, 1 primary, 2 backup. There is at most one server per role.
-    pub(super) fn set_role(&mut self, id: u64, index: usize) {
-        let role = match index {
-            1 => Some(ServerRole::Primary),
-            2 => Some(ServerRole::Backup),
-            _ => None,
-        };
+    /// There is at most one server per role: the previous holder of it loses it.
+    pub(crate) fn set_role(&mut self, id: u64, role: Option<ServerRole>) {
         let Some((_, key)) = self.server_key_of(id) else {
             return;
         };
-        // One primary and one backup at most: the previous holder of the role loses it.
+        let supported = self.server_by_id(id).is_some_and(Server::is_supported);
+        if !supported {
+            self.status("Роль можно назначить только поддерживаемому серверу");
+            return;
+        }
         let mut displaced = Vec::new();
         if let Some(r) = role {
             for (group, server) in self
@@ -100,23 +63,21 @@ impl AppState {
         self.restart_if_affected(id);
     }
 
-    pub(super) fn toggle_fragment(&mut self) {
-        let Some(server) = self.selected_server() else {
-            self.status = Some("Выберите сервер (не группу)".into());
-            return;
-        };
-        if !server.is_supported() || !matches!(server.security, Security::Tls | Security::Reality) {
-            self.status = Some("Фрагментация применима только к серверам с TLS или Reality".into());
-            return;
-        }
-        let (id, on) = (server.id, !server.fragment);
-        self.set_fragment(id, on);
-    }
-
-    pub(super) fn set_fragment(&mut self, id: u64, on: bool) {
+    pub(crate) fn set_fragment(&mut self, id: u64, on: bool) {
         let Some((_, key)) = self.server_key_of(id) else {
             return;
         };
+        let applicable = self.server_by_id(id).is_some_and(|s| {
+            s.is_supported()
+                && matches!(
+                    s.security,
+                    crate::model::server::Security::Tls | crate::model::server::Security::Reality
+                )
+        });
+        if !applicable {
+            self.status("Фрагментация применима только к серверам с TLS или Reality");
+            return;
+        }
         let mut name = String::new();
         for server in self
             .subs
@@ -154,7 +115,7 @@ impl AppState {
             return;
         }
         if self.busy {
-            self.status = Some("Изменение применится при следующем подключении".into());
+            self.status("Изменение применится при следующем подключении");
         } else {
             self.connect(c);
         }

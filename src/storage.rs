@@ -283,6 +283,19 @@ pub struct Config {
     pub rules: Vec<Rule>,
 }
 
+impl Config {
+    /// The copy the interface may see: no server links and no subscription URLs (they carry
+    /// keys and tokens). Everything else the screens need stays.
+    pub fn redacted(&self) -> Config {
+        let mut c = self.clone();
+        c.servers.clear();
+        for s in &mut c.subscriptions {
+            s.url.clear();
+        }
+        c
+    }
+}
+
 /// Set while we have changed the system proxy; holds what to put back.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProxyState {

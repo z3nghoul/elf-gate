@@ -17,14 +17,14 @@ impl ServerRole {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Security {
     None,
     Tls,
     Reality,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Transport {
     Tcp,
     Xhttp,
@@ -32,7 +32,7 @@ pub enum Transport {
     Ws,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Ping {
     Unknown,
     Pending,
@@ -42,7 +42,7 @@ pub enum Ping {
 }
 
 /// TLS / Reality parameters from the link query.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TlsParams {
     pub sni: String,
     /// uTLS fingerprint (`fp`).
@@ -58,7 +58,7 @@ pub struct TlsParams {
 }
 
 /// Transport-specific parameters from the link query.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransportParams {
     pub path: String,
     pub host: String,
@@ -74,7 +74,7 @@ pub struct TransportParams {
 /// providers' DPI breaks its large post-quantum ClientHello; `firefox` often works there.
 pub const FINGERPRINTS: &[&str] = &["chrome", "firefox", "safari", "ios", "edge", "qq", "random"];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Server {
     /// Runtime id, assigned by the application (not persisted).
     pub id: u64,
@@ -156,6 +156,17 @@ impl Server {
             ),
             Transport::Tcp | Transport::Xhttp => None,
         }
+    }
+
+    /// The copy the UI may see: the secrets that identify or unlock the server (user id, link,
+    /// Reality keys) are removed, everything the screens show stays.
+    pub fn redacted(&self) -> Server {
+        let mut s = self.clone();
+        s.uuid.clear();
+        s.link.clear();
+        s.tls.public_key.clear();
+        s.tls.short_id.clear();
+        s
     }
 
     /// `host:port`, with IPv6 addresses in brackets.

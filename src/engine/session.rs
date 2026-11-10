@@ -128,10 +128,10 @@ async fn start_core(
     Ok(core)
 }
 
-impl AppState {
+impl Engine {
     pub(super) fn connect(&mut self, id: u64) {
         if self.busy {
-            self.status = Some("Подождите: ядро запускается или останавливается".into());
+            self.status("Подождите: ядро запускается или останавливается");
             return;
         }
         let Some(server) = self.server_by_id(id).cloned() else {
@@ -147,9 +147,9 @@ impl AppState {
         let mut setup = None;
         if mode == Mode::Tun {
             if self.tun_first_run() {
-                self.popup = Some(Popup::Confirm {
+                self.alert(Alert::Ask {
                     text: "Режим TUN. Включить пресет «только Discord»?\n\nДа: через VPN пойдёт только Discord, всё остальное напрямую.\nНет: через VPN пойдёт всё, кроме локальной сети.\n(Это можно изменить на экране правил, клавиша r.)".into(),
-                    kind: ConfirmKind::PresetOffer(id),
+                    ask: Ask::PresetOffer(id),
                 });
                 return;
             }
@@ -166,8 +166,7 @@ impl AppState {
             setup = preflight.setup;
         }
 
-        self.up_bytes = 0;
-        self.down_bytes = 0;
+        self.traffic = Traffic::default();
         self.health = HealthState::Unknown;
         self.conn = Conn::Connecting(id);
         self.conn_mode = mode;
@@ -231,8 +230,7 @@ impl AppState {
 
     /// Demo servers (debug builds): no real process.
     fn connect_mock(&mut self, id: u64, server: &Server) {
-        self.up_bytes = 0;
-        self.down_bytes = 0;
+        self.traffic = Traffic::default();
         self.conn = Conn::Connecting(id);
         let old = self.core.take();
         self.log(Level::Info, format!("connecting to {} (mock)", server.name));
@@ -288,7 +286,7 @@ impl AppState {
         if needs_privileges {
             self.show_problem(&Problem::NeedsPrivileges);
         } else {
-            self.popup = Some(Popup::Error(error));
+            self.error_alert(error);
         }
     }
 
@@ -360,13 +358,13 @@ impl AppState {
             Level::Warning,
             format!("TUN: {}", text.lines().next().unwrap_or_default()),
         );
-        self.popup = Some(match problem {
-            Problem::NeedsPrivileges if cfg!(windows) => Popup::Confirm {
+        self.alert(match problem {
+            Problem::NeedsPrivileges if cfg!(windows) => Alert::Ask {
                 text,
-                kind: ConfirmKind::RestartElevated,
+                ask: Ask::RelaunchElevated,
             },
-            p if p.is_blocking() => Popup::Error(text),
-            _ => Popup::Notice(text),
+            p if p.is_blocking() => Alert::Error(text),
+            _ => Alert::Notice(text),
         });
     }
 
@@ -390,7 +388,7 @@ impl AppState {
     }
 
     /// The very first TUN start with nothing configured yet.
-    fn tun_first_run(&self) -> bool {
+    pub(super) fn tun_first_run(&self) -> bool {
         !self.config.ui.tun_intro_done
             && self.config.rules.is_empty()
             && self.config.presets.enabled == PresetsConfig::default().enabled
@@ -415,27 +413,12 @@ impl AppState {
         );
     }
 
-    /// The user said "no" to a question.
-    pub(super) fn decline(&mut self, kind: ConfirmKind) {
-        match kind {
-            ConfirmKind::PresetOffer(id) => {
-                self.config.ui.tun_intro_done = true;
-                self.save_config();
-                self.connect(id);
-            }
-            ConfirmKind::RestartElevated => {
-                self.status = Some("Без прав администратора режим TUN не запустить".into());
-            }
-            _ => {}
-        }
-    }
-
-    /// Windows: start elf-gate again with administrator rights, straight into TUN.
+    /// Windows: the process stops cleanly and starts again with administrator rights, straight
+    /// into TUN. (It must release the single-instance lock first, so the loop does the actual
+    /// launch after the shutdown.)
     pub(super) fn restart_elevated(&mut self) {
-        match platform::privileges().relaunch_elevated(&["--tun".to_string()]) {
-            Ok(()) => self.should_quit = true,
-            Err(e) => self.popup = Some(Popup::Error(e.to_string())),
-        }
+        self.relaunch_elevated = true;
+        self.should_exit = true;
     }
 
     // ---------- startup ----------
@@ -450,8 +433,8 @@ impl AppState {
 
     /// `--tun`: switch to TUN and connect to the server used last.
     pub fn start_tun_from_cli(&mut self) {
-        if !build_info::TUN_AVAILABLE {
-            self.status = Some("Режим TUN в этой версии недоступен".into());
+        if !crate::build_info::TUN_AVAILABLE {
+            self.status("Режим TUN в этой версии недоступен");
             return;
         }
         self.mode = Mode::Tun;
@@ -484,8 +467,7 @@ impl AppState {
         match found {
             Some(id) => self.connect(id),
             None => {
-                self.status =
-                    Some("Нет сервера для автоподключения: выберите сервер и нажмите Enter".into())
+                self.status("Нет сервера для автоподключения: выберите сервер и нажмите Enter")
             }
         }
     }

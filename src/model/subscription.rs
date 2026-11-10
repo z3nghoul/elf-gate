@@ -18,10 +18,12 @@ impl SubscriptionInfo {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Subscription {
     pub name: String,
     pub servers: Vec<Server>,
+    /// UI-only (the interface keeps it across updates); never part of the data.
+    #[serde(skip)]
     pub collapsed: bool,
     pub info: Option<SubscriptionInfo>,
     /// Unix time of the last successful update (`None` for manual servers and mock data).
