@@ -74,6 +74,16 @@ impl Engine {
             return;
         };
         let (tx, port) = (self.tx.clone(), self.config.core.socks_port);
+        if self.mock {
+            // Demo data have no tunnel: a plausible fake number, so the demo shows both.
+            let ms = 70 + (id % 9) as u32 * 11;
+            let _ = tx.send(BgEvent::ActiveLatency {
+                id,
+                ms: Some(ms),
+                samples: 3,
+            });
+            return;
+        }
         tokio::spawn(async move {
             let series =
                 crate::net::health::latency_series(port, crate::net::health::HEALTH_TIMEOUT).await;
