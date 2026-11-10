@@ -5,6 +5,7 @@ use crate::model::server::{Ping, Security, Server, Transport};
 use crate::model::subscription::Subscription;
 use crate::parser;
 use crate::storage::{Config, ServerEntry, Storage};
+use crate::xray::validate::{self, Verdict};
 use crate::xray::{self, process::Core};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
@@ -339,6 +340,7 @@ impl AppState {
                 }
             }
             BgEvent::CoreStopped => self.busy = false,
+            BgEvent::ServerRejected { id, reason } => self.mark_rejected(id, &reason),
             BgEvent::ConnectFailed { id, reason } => {
                 if self.conn == Conn::Connecting(id) {
                     self.conn = Conn::Error("не удалось подключиться".into());
@@ -607,11 +609,25 @@ impl AppState {
             if let Some(old) = old {
                 old.stop().await;
             }
-            let started = match xray::config::build(&server, &core_cfg) {
-                Ok(cfg) => Core::start(&core_cfg, &cfg, &run_dir, tx.clone())
-                    .await
-                    .map_err(|e| e.to_string()),
-                Err(e) => Err(e.to_string()),
+            // Ask Xray first, so a refused config is reported with Xray's own words
+            // and the server is greyed out.
+            let verdict = validate::check(&core_cfg, &server, &run_dir).await;
+            let started = match verdict {
+                Verdict::Rejected(reason) => {
+                    let _ = tx.send(BgEvent::ServerRejected {
+                        id,
+                        reason: reason.clone(),
+                    });
+                    Err(format!("Xray отверг конфиг сервера: {reason}"))
+                }
+                Verdict::Accepted | Verdict::Unavailable(_) => {
+                    match xray::config::build(&server, &core_cfg) {
+                        Ok(cfg) => Core::start(&core_cfg, &cfg, &run_dir, tx.clone())
+                            .await
+                            .map_err(|e| e.to_string()),
+                        Err(e) => Err(e.to_string()),
+                    }
+                }
             };
             let ev = match started {
                 Ok(core) => BgEvent::CoreStarted {
@@ -765,7 +781,72 @@ impl AppState {
         }
     }
 
-    fn submit_input(&mut self, text: String) {
+    /// Greys the server out and keeps Xray's error text for the details pane.
+    fn mark_rejected(&mut self, id: u64, reason: &str) {
+        let mut name = None;
+        for server in self
+            .subs
+            .iter_mut()
+            .flat_map(|s| s.servers.iter_mut())
+            .filter(|s| s.id == id)
+        {
+            server.unsupported = Some(format!("Xray отверг конфиг: {reason}"));
+            name = Some(server.name.clone());
+        }
+        if let Some(name) = name {
+            self.log(
+                Level::Warning,
+                format!("[Warning] {name}: Xray отверг конфиг: {reason}"),
+            );
+        }
+    }
+
+    /// Checks the given servers with `xray run -test` in the background, one after another.
+    fn spawn_checks(&self, servers: Vec<Server>) {
+        if servers.is_empty() {
+            return;
+        }
+        let tx = self.tx.clone();
+        let core_cfg = self.config.core.clone();
+        let run_dir = self.run_dir.clone();
+        tokio::spawn(async move {
+            for server in servers {
+                match validate::check(&core_cfg, &server, &run_dir).await {
+                    Verdict::Accepted => {}
+                    Verdict::Rejected(reason) => {
+                        let _ = tx.send(BgEvent::ServerRejected {
+                            id: server.id,
+                            reason,
+                        });
+                    }
+                    Verdict::Unavailable(why) => {
+                        // Not Xray's verdict on the server (e.g. no binary yet): skip the rest.
+                        let _ = tx.send(BgEvent::Log(LogLine {
+                            time: now_hms(),
+                            level: Level::Info,
+                            text: format!("server validation skipped: {why}"),
+                        }));
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    /// Validates every imported server that has a real link. Call once after the
+    /// run directory is set.
+    pub fn start_background_checks(&self) {
+        let servers: Vec<Server> = self
+            .subs
+            .iter()
+            .flat_map(|s| s.servers.iter())
+            .filter(|s| !s.link.is_empty() && s.is_supported())
+            .cloned()
+            .collect();
+        self.spawn_checks(servers);
+    }
+
+    pub(crate) fn submit_input(&mut self, text: String) {
         let text = text.trim().to_string();
         if text.starts_with("http://") || text.starts_with("https://") {
             // Real subscription import arrives in stage 6; for now add a mock group.
@@ -809,6 +890,9 @@ impl AppState {
             link: server.link.clone(),
         });
         let name = server.name.clone();
+        if server.is_supported() {
+            self.spawn_checks(vec![server.clone()]);
+        }
         match self.subs.iter_mut().find(|s| s.name == MANUAL_GROUP) {
             Some(sub) => sub.servers.push(server),
             None => self.subs.push(Subscription {
@@ -948,5 +1032,34 @@ mod tests {
         a.confirm(ConfirmKind::DeleteServer(id));
         assert!(a.config.servers.is_empty());
         assert!(a.subs.iter().all(|s| s.name != MANUAL_GROUP));
+    }
+
+    #[tokio::test]
+    async fn xray_rejection_greys_the_server_out_with_xrays_text() {
+        let mut a = app();
+        a.submit_input("vless://u@example.com:443?security=none#Dom".into());
+        let id = a.subs.last().unwrap().servers[0].id;
+        assert!(a.server_by_id(id).unwrap().is_supported());
+        a.on_bg(BgEvent::ServerRejected {
+            id,
+            reason: "vless without TLS is prohibited".into(),
+        });
+        let s = a.server_by_id(id).unwrap();
+        assert!(!s.is_supported());
+        assert!(s
+            .unsupported
+            .as_ref()
+            .unwrap()
+            .contains("vless without TLS is prohibited"));
+    }
+
+    #[tokio::test]
+    async fn greyed_out_server_cannot_be_connected() {
+        let mut a = app();
+        a.submit_input("vless://u@8.8.8.8:443?security=none#Pub".into());
+        a.selected = a.rows().len() - 1; // the manual server
+        a.activate_selected();
+        assert!(matches!(a.popup, Some(Popup::Error(_))));
+        assert_eq!(a.conn, Conn::Disconnected);
     }
 }

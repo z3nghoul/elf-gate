@@ -5,47 +5,23 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use url::Url;
 
-/// Suffixes of non-IP server addresses that Xray 26.x accepts for unencrypted VLESS.
-/// Found empirically with `xray run -test` (v26.11.9); the integration tests re-check
-/// this table against the installed Xray.
-const PRIVATE_DOMAIN_SUFFIXES: &[&str] = &[
-    "local",
-    "lan",
-    "internal",
-    "test",
-    "localhost",
-    "localdomain",
-    "home.arpa",
-    "example",
-    "invalid",
-];
-
-/// Does Xray allow VLESS without TLS/Reality and without `encryption` to this address?
-/// It only does for private IPs and private-looking names.
-pub fn xray_allows_plain_vless(address: &str) -> bool {
-    if let Ok(ip) = address.parse::<IpAddr>() {
-        return match ip {
-            IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
-            IpAddr::V6(v6) => {
-                let first = v6.segments()[0];
-                v6.is_loopback() || first & 0xfe00 == 0xfc00 || first & 0xffc0 == 0xfe80
-            }
-        };
+/// Does Xray 26.x refuse unencrypted VLESS to this *IP address*? It only accepts private
+/// ranges. Domains are deliberately not judged here: whether a name is acceptable is
+/// decided by Xray itself (`xray::validate`), not by a table of suffixes.
+/// The ranges were found with `xray run -test` (v26.11.9); an integration test re-checks them.
+pub fn plain_vless_blocked_for_ip(address: &str) -> bool {
+    match address.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => !(v4.is_loopback() || v4.is_private() || v4.is_link_local()),
+        Ok(IpAddr::V6(v6)) => {
+            let first = v6.segments()[0];
+            !(v6.is_loopback() || first & 0xfe00 == 0xfc00 || first & 0xffc0 == 0xfe80)
+        }
+        Err(_) => false,
     }
-    let name = address.to_ascii_lowercase();
-    if name.is_empty() || !name.is_ascii() {
-        return false;
-    }
-    if !name.contains('.') {
-        return true; // single-label name such as `vps1`
-    }
-    PRIVATE_DOMAIN_SUFFIXES
-        .iter()
-        .any(|suffix| name == *suffix || name.ends_with(&format!(".{suffix}")))
 }
 
 pub const PLAIN_VLESS_REASON: &str = "несовместим с текущим Xray: VLESS без шифрования \
-(security=none, encryption=none) на публичный адрес запрещён. Нужен TLS/Reality или encryption";
+(security=none, encryption=none) на публичный IP запрещён. Нужен TLS/Reality или encryption";
 
 /// `vless://uuid@host:port?params#name`
 pub fn parse(link: &str) -> Result<Server, ParseError> {
@@ -99,7 +75,7 @@ pub fn parse(link: &str) -> Result<Server, ParseError> {
     };
     if security == Security::None
         && encryption.eq_ignore_ascii_case("none")
-        && !xray_allows_plain_vless(&address)
+        && plain_vless_blocked_for_ip(&address)
     {
         unsupported.get_or_insert_with(|| PLAIN_VLESS_REASON.to_string());
     }
@@ -324,14 +300,8 @@ mod tests {
     }
 
     #[test]
-    fn plain_vless_to_public_address_is_marked_incompatible() {
-        for host in [
-            "8.8.8.8",
-            "example.com",
-            "de1.vpn.example.org",
-            "[2001:db8::1]",
-            "100.64.0.1",
-        ] {
+    fn plain_vless_to_public_ip_is_marked_incompatible() {
+        for host in ["8.8.8.8", "[2001:db8::1]", "100.64.0.1", "172.32.0.1"] {
             let s = parse_link(&format!(
                 "vless://{UUID}@{host}:443?security=none&encryption=none#p"
             ))
@@ -348,7 +318,22 @@ mod tests {
     }
 
     #[test]
-    fn plain_vless_to_private_address_is_fine() {
+    fn domains_are_left_to_xray_validation() {
+        // No suffix table: the parser never judges names, `xray run -test` does.
+        for host in [
+            "example.com",
+            "vps1",
+            "box.lan",
+            "de1.vpn.example.org",
+            "тест",
+        ] {
+            let s = parse_link(&format!("vless://{UUID}@{host}:443?security=none#d")).unwrap();
+            assert!(s.is_supported(), "{host}");
+        }
+    }
+
+    #[test]
+    fn plain_vless_to_private_ip_is_fine() {
         for host in [
             "10.0.0.5",
             "192.168.1.9",
@@ -356,9 +341,6 @@ mod tests {
             "127.0.0.1",
             "[::1]",
             "[fd00::1]",
-            "vps1",
-            "box.lan",
-            "x.home.arpa",
         ] {
             let s = parse_link(&format!("vless://{UUID}@{host}:443?security=none#p")).unwrap();
             assert!(s.is_supported(), "{host}");
@@ -374,31 +356,48 @@ mod tests {
     }
 
     #[test]
-    fn address_table() {
-        for (addr, ok) in [
-            ("127.0.0.1", true),
-            ("10.1.2.3", true),
-            ("172.16.0.1", true),
-            ("172.32.0.1", false),
-            ("192.168.1.1", true),
-            ("169.254.1.1", true),
-            ("100.64.0.1", false),
-            ("8.8.8.8", false),
-            ("::1", true),
-            ("fd00::1", true),
-            ("fe80::1", true),
-            ("2001:db8::1", false),
+    fn ip_table() {
+        for (addr, blocked) in [
+            ("127.0.0.1", false),
+            ("10.1.2.3", false),
+            ("172.16.0.1", false),
+            ("172.32.0.1", true),
+            ("192.168.1.1", false),
+            ("169.254.1.1", false),
+            ("100.64.0.1", true),
+            ("8.8.8.8", true),
+            ("::1", false),
+            ("fd00::1", false),
+            ("fe80::1", false),
+            ("2001:db8::1", true),
+            // Not IP addresses: never judged here.
             ("example.com", false),
-            ("localhost", true),
-            ("myserver", true),
-            ("foo.local", true),
-            ("foo.example", true),
-            ("foo.dev", false),
-            ("foo.corp", false),
+            ("localhost", false),
             ("", false),
-            ("тест", false),
         ] {
-            assert_eq!(xray_allows_plain_vless(addr), ok, "{addr}");
+            assert_eq!(plain_vless_blocked_for_ip(addr), blocked, "{addr}");
         }
+    }
+
+    #[test]
+    fn ws_and_grpc_are_deprecated_but_supported() {
+        for (ty, extra) in [("ws", ""), ("grpc", "&serviceName=s")] {
+            let s = parse_link(&format!(
+                "vless://{UUID}@h.example.com:443?security=tls&type={ty}{extra}#t"
+            ))
+            .unwrap();
+            assert!(s.is_supported());
+            assert!(s.deprecated_transport().unwrap().contains(ty));
+        }
+        for ty in ["tcp", "xhttp"] {
+            let s = parse_link(&format!(
+                "vless://{UUID}@h.example.com:443?security=tls&type={ty}#t"
+            ))
+            .unwrap();
+            assert!(s.deprecated_transport().is_none());
+        }
+        // Incompatible servers are not additionally tagged as deprecated.
+        let bad = parse_link(&format!("vless://{UUID}@8.8.8.8:443?type=ws#t")).unwrap();
+        assert!(!bad.is_supported() && bad.deprecated_transport().is_none());
     }
 }

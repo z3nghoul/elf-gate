@@ -4,8 +4,9 @@
 
 use super::config;
 use super::process::{Core, CoreError};
+use super::validate::{self, Verdict};
 use crate::parser::parse_link;
-use crate::parser::vless::xray_allows_plain_vless;
+use crate::parser::vless::plain_vless_blocked_for_ip;
 use crate::storage::CoreConfig;
 use serde_json::{json, Value};
 use std::net::TcpListener as StdListener;
@@ -210,9 +211,9 @@ fn plain_vless_to_public_address_is_rejected_by_xray_and_flagged_by_parser() {
     assert!(ok, "{out}");
 }
 
-/// The parser's address rule must agree with the installed Xray.
+/// The parser's IP rule must agree with the installed Xray (IPs only; names are Xray's call).
 #[test]
-fn address_rule_matches_installed_xray() {
+fn ip_rule_matches_installed_xray() {
     let xray = require_xray!();
     let tmp = TempDir::new("addr");
     for addr in [
@@ -228,21 +229,6 @@ fn address_rule_matches_installed_xray() {
         "fd00::1",
         "fe80::1",
         "2001:db8::1",
-        "example.com",
-        "localhost",
-        "myserver",
-        "foo.local",
-        "foo.lan",
-        "foo.internal",
-        "foo.test",
-        "foo.localdomain",
-        "foo.home.arpa",
-        "foo.example",
-        "foo.invalid",
-        "foo.dev",
-        "foo.corp",
-        "foo.intranet",
-        "foo.onion",
     ] {
         let cfg = json!({
             "inbounds": [],
@@ -258,10 +244,38 @@ fn address_rule_matches_installed_xray() {
         let (ok, out) = xray_test(&xray, &cfg, tmp.path(), "addr");
         assert_eq!(
             ok,
-            xray_allows_plain_vless(addr),
+            !plain_vless_blocked_for_ip(addr),
             "parser and Xray disagree on {addr}: {out}"
         );
     }
+}
+
+/// Domains are judged by Xray through `validate::check`, not by a table in our code.
+#[tokio::test]
+async fn xray_validation_decides_domains() {
+    let xray = require_xray!();
+    let tmp = TempDir::new("domains");
+    let core_cfg = CoreConfig {
+        xray_path: xray.to_string_lossy().into_owned(),
+        ..CoreConfig::default()
+    };
+    let check = |host: &str, query: &str| {
+        let server = parse_link(&format!("vless://{UUID}@{host}:443?{query}#d")).unwrap();
+        assert!(server.is_supported(), "the parser must not judge {host}");
+        let dir = tmp.path().to_path_buf();
+        let core_cfg = core_cfg.clone();
+        async move { validate::check(&core_cfg, &server, &dir).await }
+    };
+
+    match check("example.com", "security=none").await {
+        Verdict::Rejected(text) => assert!(text.contains("prohibited"), "{text}"),
+        other => panic!("example.com without TLS must be rejected, got {other:?}"),
+    }
+    assert_eq!(check("vps1", "security=none").await, Verdict::Accepted);
+    assert_eq!(
+        check("example.com", "security=tls").await,
+        Verdict::Accepted
+    );
 }
 
 // ---------------------------------------------------------------------------

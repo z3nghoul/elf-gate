@@ -43,9 +43,17 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                 } else {
                     (th.muted(), "n/a".to_string(), th.muted())
                 };
+                // Separate from incompatibility: the server works, but its transport is deprecated.
+                let tag = if s.deprecated_transport().is_some() {
+                    "[устар.]"
+                } else {
+                    ""
+                };
+                let name: String = s.name.chars().take(14).collect();
                 ListItem::new(Line::from(vec![
                     Span::styled(marker, th.good()),
-                    Span::styled(format!("{:<16}", s.name), name_style),
+                    Span::styled(format!("{name:<14}"), name_style),
+                    Span::styled(format!("{tag:<8}"), th.warn()),
                     Span::styled(format!("{ping_text:>8}"), ping_style),
                 ]))
             }

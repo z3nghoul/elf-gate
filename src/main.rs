@@ -69,6 +69,7 @@ async fn run(terminal: &mut Term, config: Config, storage: Storage) -> Result<()
     mock::spawn_log_generator(tx.clone());
     let mut app = AppState::with_config(tx, config, Some(storage))
         .with_run_dir(storage::state_dir().join("run"));
+    app.start_background_checks();
 
     while !app.should_quit {
         terminal.draw(|f| ui::render(f, &mut app))?;

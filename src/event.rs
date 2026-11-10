@@ -52,6 +52,11 @@ pub enum BgEvent {
     },
     /// A background stop finished; the core ports are free again.
     CoreStopped,
+    /// `xray run -test` refused the config generated for server `id`.
+    ServerRejected {
+        id: u64,
+        reason: String,
+    },
     ConnectFailed {
         id: u64,
         reason: String,

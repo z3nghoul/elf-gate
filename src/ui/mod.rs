@@ -118,4 +118,35 @@ mod tests {
             draw(MIN_WIDTH, MIN_HEIGHT, &mut app);
         }
     }
+
+    #[tokio::test]
+    async fn deprecated_and_rejected_servers_are_tagged() {
+        let (tx, _rx) = unbounded_channel();
+        let mut app = AppState::new(tx);
+        // Mock list: FI-1 uses ws, Финляндия-3 uses grpc.
+        let out = draw(MIN_WIDTH, MIN_HEIGHT, &mut app);
+        println!("{out}");
+        assert!(out.matches("[устар.]").count() >= 2, "{out}");
+
+        // Select a deprecated server: details explain it.
+        app.selected = 3; // main group header, DE-1, NL-2, FI-1
+        let out = draw(100, 30, &mut app);
+        assert!(out.contains("Устаревший транспорт ws"), "{out}");
+
+        // A server refused by Xray is greyed out and shows Xray's text.
+        app.submit_input("vless://u@example.com:443?security=none#Dom".into());
+        let id = app.subs.last().unwrap().servers[0].id;
+        app.handle_event(crate::event::Event::Bg(
+            crate::event::BgEvent::ServerRejected {
+                id,
+                reason: "vless without TLS or other encryption is prohibited".into(),
+            },
+        ));
+        app.selected = app.rows().len() - 1;
+        let out = draw(100, 30, &mut app);
+        println!("{out}");
+        assert!(out.contains("n/a"), "{out}");
+        assert!(out.contains("Xray отверг конфиг"), "{out}");
+        assert!(out.contains("prohibited"), "{out}");
+    }
 }

@@ -97,6 +97,25 @@ impl Server {
         self.unsupported.is_none()
     }
 
+    /// Explanation when the transport still works but Xray marks it deprecated.
+    /// This is separate from `unsupported` (incompatibility): such servers stay usable.
+    pub fn deprecated_transport(&self) -> Option<&'static str> {
+        if !self.is_supported() {
+            return None;
+        }
+        match self.transport {
+            Transport::Ws => Some(
+                "Устаревший транспорт ws: Xray помечает WebSocket как deprecated и может \
+                 убрать его. Рекомендуется XHTTP.",
+            ),
+            Transport::Grpc => Some(
+                "Устаревший транспорт grpc: Xray помечает gRPC как deprecated и может \
+                 убрать его. Рекомендуется XHTTP.",
+            ),
+            Transport::Tcp | Transport::Xhttp => None,
+        }
+    }
+
     /// `host:port`, with IPv6 addresses in brackets.
     pub fn host_port(&self) -> String {
         if self.address.contains(':') {

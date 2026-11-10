@@ -4,7 +4,7 @@ use crate::ui::statusbar::format_bytes;
 use crate::ui::theme::Theme;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Frame;
 
 fn field<'a>(label: &str, value: String, th: &Theme) -> Line<'a> {
@@ -34,6 +34,9 @@ fn server_lines<'a>(s: &Server, th: &Theme) -> Vec<Line<'a>> {
         th,
     ));
     lines.push(field("Транспорт:", s.transport.label().into(), th));
+    if let Some(note) = s.deprecated_transport() {
+        lines.push(Line::from(Span::styled(note, th.warn())));
+    }
     lines.push(field("Адрес:", s.host_port(), th));
     opt(&mut lines, "UUID:", &s.uuid, th);
     opt(&mut lines, "Flow:", &s.flow, th);
@@ -84,7 +87,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         ))],
     };
     f.render_widget(
-        Paragraph::new(lines).block(
+        Paragraph::new(lines).wrap(Wrap { trim: false }).block(
             Block::bordered()
                 .title(Span::styled(" Детали ", th.title()))
                 .border_style(th.border(focused)),
