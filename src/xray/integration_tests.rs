@@ -1022,3 +1022,56 @@ async fn traffic_moves_to_the_backup_when_the_primary_dies_and_returns_after_cle
     drop(primary_proc);
     core.stop().await;
 }
+
+/// Traffic through the core shows up in `xray api statsquery` under the `proxy` outbound.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn statsquery_counts_traffic_through_the_proxy_outbound() {
+    use super::stats;
+    let xray = require_xray!();
+    let tmp = TempDir::new("stats");
+    let server_port = free_port();
+    let _server = spawn_server(
+        &xray,
+        &local_vless_server_config(server_port, &tmp.path().join("s.log")),
+        tmp.path(),
+    );
+    assert!(wait_port(server_port, true, 10).await);
+    let http = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let http_port = http.local_addr().unwrap().port();
+    tokio::spawn(serve_http(http));
+
+    let server = parse_link(&format!(
+        "vless://{UUID}@127.0.0.1:{server_port}?security=none&type=tcp#local"
+    ))
+    .unwrap();
+    let core_cfg = CoreConfig {
+        xray_path: xray.display().to_string(),
+        socks_port: free_port(),
+        http_port: free_port(),
+        api_port: free_port(),
+        ..CoreConfig::default()
+    };
+    let mut cfg = config::build(&server, &core_cfg).unwrap();
+    // Keep only the api rule: the loopback target must go through the VLESS chain.
+    cfg["routing"]["rules"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|r| r.get("inboundTag").is_some());
+    let (tx, _rx) = unbounded_channel();
+    let core = Core::start(&core_cfg, &cfg, &tmp.path().join("run"), tx)
+        .await
+        .unwrap();
+    let body = timeout(
+        Duration::from_secs(10),
+        socks_get(core_cfg.socks_port, http_port),
+    )
+    .await
+    .unwrap();
+    assert!(body.contains("elf-gate-chain-ok"));
+    let c = stats::query(&xray, core_cfg.api_port)
+        .await
+        .expect("statsquery output");
+    // (The uplink counter of a short request can still read 0 when it is queried.)
+    assert!(c.proxy_down > 0 && c.direct_down == 0, "{c:?}");
+    core.stop().await;
+}

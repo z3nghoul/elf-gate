@@ -92,15 +92,19 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     if app.proxy_active {
         spans.push(Span::styled(" sys-proxy", th.good()));
     }
-    // Real traffic statistics arrive in stage 8; until then only the demo build shows numbers.
-    if app.mock {
+    if matches!(app.conn, Conn::Connected(_)) || app.mock {
+        let t = &app.traffic;
         spans.extend([
             sep.clone(),
             Span::styled(
                 format!(
-                    "up {}  down {}",
-                    format_bytes(app.traffic.proxy_up + app.traffic.direct_up),
-                    format_bytes(app.traffic.proxy_down + app.traffic.direct_down)
+                    "↑{}/s ↓{}/s | VPN {}↑ {}↓ | напрямую {}↑ {}↓",
+                    format_bytes(t.speed_up),
+                    format_bytes(t.speed_down),
+                    format_bytes(t.proxy_up),
+                    format_bytes(t.proxy_down),
+                    format_bytes(t.direct_up),
+                    format_bytes(t.direct_down),
                 ),
                 th.text(),
             ),

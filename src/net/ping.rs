@@ -59,6 +59,7 @@ pub async fn url_probe(
         socks_port: socks,
         http_port: http,
         log_level: "none".into(),
+        api_port: 0,
         ..core.clone()
     };
     let cfg = config::build_with(server, &probe_core, &Plan::proxy_default())

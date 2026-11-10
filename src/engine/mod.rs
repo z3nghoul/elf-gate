@@ -128,6 +128,9 @@ pub struct Engine {
     /// When a subscription's update last failed (not retried for ten minutes).
     failed_at: HashMap<String, Instant>,
     autostart_on: bool,
+    /// Polls the core's traffic counters while it runs.
+    stats_task: Option<tokio::task::JoinHandle<()>>,
+    last_counters: Option<(crate::xray::stats::Counters, Instant)>,
     next_id: u64,
     tx: BgTx,
     rng: Lcg,
@@ -238,6 +241,8 @@ impl Engine {
             last_auto_check: None,
             failed_at: HashMap::new(),
             autostart_on: false,
+            stats_task: None,
+            last_counters: None,
             next_id,
             tx,
             rng: Lcg::from_clock(),
@@ -585,6 +590,7 @@ impl Engine {
                     self.error_alert(reason);
                 }
             }
+            BgEvent::Stats(c) => self.on_stats(c),
             BgEvent::FpSuspect { id } => self.on_fp_suspect(id),
             BgEvent::FpSearched {
                 id,
@@ -663,6 +669,7 @@ impl Engine {
     }
 
     pub fn disconnect(&mut self) {
+        self.stop_stats();
         if self.conn == Conn::Disconnected {
             return;
         }
@@ -681,6 +688,7 @@ impl Engine {
         let Some(core) = &mut self.core else { return };
         let Some(info) = core.try_exit() else { return };
         self.core = None;
+        self.stop_stats();
         self.tun_active = false;
         if let Some(store) = &self.state_store {
             crate::tun::mark_down(store);
@@ -721,6 +729,63 @@ impl Engine {
         if let Conn::Connected(id) | Conn::Connecting(id) = self.conn {
             self.connect(id);
         }
+    }
+
+    // ---------- statistics ----------
+
+    pub(crate) fn stop_stats(&mut self) {
+        if let Some(t) = self.stats_task.take() {
+            t.abort();
+        }
+        self.last_counters = None;
+    }
+
+    /// Starts reading the core's counters once a second.
+    pub(crate) fn start_stats(&mut self) {
+        self.stop_stats();
+        self.traffic = Traffic::default();
+        if self.mock || self.config.core.api_port == 0 {
+            return;
+        }
+        let Ok(binary) = crate::xray::process::resolve_binary(&self.config.core.xray_path) else {
+            return;
+        };
+        let (tx, port) = (self.tx.clone(), self.config.core.api_port);
+        self.stats_task = Some(tokio::spawn(async move {
+            let mut every = tokio::time::interval(Duration::from_secs(1));
+            every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                every.tick().await;
+                if let Some(c) = crate::xray::stats::query(&binary, port).await {
+                    if tx.send(BgEvent::Stats(c)).is_err() {
+                        return;
+                    }
+                }
+            }
+        }));
+    }
+
+    fn on_stats(&mut self, c: crate::xray::stats::Counters) {
+        let now = Instant::now();
+        let (mut up, mut down) = (0, 0);
+        if let Some((prev, at)) = &self.last_counters {
+            let secs = now.duration_since(*at).as_secs_f64().max(0.001);
+            let delta = |a: u64, b: u64| (a.saturating_sub(b) as f64 / secs) as u64;
+            up = delta(c.proxy_up + c.direct_up, prev.proxy_up + prev.direct_up);
+            down = delta(
+                c.proxy_down + c.direct_down,
+                prev.proxy_down + prev.direct_down,
+            );
+        }
+        self.last_counters = Some((c, now));
+        self.traffic = Traffic {
+            proxy_up: c.proxy_up,
+            proxy_down: c.proxy_down,
+            direct_up: c.direct_up,
+            direct_down: c.direct_down,
+            speed_up: up,
+            speed_down: down,
+        };
     }
 
     // ---------- adding and removing ----------

@@ -271,6 +271,7 @@ impl Engine {
             ),
         );
         self.remember_server(id);
+        self.start_stats();
         self.spawn_health(id);
     }
 

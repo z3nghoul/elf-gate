@@ -40,6 +40,8 @@ pub enum BgEvent {
         id: u64,
         result: Ping,
     },
+    /// Cumulative traffic counters of the running core.
+    Stats(crate::xray::stats::Counters),
     /// A URL ping failed although the server answers over TCP: another fingerprint may help.
     FpSuspect {
         id: u64,

@@ -3,6 +3,12 @@ source: src/xray/config.rs
 expression: cfg
 ---
 {
+  "api": {
+    "services": [
+      "StatsService"
+    ],
+    "tag": "api"
+  },
   "dns": {
     "queryStrategy": "UseIP",
     "servers": [
@@ -85,6 +91,15 @@ expression: cfg
         "enabled": true
       },
       "tag": "tun-in"
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1"
+      },
+      "tag": "api"
     }
   ],
   "log": {
@@ -133,9 +148,22 @@ expression: cfg
       "tag": "dns-out"
     }
   ],
+  "policy": {
+    "system": {
+      "statsOutboundDownlink": true,
+      "statsOutboundUplink": true
+    }
+  },
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
+      {
+        "inboundTag": [
+          "api"
+        ],
+        "outboundTag": "api",
+        "type": "field"
+      },
       {
         "inboundTag": [
           "tun-in"
@@ -189,5 +217,6 @@ expression: cfg
         "type": "field"
       }
     ]
-  }
+  },
+  "stats": {}
 }
