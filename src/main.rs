@@ -111,6 +111,13 @@ async fn run(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let first_arg = std::env::args().nth(1);
+    if first_arg.as_deref() == Some("--supervise") {
+        // Hidden mode: a tiny process that keeps a privileged core tied to elf-gate
+        // (the kernel drops the parent-death signal for binaries with capabilities).
+        let rest: Vec<String> = std::env::args().skip(2).collect();
+        std::process::exit(platform::run_supervisor(&rest));
+    }
     if std::env::args()
         .skip(1)
         .any(|a| a == "--version" || a == "-V")

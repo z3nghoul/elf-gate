@@ -8,6 +8,21 @@ class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 class TS(socketserver.ThreadingMixIn, http.server.HTTPServer): daemon_threads = True; allow_reuse_address = True
 threading.Thread(target=TS((HOST, 8080), H).serve_forever, daemon=True).start()
+
+
+class H204(http.server.BaseHTTPRequestHandler):
+    """connectivitycheck.gstatic.com/generate_204 stand-in for elf-gate's connection check."""
+
+    def do_GET(self):
+        self.send_response(204); self.end_headers()
+
+    def log_message(self, *a): pass
+
+
+try:
+    threading.Thread(target=TS((HOST, 80), H204).serve_forever, daemon=True).start()
+except OSError:
+    pass
 def echo(port):
     u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); u.bind((HOST, port))
     while True:

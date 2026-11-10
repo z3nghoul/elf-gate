@@ -83,3 +83,74 @@ curl   TCP : FAIL
 python TCP : peer=10.0.0.1
 socat  UDP : 
 python UDP : udp size=100 sent=3 lost=0 peer=10.0.0.1:44263 rtt_ms p50=6.48 max=8.64
+
+################ 06-dns-routing (DNS by domain through the tunnel)
+
+===== mode: include (listed domain: discord.test) =====
+discord.test -> 7.7.7.7   (7.7.7.7 = tunnel DNS answer, 198.51.100.2 = local upstream answer)
+other.test   -> 198.51.100.2
+  local upstream (203.0.113.53) was asked: query other.test from 10.0.0.1;
+  tunnel DNS     (203.0.113.54) was asked: query discord.test from 203.0.113.54;
+  (10.0.0.1 = asked directly from this machine; any other source = came out of the VPN server)
+
+===== mode: exclude (listed domain: discord.test) =====
+discord.test -> 198.51.100.2   (7.7.7.7 = tunnel DNS answer, 198.51.100.2 = local upstream answer)
+other.test   -> 7.7.7.7
+  local upstream (203.0.113.53) was asked: query discord.test from 10.0.0.1;
+  tunnel DNS     (203.0.113.54) was asked: query other.test from 203.0.113.54;
+  (10.0.0.1 = asked directly from this machine; any other source = came out of the VPN server)
+
+################ 07-elfgate-e2e (the real elf-gate binary)
+=== A. include mode: process rule curl -> VPN, everything else direct ===
+PASS  [include] elf-gate --tun connects
+PASS  [include] TUN interface elfgate0 is up
+PASS  [include] curl goes through the VPN
+PASS  [include] python goes direct
+PASS  [include] connection check passed
+PASS  [include] xray is running
+PASS  [include] state.json records the TUN
+PASS  [include] system proxy was not touched in TUN mode
+PASS  [include] quit stops everything
+PASS  [include] interface gone after quit
+PASS  [include] xray gone after quit
+PASS  [include] state.json cleared
+PASS  [include] routes cleaned up
+
+=== B. exclude mode: process rule python -> direct, everything else VPN ===
+PASS  [exclude] elf-gate --tun connects
+PASS  [exclude] TUN interface elfgate0 is up
+PASS  [exclude] curl goes through the VPN
+PASS  [exclude] python goes direct
+PASS  [exclude] quit
+PASS  [exclude] interface gone
+
+=== C. DNS by domain: listed domain through the tunnel, others as before ===
+PASS  [dns] elf-gate --tun connects
+PASS  [dns] TUN interface elfgate0 is up
+PASS  [dns] discord.test resolves through the tunnel (tunnel resolver answers 7.7.7.7)
+PASS  [dns] other.test resolves locally as before (local upstream answers 198.51.100.2)
+PASS  [dns] the local upstream was asked directly from this machine, only for the other name
+PASS  [dns] the tunnel resolver saw only the listed name, from the VPN side
+PASS  [dns] quit
+
+=== D. kill -9 of elf-gate leaves no tunnel behind ===
+PASS  [kill] elf-gate --tun connects
+PASS  [kill] TUN interface elfgate0 is up
+PASS  [kill] xray runs before the kill
+PASS  [kill] the core dies with elf-gate
+PASS  [kill] TUN interface gone
+PASS  [kill] routes gone and direct internet works
+
+=== E. the next start cleans up what the crash left in state.json ===
+PASS  [restart] state.json still names the dead run
+PASS  [restart] startup reports the cleanup
+PASS  [restart] state.json cleared
+
+=== F. the capability supervisor stops the core when its parent is killed ===
+PASS  [supervisor] the tunnel comes up
+PASS  [supervisor] the core runs under the supervisor
+PASS  [supervisor] a supervisor process exists
+PASS  [supervisor] killing the parent stops the core
+PASS  [supervisor] and the tunnel is gone
+
+0 failure(s)

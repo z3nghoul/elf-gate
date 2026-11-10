@@ -101,6 +101,11 @@ impl TunHost for Host {
     }
 
     fn trusted_binary(&self, path: &Path) -> Result<(), String> {
+        // Lab hook, debug builds only: inside a user namespace the real root is unmapped, so
+        // "owned by root" cannot hold. Release builds have no such switch.
+        if cfg!(debug_assertions) && std::env::var_os("ELF_GATE_LAB_TRUST_ALL").is_some() {
+            return Ok(());
+        }
         let real: PathBuf =
             fs::canonicalize(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let meta = fs::metadata(&real).map_err(|e| format!("{}: {e}", real.display()))?;
