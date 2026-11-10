@@ -1,12 +1,57 @@
 //! Pinging servers and the automatic TLS fingerprint search.
 
 use super::*;
+use crate::model::server::Security;
 use crate::net::ping;
 use crate::storage::PingMode;
 use crate::xray::process::resolve_binary;
 
-impl AppState {
+impl Engine {
     pub(super) fn ping_all(&mut self) {
+        self.last_auto_ping = Some(Instant::now());
+        self.ping_servers(true);
+    }
+
+    /// The background refresh: TCP pings without the "..." flicker, every
+    /// `[ping].auto_interval_secs` (stretched while no interface is open). For the live
+    /// connection the latency through the tunnel is measured instead.
+    pub(super) fn auto_ping_tick(&mut self) {
+        let base = self.config.ping.auto_interval_secs;
+        if base == 0 || self.subs.is_empty() {
+            return;
+        }
+        // Nobody is looking: five times slower, at most every five minutes.
+        let watched = self.hub.view_receivers() > usize::from(self.tray);
+        let every = if watched {
+            base
+        } else {
+            (base * 5).min(300).max(base)
+        };
+        if self
+            .last_auto_ping
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(every))
+        {
+            return;
+        }
+        self.last_auto_ping = Some(Instant::now());
+        self.ping_servers(false);
+        if let Conn::Connected(id) = self.conn {
+            let (tx, port) = (self.tx.clone(), self.config.core.socks_port);
+            tokio::spawn(async move {
+                if let Ok(d) =
+                    crate::net::health::check(port, crate::net::health::HEALTH_TIMEOUT).await
+                {
+                    let _ = tx.send(BgEvent::ActiveLatency {
+                        id,
+                        ms: d.as_millis().min(u128::from(u32::MAX)) as u32,
+                    });
+                }
+            });
+        }
+    }
+
+    /// `manual`: marks servers as pending and also drives the demo pings.
+    fn ping_servers(&mut self, manual: bool) {
         let real: Vec<Server> = self
             .subs
             .iter()
@@ -14,7 +59,7 @@ impl AppState {
             .filter(|s| s.is_supported() && !s.link.is_empty())
             .cloned()
             .collect();
-        if self.mock {
+        if self.mock && manual {
             for sub in &mut self.subs {
                 for s in sub
                     .servers
@@ -28,7 +73,7 @@ impl AppState {
         }
         if real.is_empty() {
             if !self.mock {
-                self.status = Some("Нет серверов для пинга".into());
+                self.status("Нет серверов для пинга");
             }
             return;
         }
@@ -38,13 +83,13 @@ impl AppState {
         let mut mode = self.config.ping.mode;
         if mode == PingMode::Url && tun_up {
             mode = PingMode::Tcp;
-            self.status = Some("В режиме TUN пинг по URL недоступен, измерен TCP-пинг".into());
+            self.status("В режиме TUN пинг по URL недоступен, измерен TCP-пинг");
         }
         let binary = if mode == PingMode::Url {
             match resolve_binary(&self.config.core.xray_path) {
                 Ok(b) => Some(b),
                 Err(e) => {
-                    self.status = Some(format!("Пинг по URL: {e}"));
+                    self.status(format!("Пинг по URL: {e}"));
                     return;
                 }
             }
@@ -53,7 +98,9 @@ impl AppState {
         };
         let limit = Duration::from_millis(self.config.ping.timeout_ms.max(500));
         for server in real {
-            self.set_ping(server.id, Ping::Pending);
+            if manual {
+                self.set_ping(server.id, Ping::Pending);
+            }
             let tx = self.tx.clone();
             let core = self.config.core.clone();
             let cfg = self.config.ping.clone();
@@ -192,7 +239,7 @@ impl AppState {
                     Level::Info,
                     format!("{name}: fp подобран автоматически: {fp}"),
                 );
-                self.status = Some(format!("{name}: подобран fp={fp}"));
+                self.status(format!("{name}: подобран fp={fp}"));
             }
             None => {
                 self.log(
@@ -201,7 +248,7 @@ impl AppState {
                         "[Warning] {name}: ни один fp не помог. Проверьте ключ, SNI, shortId и порт на сервере"
                     ),
                 );
-                self.status = Some(format!("{name}: подобрать fp не удалось"));
+                self.status(format!("{name}: подобрать fp не удалось"));
             }
         }
         let current = found.clone();
@@ -254,10 +301,10 @@ mod tests {
     const REALITY: &str =
         "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R1";
 
-    fn app() -> (AppState, u64) {
+    fn app() -> (Engine, u64) {
         let (tx, _rx) = unbounded_channel();
-        let mut a = AppState::build(tx, Config::default(), None, false);
-        a.submit_input(REALITY.into());
+        let mut a = Engine::build(tx, Config::default(), None, false);
+        a.add_link(REALITY.into());
         let id = a.subs[0].servers[0].id;
         (a, id)
     }
@@ -299,7 +346,7 @@ mod tests {
         a.on_fp_searched(id, Some("Xray 1".into()), None, false);
         assert_eq!(a.server_by_id(id).unwrap().fp_override, None);
         assert_eq!(a.stored_search_version(id).as_deref(), Some("Xray 1"));
-        assert!(a.status.as_deref().unwrap().contains("не удалось"));
+        assert!(a.last_status().unwrap().as_str().contains("не удалось"));
         // A skipped run changes nothing.
         let before = a.config.overrides.clone();
         a.on_fp_searched(id, Some("Xray 1".into()), None, true);
@@ -316,8 +363,8 @@ mod tests {
             }
         });
         let (tx, mut rx) = unbounded_channel();
-        let mut a = AppState::build(tx, Config::default(), None, false);
-        a.submit_input(format!("vless://u@127.0.0.1:{port}?security=none#Local"));
+        let mut a = Engine::build(tx, Config::default(), None, false);
+        a.add_link(format!("vless://u@127.0.0.1:{port}?security=none#Local"));
         let id = a.subs[0].servers[0].id;
         a.ping_all();
         assert_eq!(a.server_by_id(id).unwrap().ping, Ping::Pending);
@@ -330,5 +377,47 @@ mod tests {
             a.on_bg(ev);
         }
         assert!(matches!(a.server_by_id(id).unwrap().ping, Ping::Ms(_)));
+    }
+
+    #[tokio::test]
+    async fn the_background_refresh_respects_the_interval_and_can_be_switched_off() {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            loop {
+                let _ = l.accept().await;
+            }
+        });
+        let (tx, mut rx) = unbounded_channel();
+        let mut a = Engine::build(tx, Config::default(), None, false);
+        a.add_link(format!("vless://u@127.0.0.1:{port}?security=none#L"));
+        let id = a.subs[0].servers[0].id;
+
+        a.config.ping.auto_interval_secs = 0;
+        a.auto_ping_tick();
+        assert_eq!(
+            a.server_by_id(id).unwrap().ping,
+            Ping::Unknown,
+            "off means off"
+        );
+
+        a.config.ping.auto_interval_secs = 60;
+        a.auto_ping_tick();
+        assert_eq!(
+            a.server_by_id(id).unwrap().ping,
+            Ping::Unknown,
+            "the refresh does not flash the pending marker"
+        );
+        while a.server_by_id(id).unwrap().ping_at.is_none() {
+            let ev = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            a.on_bg(ev);
+        }
+        assert!(matches!(a.server_by_id(id).unwrap().ping, Ping::Ms(_)));
+        let again = a.last_auto_ping;
+        a.auto_ping_tick();
+        assert_eq!(a.last_auto_ping, again, "not due yet");
     }
 }

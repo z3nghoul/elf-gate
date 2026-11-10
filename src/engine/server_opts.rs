@@ -4,17 +4,7 @@
 use super::*;
 use crate::model::server::ServerRole;
 
-impl AppState {
-    /// `(group, override key)` of a server.
-    fn server_key_of(&self, id: u64) -> Option<(String, String)> {
-        self.subs.iter().find_map(|sub| {
-            sub.servers
-                .iter()
-                .find(|s| s.id == id)
-                .map(|s| (sub.name.clone(), override_key(&sub.name, s)))
-        })
-    }
-
+impl Engine {
     /// The server that backs `primary_id` up, if `primary_id` is the primary.
     pub(super) fn backup_for(&self, primary_id: u64) -> Option<Server> {
         let primary = self.server_by_id(primary_id)?;
@@ -28,43 +18,16 @@ impl AppState {
             .cloned()
     }
 
-    pub(super) fn open_role_menu(&mut self) {
-        let Some(server) = self.selected_server() else {
-            self.status = Some("Выберите сервер (не группу)".into());
-            return;
-        };
-        if !server.is_supported() {
-            self.status = Some("Роль можно назначить только поддерживаемому серверу".into());
-            return;
-        }
-        let selected = match server.role {
-            None => 0,
-            Some(ServerRole::Primary) => 1,
-            Some(ServerRole::Backup) => 2,
-        };
-        self.popup = Some(Popup::Select {
-            title: format!("Роль сервера: {}", server.name),
-            options: vec![
-                "нет".into(),
-                "основной (всегда первым)".into(),
-                "запасной (если основной недоступен)".into(),
-            ],
-            selected,
-            kind: SelectKind::Role(server.id),
-        });
-    }
-
-    /// `index`: 0 none, 1 primary, 2 backup. There is at most one server per role.
-    pub(super) fn set_role(&mut self, id: u64, index: usize) {
-        let role = match index {
-            1 => Some(ServerRole::Primary),
-            2 => Some(ServerRole::Backup),
-            _ => None,
-        };
+    /// There is at most one server per role: the previous holder of it loses it.
+    pub(crate) fn set_role(&mut self, id: u64, role: Option<ServerRole>) {
         let Some((_, key)) = self.server_key_of(id) else {
             return;
         };
-        // One primary and one backup at most: the previous holder of the role loses it.
+        let supported = self.server_by_id(id).is_some_and(Server::is_supported);
+        if !supported {
+            self.status("Роль можно назначить только поддерживаемому серверу");
+            return;
+        }
         let mut displaced = Vec::new();
         if let Some(r) = role {
             for (group, server) in self
@@ -100,23 +63,21 @@ impl AppState {
         self.restart_if_affected(id);
     }
 
-    pub(super) fn toggle_fragment(&mut self) {
-        let Some(server) = self.selected_server() else {
-            self.status = Some("Выберите сервер (не группу)".into());
-            return;
-        };
-        if !server.is_supported() || !matches!(server.security, Security::Tls | Security::Reality) {
-            self.status = Some("Фрагментация применима только к серверам с TLS или Reality".into());
-            return;
-        }
-        let (id, on) = (server.id, !server.fragment);
-        self.set_fragment(id, on);
-    }
-
-    pub(super) fn set_fragment(&mut self, id: u64, on: bool) {
+    pub(crate) fn set_fragment(&mut self, id: u64, on: bool) {
         let Some((_, key)) = self.server_key_of(id) else {
             return;
         };
+        let applicable = self.server_by_id(id).is_some_and(|s| {
+            s.is_supported()
+                && matches!(
+                    s.security,
+                    crate::model::server::Security::Tls | crate::model::server::Security::Reality
+                )
+        });
+        if !applicable {
+            self.status("Фрагментация применима только к серверам с TLS или Reality");
+            return;
+        }
         let mut name = String::new();
         for server in self
             .subs
@@ -154,7 +115,7 @@ impl AppState {
             return;
         }
         if self.busy {
-            self.status = Some("Изменение применится при следующем подключении".into());
+            self.status("Изменение применится при следующем подключении");
         } else {
             self.connect(c);
         }
@@ -169,7 +130,7 @@ mod tests {
     const REALITY: &str =
         "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R";
 
-    fn app_with(links: &[&str]) -> (AppState, Vec<u64>) {
+    fn app_with(links: &[&str]) -> (Engine, Vec<u64>) {
         let dir = std::env::temp_dir().join(format!(
             "elf-gate-opts-{}-{}",
             std::process::id(),
@@ -177,9 +138,9 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         let (tx, _rx) = unbounded_channel();
-        let mut a = AppState::build(tx, Config::default(), Some(Storage::new(dir)), false);
+        let mut a = Engine::build(tx, Config::default(), Some(Storage::new(dir)), false);
         for l in links {
-            a.submit_input((*l).into());
+            a.add_link((*l).into());
         }
         let ids = a.subs[0].servers.iter().map(|s| s.id).collect();
         (a, ids)
@@ -193,8 +154,8 @@ mod tests {
                 .replace("#R", "#R2")
                 .replace("h.example", "h2.example"),
         ]);
-        a.set_role(ids[0], 1);
-        a.set_role(ids[1], 1);
+        a.set_role(ids[0], Some(ServerRole::Primary));
+        a.set_role(ids[1], Some(ServerRole::Primary));
         assert_eq!(
             a.server_by_id(ids[0]).unwrap().role,
             None,
@@ -214,7 +175,7 @@ mod tests {
             "and so does config.toml"
         );
         // Clearing removes the entry completely.
-        a.set_role(ids[1], 0);
+        a.set_role(ids[1], None);
         assert!(a.config.overrides.is_empty());
     }
 
@@ -226,8 +187,8 @@ mod tests {
                 .replace("#R", "#R2")
                 .replace("h.example", "h2.example"),
         ]);
-        a.set_role(ids[0], 1);
-        a.set_role(ids[1], 2);
+        a.set_role(ids[0], Some(ServerRole::Primary));
+        a.set_role(ids[1], Some(ServerRole::Backup));
         assert_eq!(a.backup_for(ids[0]).unwrap().id, ids[1]);
         assert!(
             a.backup_for(ids[1]).is_none(),
@@ -238,7 +199,7 @@ mod tests {
     #[tokio::test]
     async fn roles_and_fragmentation_survive_a_restart_and_leave_the_link_alone() {
         let (mut a, ids) = app_with(&[REALITY]);
-        a.set_role(ids[0], 2);
+        a.set_role(ids[0], Some(ServerRole::Backup));
         a.set_fragment(ids[0], true);
         let storage = a.storage.clone().unwrap();
         let text = std::fs::read_to_string(storage.config_path()).unwrap();
@@ -249,7 +210,7 @@ mod tests {
         assert_eq!(a.config.servers[0].link, REALITY);
 
         let (tx, _rx) = unbounded_channel();
-        let b = AppState::build(tx, storage.load().unwrap(), Some(storage), false);
+        let b = Engine::build(tx, storage.load().unwrap(), Some(storage), false);
         let s = &b.subs[0].servers[0];
         assert_eq!(s.role, Some(ServerRole::Backup));
         assert!(s.fragment);
@@ -258,8 +219,12 @@ mod tests {
     #[tokio::test]
     async fn fragmentation_is_for_tls_and_reality_only() {
         let (mut a, _) = app_with(&["vless://u@10.0.0.5:443?security=none#Plain"]);
-        a.selected = 1;
-        a.toggle_fragment();
-        assert!(a.status.as_deref().unwrap().contains("TLS или Reality"));
+        let id = a.subs[0].servers[0].id;
+        a.set_fragment(id, true);
+        assert!(a
+            .last_status()
+            .unwrap()
+            .as_str()
+            .contains("TLS или Reality"));
     }
 }

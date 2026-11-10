@@ -30,7 +30,7 @@ fn host_of(url: &str) -> String {
         .unwrap_or_else(|| "subscription".into())
 }
 
-impl AppState {
+impl Engine {
     /// Groups for `[[subscriptions]]`, filled from the cache; call from `build`.
     pub(super) fn subscription_groups(
         config: &Config,
@@ -89,7 +89,7 @@ impl AppState {
     /// `u`: update every subscription now.
     pub(super) fn update_subscriptions(&mut self) {
         if self.config.subscriptions.is_empty() {
-            self.status = Some("Нет подписок: добавьте ссылку на подписку клавишей a".into());
+            self.status("Нет подписок: добавьте ссылку на подписку клавишей a");
             return;
         }
         let names: Vec<String> = self
@@ -99,10 +99,10 @@ impl AppState {
             .map(|s| s.name.clone())
             .collect();
         let started = names.into_iter().filter(|n| self.spawn_update(n)).count();
-        self.status = Some(if started > 0 {
-            "Обновление подписок...".into()
+        self.status(if started > 0 {
+            "Обновление подписок..."
         } else {
-            "Обновление уже идёт".into()
+            "Обновление уже идёт"
         });
     }
 
@@ -177,7 +177,7 @@ impl AppState {
                     Level::Warning,
                     format!("[Warning] подписка «{name}» не обновлена: {e}"),
                 );
-                self.status = Some(format!("Подписка «{name}»: {e}"));
+                self.status(format!("Подписка «{name}»: {e}"));
             }
             Ok(update) => {
                 self.failed_at.remove(&name);
@@ -232,9 +232,8 @@ impl AppState {
                 }
             ),
         );
-        self.status = Some(format!("Подписка «{name}»: {count} серверов"));
+        self.status(format!("Подписка «{name}»: {count} серверов"));
         self.save_subscription_cache();
-        self.clamp_selection();
         // Only servers whose config changed cost a real `xray run -test`: the cache knows the rest.
         let to_check: Vec<Server> = self.subs[gi]
             .servers
@@ -248,14 +247,14 @@ impl AppState {
     /// `a` with an http(s) link: download first, add the subscription only if it works.
     pub(super) fn add_subscription_url(&mut self, url: String) {
         if self.config.subscriptions.iter().any(|s| s.url == url) {
-            self.popup = Some(Popup::Error("Эта подписка уже добавлена".into()));
+            self.error_alert("Эта подписка уже добавлена");
             return;
         }
         if url::Url::parse(&url).is_err() {
-            self.popup = Some(Popup::Error("Некорректный адрес подписки".into()));
+            self.error_alert("Некорректный адрес подписки");
             return;
         }
-        self.status = Some("Загрузка подписки...".into());
+        self.status("Загрузка подписки...");
         let tx = self.tx.clone();
         let user_agent = fetch::DEFAULT_USER_AGENT.to_string();
         tokio::spawn(async move {
@@ -281,7 +280,7 @@ impl AppState {
                     Level::Warning,
                     format!("[Warning] подписка не добавлена: {e}"),
                 );
-                self.popup = Some(Popup::Error(format!("Подписку не удалось загрузить:\n{e}")));
+                self.error_alert(format!("Подписку не удалось загрузить:\n{e}"));
                 return;
             }
         };
@@ -342,9 +341,9 @@ mod tests {
         })
     }
 
-    fn app_in(dir: &std::path::Path) -> AppState {
+    fn app_in(dir: &std::path::Path) -> Engine {
         let (tx, _rx) = unbounded_channel();
-        AppState::build(tx, Config::default(), Some(Storage::new(dir)), false)
+        Engine::build(tx, Config::default(), Some(Storage::new(dir)), false)
     }
 
     fn dir(tag: &str) -> PathBuf {
@@ -372,7 +371,7 @@ mod tests {
         // A fresh start has the same list without any network.
         let storage = Storage::new(&d);
         let (tx, _rx) = unbounded_channel();
-        let b = AppState::build(tx, storage.load().unwrap(), Some(storage), false);
+        let b = Engine::build(tx, storage.load().unwrap(), Some(storage), false);
         assert_eq!(b.subs[0].servers.len(), 2);
         assert_eq!(b.subs[0].servers[1].name, "B");
         assert!(b.subs[0].updated.is_some());
@@ -388,7 +387,7 @@ mod tests {
             "ua".into(),
             Err("нет сети".into()),
         );
-        assert!(matches!(a.popup, Some(Popup::Error(_))));
+        assert!(matches!(a.alerts().last(), Some(Alert::Error(_))));
         assert!(a.subs.is_empty() && a.config.subscriptions.is_empty());
 
         a.on_sub_added(
@@ -401,7 +400,7 @@ mod tests {
         a.on_sub_fetched(name.clone(), Err("timeout".into()));
         assert_eq!(a.subs[0].servers.len(), 2, "old servers stay");
         assert!(!a.updating.contains(&name));
-        assert!(a.status.as_deref().unwrap().contains("timeout"));
+        assert!(a.last_status().unwrap().as_str().contains("timeout"));
         let _ = std::fs::remove_dir_all(d);
     }
 
@@ -476,7 +475,8 @@ mod tests {
         let d = dir("del");
         let mut a = app_in(&d);
         a.on_sub_added("https://x.example/1".into(), "ua".into(), Ok(update(&[A])));
-        a.confirm(ConfirmKind::DeleteGroup(0));
+        let n = a.subs[0].name.clone();
+        a.delete_group(&n);
         assert!(a.subs.is_empty());
         assert!(a.config.subscriptions.is_empty());
         let storage = Storage::new(&d);

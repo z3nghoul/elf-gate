@@ -3,6 +3,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Quit,
+    /// Quit and stop the background process (the VPN goes down).
+    QuitAll,
     Up,
     Down,
     PageUp,
@@ -54,9 +56,16 @@ const C: KeyModifiers = KeyModifiers::CONTROL;
 pub const BINDINGS: &[Binding] = &[
     Binding {
         label: "q / Ctrl+C",
-        desc: "выход (с подтверждением, если подключено)",
+        desc: "закрыть интерфейс (VPN продолжает работать в фоне)",
         action: Action::Quit,
         keys: &[(KeyCode::Char('q'), N), (KeyCode::Char('c'), C)],
+        hidden: false,
+    },
+    Binding {
+        label: "Q",
+        desc: "выйти и остановить фоновую часть (VPN отключится)",
+        action: Action::QuitAll,
+        keys: &[(KeyCode::Char('Q'), N)],
         hidden: false,
     },
     Binding {

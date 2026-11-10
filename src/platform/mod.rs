@@ -287,3 +287,56 @@ mod bypass_tests {
         assert!(out.contains(&"::1".to_string()) && out.contains(&"localhost".to_string()));
     }
 }
+
+// ---------------------------------------------------------------- local IPC
+
+/// A connected local IPC stream (unix socket or named pipe).
+pub trait IpcStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin> IpcStream for T {}
+pub type BoxStream = Box<dyn IpcStream>;
+
+pub type AcceptFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<BoxStream>> + Send + 'a>>;
+
+/// The listening side; owning it is the "one background process per user" lock.
+pub trait IpcListener: Send {
+    fn accept(&mut self) -> AcceptFuture<'_>;
+}
+
+#[derive(Debug, Error)]
+pub enum IpcBindError {
+    #[error("фоновая часть уже запущена")]
+    AlreadyRunning,
+    #[error("не удалось создать канал связи: {0}")]
+    Other(String),
+}
+
+pub fn ipc_bind() -> Result<Box<dyn IpcListener>, IpcBindError> {
+    imp::ipc::bind()
+}
+
+/// Connects to the running background process.
+pub async fn ipc_connect() -> std::io::Result<BoxStream> {
+    imp::ipc::connect().await
+}
+
+/// Starts a program fully detached: no console window, not tied to our terminal or lifetime.
+pub fn spawn_detached(program: &Path, args: &[String]) -> Result<(), PlatformError> {
+    imp::ipc::spawn_detached(program, args)
+}
+
+// ---------------------------------------------------------------- tray
+
+/// Shows the tray icon and feeds menu choices to `on_action`. `Err` means there is no tray
+/// here (no StatusNotifier on Linux, for example): the process works the same without it.
+pub async fn tray_start(
+    model: tokio::sync::watch::Receiver<crate::tray::TrayModel>,
+    on_action: std::sync::Arc<dyn Fn(crate::tray::TrayAction) + Send + Sync>,
+) -> Result<(), String> {
+    imp::tray::start(model, on_action).await
+}
+
+/// Opens the interface in a terminal window (the tray's "open interface").
+pub fn open_interface(program: &Path) -> Result<(), PlatformError> {
+    imp::tray::open_interface(program)
+}

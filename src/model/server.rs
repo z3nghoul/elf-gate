@@ -17,14 +17,14 @@ impl ServerRole {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Security {
     None,
     Tls,
     Reality,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Transport {
     Tcp,
     Xhttp,
@@ -32,7 +32,7 @@ pub enum Transport {
     Ws,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Ping {
     Unknown,
     Pending,
@@ -42,7 +42,7 @@ pub enum Ping {
 }
 
 /// TLS / Reality parameters from the link query.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TlsParams {
     pub sni: String,
     /// uTLS fingerprint (`fp`).
@@ -58,7 +58,7 @@ pub struct TlsParams {
 }
 
 /// Transport-specific parameters from the link query.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransportParams {
     pub path: String,
     pub host: String,
@@ -74,7 +74,7 @@ pub struct TransportParams {
 /// providers' DPI breaks its large post-quantum ClientHello; `firefox` often works there.
 pub const FINGERPRINTS: &[&str] = &["chrome", "firefox", "safari", "ios", "edge", "qq", "random"];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Server {
     /// Runtime id, assigned by the application (not persisted).
     pub id: u64,
@@ -103,6 +103,9 @@ pub struct Server {
     /// `Some(reason)` when the server was imported but cannot be used yet.
     pub unsupported: Option<String>,
     pub ping: Ping,
+    /// Unix time of the last measurement (`None` = never).
+    #[serde(default)]
+    pub ping_at: Option<i64>,
 }
 
 impl Server {
@@ -127,6 +130,7 @@ impl Server {
             role: None,
             unsupported: Some(reason),
             ping: Ping::Unknown,
+            ping_at: None,
         }
     }
 
@@ -156,6 +160,17 @@ impl Server {
             ),
             Transport::Tcp | Transport::Xhttp => None,
         }
+    }
+
+    /// The copy the UI may see: the secrets that identify or unlock the server (user id, link,
+    /// Reality keys) are removed, everything the screens show stays.
+    pub fn redacted(&self) -> Server {
+        let mut s = self.clone();
+        s.uuid.clear();
+        s.link.clear();
+        s.tls.public_key.clear();
+        s.tls.short_id.clear();
+        s
     }
 
     /// `host:port`, with IPv6 addresses in brackets.
@@ -189,6 +204,23 @@ impl Transport {
     }
 }
 
+/// `42 ms, 30 с назад`: the age tells that the number is alive.
+pub fn ping_label_with_age(ping: Ping, at: Option<i64>, now: i64) -> String {
+    let base = ping.label();
+    let Some(at) = at.filter(|_| !matches!(ping, Ping::Unknown | Ping::Pending)) else {
+        return base;
+    };
+    let age = (now - at).max(0);
+    let ago = if age < 90 {
+        format!("{age} с")
+    } else if age < 5400 {
+        format!("{} мин", age / 60)
+    } else {
+        format!("{} ч", age / 3600)
+    };
+    format!("{base}, {ago} назад")
+}
+
 impl Ping {
     pub fn label(self) -> String {
         match self {
@@ -206,5 +238,23 @@ impl Ping {
             Ping::Ms(ms) => ms,
             _ => u32::MAX,
         }
+    }
+}
+
+#[cfg(test)]
+mod age_tests {
+    use super::*;
+
+    #[test]
+    fn the_age_of_a_measurement_is_shown() {
+        let l = |p, at, now| ping_label_with_age(p, at, now);
+        assert_eq!(l(Ping::Ms(42), Some(970), 1000), "42 ms, 30 с назад");
+        assert_eq!(
+            l(Ping::Ms(42), Some(1000 - 600), 1000),
+            "42 ms, 10 мин назад"
+        );
+        assert_eq!(l(Ping::Timeout, Some(1000), 1000), "timeout, 0 с назад");
+        assert_eq!(l(Ping::Unknown, None, 1000), "-");
+        assert_eq!(l(Ping::Pending, Some(1), 1000), "...");
     }
 }

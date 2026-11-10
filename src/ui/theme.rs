@@ -25,6 +25,27 @@ impl Theme {
         }
     }
 
+    /// For a light terminal background.
+    pub fn light() -> Self {
+        Self {
+            fg: Color::Black,
+            muted: Color::DarkGray,
+            accent: Color::Blue,
+            good: Color::Rgb(0, 130, 40),
+            warn: Color::Rgb(170, 110, 0),
+            bad: Color::Red,
+            selection_bg: Color::Rgb(205, 218, 240),
+        }
+    }
+
+    pub fn by_name(name: &str) -> Self {
+        if name == "light" {
+            Self::light()
+        } else {
+            Self::dark()
+        }
+    }
+
     pub fn text(&self) -> Style {
         Style::default().fg(self.fg)
     }
