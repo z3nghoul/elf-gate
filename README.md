@@ -25,6 +25,10 @@ traffic and latency. one keyboard-driven screen, no electron.
 
 [SPEC.md](SPEC.md) · [decisions](docs/decisions.md)
 
+<p align="center">
+  <img alt="elf-gate in a terminal: servers, pings, connecting, privacy mode, rules" src="docs/demo.gif" width="100%">
+</p>
+
 ## ✦ quick start
 
 grab the archive for your system from the [latest release](https://github.com/z3nghoul/elf-gate/releases/latest),
