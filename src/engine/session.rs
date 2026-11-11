@@ -374,16 +374,45 @@ impl Engine {
         self.health = HealthState::Checking;
         let tx = self.tx.clone();
         let socks_port = self.config.core.socks_port;
+        let tun = (self.conn_mode == Mode::Tun).then(|| {
+            let dns = &self.config.tun.tunnel_dns;
+            // The adapter's own resolver is a plain address; a URL setting falls back to 1.1.1.1.
+            let dns = if dns.parse::<std::net::IpAddr>().is_ok() {
+                dns.clone()
+            } else {
+                "1.1.1.1".to_string()
+            };
+            (self.tun_host.clone(), self.config.tun.name.clone(), dns)
+        });
         tokio::spawn(async move {
+            let in_tun = tun.is_some();
+            if let Some((host, name, dns)) = tun {
+                // The adapter appears a moment after the core starts.
+                for _ in 0..10 {
+                    let (h, n, d) = (host.clone(), name.clone(), dns.clone());
+                    let done =
+                        tokio::task::spawn_blocking(move || h.prefer_tun_adapter_dns(&n, &d))
+                            .await
+                            .map(|r| r.is_ok())
+                            .unwrap_or(false);
+                    if done || !cfg!(windows) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+            }
             // The first request right after the start can race with the routes settling.
             let mut last = String::new();
             for attempt in 0..2 {
                 match health::check(socks_port, health::HEALTH_TIMEOUT).await {
                     Ok(latency) => {
-                        let _ = tx.send(BgEvent::Health {
-                            id,
-                            result: Ok(latency),
-                        });
+                        // The tunnel works; names must resolve through the system path too.
+                        let result = if in_tun && !health::system_dns_resolves().await {
+                            Err(crate::t!("net.dns_bypass"))
+                        } else {
+                            Ok(latency)
+                        };
+                        let _ = tx.send(BgEvent::Health { id, result });
                         return;
                     }
                     Err(e) => last = e,

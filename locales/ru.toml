@@ -325,6 +325,7 @@ group = "подписка"
 server = "сервер {n}"
 
 [net]
+dns_bypass = "DNS идёт мимо туннеля: системный резолвер не разрешает заблокированные имена"
 bad_socks = "непонятный ответ socks"
 http_client = "не удалось создать HTTP-клиент: {error}"
 http_reply = "ответ {status}"

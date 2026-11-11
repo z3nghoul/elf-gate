@@ -13,6 +13,27 @@ pub const HEALTH_HOST: &str = "connectivitycheck.gstatic.com";
 pub const HEALTH_PATH: &str = "/generate_204";
 pub const HEALTH_TIMEOUT: Duration = Duration::from_secs(8);
 
+/// A name that is blocked for many users and is the usual victim of DNS leaking around the
+/// tunnel.
+pub const DNS_PROBE_HOST: &str = "youtube.com";
+
+/// Does `DNS_PROBE_HOST` resolve through the system resolver (the path every program uses)?
+/// Two tries: the first can race with the adapter's resolver settings.
+pub async fn system_dns_resolves() -> bool {
+    for attempt in 0..2 {
+        let lookup = tokio::net::lookup_host((DNS_PROBE_HOST, 443));
+        if let Ok(Ok(mut found)) = timeout(Duration::from_secs(5), lookup).await {
+            if found.next().is_some() {
+                return true;
+            }
+        }
+        if attempt == 0 {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+    false
+}
+
 /// `Ok(latency)` if the endpoint answered 204 through the proxy.
 pub async fn check(socks_port: u16, limit: Duration) -> Result<Duration, String> {
     check_host(socks_port, HEALTH_HOST, HEALTH_PATH, limit).await

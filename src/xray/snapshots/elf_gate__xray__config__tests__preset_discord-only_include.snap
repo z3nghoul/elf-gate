@@ -13,7 +13,7 @@ expression: cfg
     "queryStrategy": "UseIP",
     "servers": [
       {
-        "address": "1.1.1.1",
+        "address": "https://1.1.1.1/dns-query",
         "domains": [
           "domain:discord.com",
           "domain:discord.gg",
@@ -22,9 +22,21 @@ expression: cfg
           "domain:discord.media",
           "domain:discordcdn.com"
         ],
-        "port": 53,
         "skipFallback": true,
         "tag": "dns-tunnel"
+      },
+      {
+        "address": "https://8.8.8.8/dns-query",
+        "domains": [
+          "domain:discord.com",
+          "domain:discord.gg",
+          "domain:discordapp.com",
+          "domain:discordapp.net",
+          "domain:discord.media",
+          "domain:discordcdn.com"
+        ],
+        "skipFallback": true,
+        "tag": "dns-tunnel-1"
       },
       {
         "address": "192.168.1.1",
@@ -170,14 +182,15 @@ expression: cfg
         "inboundTag": [
           "tun-in"
         ],
-        "network": "udp",
+        "network": "tcp,udp",
         "outboundTag": "dns-out",
         "port": "53",
         "type": "field"
       },
       {
         "inboundTag": [
-          "dns-tunnel"
+          "dns-tunnel",
+          "dns-tunnel-1"
         ],
         "outboundTag": "proxy",
         "type": "field"

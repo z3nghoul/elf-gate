@@ -253,10 +253,10 @@ impl Plan {
 
     /// Domains that should resolve through the tunnel (include) or locally (exclude) need
     /// DNS routing; it also needs somewhere to resolve the rest.
+    /// In TUN mode every DNS query is hijacked, so the built-in DNS is always there.
     fn dns_routing(&self) -> Option<(&TunPlan, &[String])> {
         let tun = self.tun.as_ref()?;
-        (!self.rules.domains.is_empty() && !tun.local_dns.is_empty())
-            .then_some((tun, self.rules.domains.as_slice()))
+        Some((tun, self.rules.domains.as_slice()))
     }
 }
 
@@ -288,8 +288,49 @@ fn tun_inbound(t: &TunPlan, sniffing: &Value) -> Value {
     })
 }
 
+/// DNS-over-HTTPS endpoints of well-known public resolvers.
+fn doh_url(ip: &str) -> Option<&'static str> {
+    Some(match ip {
+        "1.1.1.1" | "1.0.0.1" => "https://1.1.1.1/dns-query",
+        "8.8.8.8" | "8.8.4.4" => "https://8.8.8.8/dns-query",
+        "9.9.9.9" => "https://9.9.9.9/dns-query",
+        _ => return None,
+    })
+}
+
+/// Resolvers reached through the tunnel: DoH (or DNS over TCP), never plain UDP, which some
+/// servers do not pass. The second one is a fallback.
+fn tunnel_servers(tunnel_dns: &str) -> Vec<Value> {
+    let primary = if tunnel_dns.starts_with("https://") || tunnel_dns.starts_with("tcp://") {
+        tunnel_dns.to_string()
+    } else if tunnel_dns.is_empty() {
+        "https://1.1.1.1/dns-query".to_string()
+    } else {
+        doh_url(tunnel_dns).map_or_else(|| format!("tcp://{tunnel_dns}"), str::to_string)
+    };
+    let mut addresses = vec![primary];
+    let fallback = "https://8.8.8.8/dns-query".to_string();
+    if !addresses.contains(&fallback) {
+        addresses.push(fallback);
+    }
+    addresses
+        .into_iter()
+        .enumerate()
+        .map(|(i, a)| json!({ "address": a, "tag": tunnel_tag(i) }))
+        .collect()
+}
+
+fn tunnel_tag(i: usize) -> String {
+    if i == 0 {
+        "dns-tunnel".into()
+    } else {
+        format!("dns-tunnel-{i}")
+    }
+}
+
 fn dns_section(plan: &Plan, t: &TunPlan, listed: &[String]) -> (Value, Vec<Value>) {
-    let tunnel = json!({ "address": t.tunnel_dns, "port": 53, "tag": "dns-tunnel" });
+    let tunnel = tunnel_servers(&t.tunnel_dns);
+    let tunnel_tags: Vec<String> = (0..tunnel.len()).map(tunnel_tag).collect();
     let locals: Vec<Value> = t
         .local_dns
         .iter()
@@ -297,29 +338,35 @@ fn dns_section(plan: &Plan, t: &TunPlan, listed: &[String]) -> (Value, Vec<Value
         .map(|(i, a)| json!({ "address": a, "port": 53, "tag": format!("dns-local-{i}") }))
         .collect();
     // The listed names use one resolver exclusively; every other name uses the other side.
+    // Without listed names or without a system resolver everything goes through the tunnel.
     let restrict = |mut server: Value| {
         server["domains"] = json!(listed);
         server["skipFallback"] = json!(true);
         server
     };
-    let servers: Vec<Value> = match plan.routing {
-        RoutingMode::Include => std::iter::once(restrict(tunnel)).chain(locals).collect(),
-        RoutingMode::Exclude => locals
-            .into_iter()
-            .map(restrict)
-            .chain(std::iter::once(tunnel))
-            .collect(),
+    let split = !listed.is_empty() && !locals.is_empty();
+    let (servers, local_tags): (Vec<Value>, Vec<String>) = if !split {
+        (tunnel, Vec::new())
+    } else {
+        let tags = (0..t.local_dns.len())
+            .map(|i| format!("dns-local-{i}"))
+            .collect();
+        let servers = match plan.routing {
+            RoutingMode::Include => tunnel.into_iter().map(restrict).chain(locals).collect(),
+            RoutingMode::Exclude => locals.into_iter().map(restrict).chain(tunnel).collect(),
+        };
+        (servers, tags)
     };
-    let local_tags: Vec<String> = (0..t.local_dns.len())
-        .map(|i| format!("dns-local-{i}"))
-        .collect();
-    let rules = vec![
-        // The system resolver's queries reach Xray through the tunnel; answer them with the
-        // built-in DNS, which picks the resolver by name.
-        json!({ "type": "field", "inboundTag": ["tun-in"], "network": "udp", "port": "53", "outboundTag": "dns-out" }),
-        json!({ "type": "field", "inboundTag": ["dns-tunnel"], "outboundTag": "proxy" }),
-        json!({ "type": "field", "inboundTag": local_tags, "outboundTag": "direct" }),
+    // Every query to port 53 (any destination, private ones too) is answered by the built-in
+    // DNS, ahead of every other rule: a resolver on the LAN or at the provider must not be
+    // reached around the tunnel. The resolver's own connections are routed by their tags.
+    let mut rules = vec![
+        json!({ "type": "field", "inboundTag": ["tun-in"], "network": "tcp,udp", "port": "53", "outboundTag": "dns-out" }),
+        json!({ "type": "field", "inboundTag": tunnel_tags, "outboundTag": "proxy" }),
     ];
+    if !local_tags.is_empty() {
+        rules.push(json!({ "type": "field", "inboundTag": local_tags, "outboundTag": "direct" }));
+    }
     (
         json!({ "servers": servers, "queryStrategy": "UseIP" }),
         rules,
@@ -1077,6 +1124,7 @@ mod tests {
         );
         assert!(r
             .iter()
+            .filter(|r| r["outboundTag"] != "dns-out")
             .all(|r| r.get("network") != Some(&json!("tcp,udp"))));
         assert_eq!(
             cfg["outbounds"][0]["tag"], "proxy",
@@ -1085,7 +1133,7 @@ mod tests {
     }
 
     #[test]
-    fn dns_routing_exists_only_with_domains_and_a_local_resolver() {
+    fn dns_servers_split_by_listed_domains_and_local_resolver() {
         let with = |mode, rules: &[Rule]| {
             build_with(
                 &server(),
@@ -1094,11 +1142,13 @@ mod tests {
             )
             .unwrap()
         };
-        assert!(
-            with(RoutingMode::Include, &[Rule::new(RuleKind::Process, "x")])
-                .get("dns")
-                .is_none()
-        );
+        // No listed domains: everything resolves through the tunnel.
+        let cfg = with(RoutingMode::Include, &[Rule::new(RuleKind::Process, "x")]);
+        let servers = cfg["dns"]["servers"].as_array().unwrap();
+        assert!(servers.iter().all(|s| s.get("domains").is_none()));
+        assert!(servers
+            .iter()
+            .all(|s| s["address"].as_str().unwrap().starts_with("https://")));
 
         let cfg = with(
             RoutingMode::Include,
@@ -1108,11 +1158,12 @@ mod tests {
         assert_eq!(servers[0]["tag"], "dns-tunnel");
         assert_eq!(servers[0]["domains"], json!(["domain:discord.com"]));
         assert_eq!(servers[0]["skipFallback"], true);
+        let local = servers.iter().find(|s| s["tag"] == "dns-local-0").unwrap();
         assert_eq!(
-            servers[1]["address"], "192.168.1.1",
+            local["address"], "192.168.1.1",
             "unlisted names resolve locally"
         );
-        assert!(servers[1].get("domains").is_none());
+        assert!(local.get("domains").is_none());
         assert!(cfg["outbounds"]
             .as_array()
             .unwrap()
@@ -1144,10 +1195,80 @@ mod tests {
         );
         plan.tun.as_mut().unwrap().local_dns.clear();
         let cfg = build_with(&server(), &CoreConfig::default(), &plan).unwrap();
+        let servers = cfg["dns"]["servers"].as_array().unwrap();
         assert!(
-            cfg.get("dns").is_none(),
-            "no local resolver known: do not hijack DNS"
+            servers.iter().all(|s| s.get("domains").is_none()),
+            "no local resolver known: the tunnel resolves everything"
         );
+    }
+
+    fn rules_of(cfg: &Value) -> Vec<Value> {
+        cfg["routing"]["rules"].as_array().unwrap().clone()
+    }
+
+    #[test]
+    fn tun_hijacks_port_53_above_private_direct_and_user_rules() {
+        for mode in [RoutingMode::Exclude, RoutingMode::Include] {
+            let cfg = build_with(
+                &server(),
+                &CoreConfig::default(),
+                &plan_for(
+                    mode,
+                    &["local-direct"],
+                    &[Rule::new(RuleKind::Process, "steam")],
+                    true,
+                ),
+            )
+            .unwrap();
+            let r = rules_of(&cfg);
+            let dns = r
+                .iter()
+                .position(|r| {
+                    r["outboundTag"] == "dns-out"
+                        && r["port"] == "53"
+                        && r["network"] == "tcp,udp"
+                        && r["inboundTag"] == json!(["tun-in"])
+                        && r.get("ip").is_none()
+                })
+                .expect("a port 53 -> dns-out rule for any destination");
+            let private = r
+                .iter()
+                .position(|r| r["ip"] == json!(["geoip:private"]))
+                .expect("geoip:private -> direct is present in the default plan");
+            let user = r.iter().position(user_process_rule).unwrap();
+            assert!(dns < private, "{mode:?}");
+            assert!(dns < user, "{mode:?}");
+            assert!(
+                r[..dns].iter().all(|r| r["outboundTag"] == "api"),
+                "only the internal api rule may precede the hijack"
+            );
+        }
+    }
+
+    #[test]
+    fn tunnel_dns_uses_doh_with_a_fallback_never_plain_udp() {
+        let cfg = build_with(
+            &server(),
+            &CoreConfig::default(),
+            &plan_for(RoutingMode::Exclude, &["local-direct"], &[], true),
+        )
+        .unwrap();
+        let servers = cfg["dns"]["servers"].as_array().unwrap();
+        assert_eq!(servers[0]["address"], "https://1.1.1.1/dns-query");
+        assert_eq!(servers[1]["address"], "https://8.8.8.8/dns-query");
+        assert_eq!(servers[0]["tag"], "dns-tunnel");
+        assert_eq!(servers[1]["tag"], "dns-tunnel-1");
+        let r = rules_of(&cfg);
+        assert!(r
+            .iter()
+            .any(|r| r["inboundTag"] == json!(["dns-tunnel", "dns-tunnel-1"])
+                && r["outboundTag"] == "proxy"));
+
+        // An unknown plain resolver address is asked over TCP.
+        let mut plan = plan_for(RoutingMode::Exclude, &["local-direct"], &[], true);
+        plan.tun.as_mut().unwrap().tunnel_dns = "9.9.9.10".into();
+        let cfg = build_with(&server(), &CoreConfig::default(), &plan).unwrap();
+        assert_eq!(cfg["dns"]["servers"][0]["address"], "tcp://9.9.9.10");
     }
 
     #[test]

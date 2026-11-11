@@ -26,9 +26,12 @@ expression: cfg
         "tag": "dns-local-0"
       },
       {
-        "address": "1.1.1.1",
-        "port": 53,
+        "address": "https://1.1.1.1/dns-query",
         "tag": "dns-tunnel"
+      },
+      {
+        "address": "https://8.8.8.8/dns-query",
+        "tag": "dns-tunnel-1"
       }
     ]
   },
@@ -169,14 +172,15 @@ expression: cfg
         "inboundTag": [
           "tun-in"
         ],
-        "network": "udp",
+        "network": "tcp,udp",
         "outboundTag": "dns-out",
         "port": "53",
         "type": "field"
       },
       {
         "inboundTag": [
-          "dns-tunnel"
+          "dns-tunnel",
+          "dns-tunnel-1"
         ],
         "outboundTag": "proxy",
         "type": "field"

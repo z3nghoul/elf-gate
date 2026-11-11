@@ -144,6 +144,38 @@ fn xhttp_link_with_extra_passes_xray_test() {
     assert!(ok, "{text}");
 }
 
+#[test]
+fn tun_dns_hijack_config_passes_xray_test() {
+    let xray = require_xray!();
+    let server = parse_link(&format!(
+        "vless://{UUID}@h.example.com:443?security=tls&sni=h.example.com&type=ws&path=%2Fws#t"
+    ))
+    .unwrap();
+    let dir = TempDir::new("tun-dns");
+    for (n, dns) in ["1.1.1.1", "9.9.9.10"].into_iter().enumerate() {
+        for local in [vec![], vec!["192.168.3.1".to_string()]] {
+            let mut plan = config::Plan::proxy_default();
+            plan.traffic = crate::model::rule::TrafficMode::Tun;
+            plan.rules.domains = vec!["domain:example.ru".into()];
+            plan.tun = Some(config::TunPlan {
+                name: "elfgate0".into(),
+                ipv6: false,
+                windows: false,
+                tunnel_dns: dns.into(),
+                local_dns: local.clone(),
+            });
+            let cfg = config::build_with(&server, &CoreConfig::default(), &plan).unwrap();
+            let (ok, text) = xray_test(
+                &xray,
+                &cfg,
+                dir.path(),
+                &format!("tun-dns-{n}-{}", local.len()),
+            );
+            assert!(ok, "{dns} {local:?}: {text}");
+        }
+    }
+}
+
 /// Xray started as a throw-away local "server"; killed when dropped, even on panic.
 struct ServerProc(#[allow(dead_code)] Child);
 

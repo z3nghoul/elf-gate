@@ -158,6 +158,12 @@ pub trait TunHost: Send + Sync {
     /// Upstream resolvers of the system (never loopback stubs).
     fn system_dns(&self) -> Vec<String>;
     fn ipv6_enabled(&self) -> bool;
+    /// Windows: gives the TUN adapter a resolver and the lowest metric so the system prefers it
+    /// for DNS. The adapter disappears with the core, which takes these settings with it, so
+    /// there is nothing to put back. Linux: nothing to do.
+    fn prefer_tun_adapter_dns(&self, _adapter: &str, _dns: &str) -> Result<(), String> {
+        Ok(())
+    }
     fn interface_exists(&self, name: &str) -> bool;
     /// Names of running programs as the core sees them (real file name, no `.exe`).
     fn running_processes(&self) -> Vec<String>;

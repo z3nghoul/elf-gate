@@ -128,6 +128,41 @@ impl TunHost for Host {
         None
     }
 
+    fn prefer_tun_adapter_dns(&self, adapter: &str, dns: &str) -> Result<(), String> {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let netsh = |args: &[String]| -> Result<(), String> {
+            let out = std::process::Command::new("netsh")
+                .args(args)
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+                .map_err(|e| e.to_string())?;
+            if out.status.success() {
+                Ok(())
+            } else {
+                Err(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            }
+        };
+        netsh(&[
+            "interface".into(),
+            "ipv4".into(),
+            "set".into(),
+            "dnsservers".into(),
+            format!("name={adapter}"),
+            "source=static".into(),
+            format!("address={dns}"),
+            "validate=no".into(),
+        ])?;
+        netsh(&[
+            "interface".into(),
+            "ipv4".into(),
+            "set".into(),
+            "interface".into(),
+            format!("name={adapter}"),
+            "metric=1".into(),
+        ])
+    }
+
     fn system_dns(&self) -> Vec<String> {
         // Adapters that are up and have a gateway are the physical ones (a VPN adapter we
         // create ourselves has neither at the time of the query).

@@ -9,6 +9,19 @@ expression: cfg
     ],
     "tag": "api"
   },
+  "dns": {
+    "queryStrategy": "UseIP",
+    "servers": [
+      {
+        "address": "https://1.1.1.1/dns-query",
+        "tag": "dns-tunnel"
+      },
+      {
+        "address": "https://8.8.8.8/dns-query",
+        "tag": "dns-tunnel-1"
+      }
+    ]
+  },
   "inbounds": [
     {
       "listen": "127.0.0.1",
@@ -120,6 +133,10 @@ expression: cfg
     {
       "protocol": "blackhole",
       "tag": "block"
+    },
+    {
+      "protocol": "dns",
+      "tag": "dns-out"
     }
   ],
   "policy": {
@@ -136,6 +153,23 @@ expression: cfg
           "api"
         ],
         "outboundTag": "api",
+        "type": "field"
+      },
+      {
+        "inboundTag": [
+          "tun-in"
+        ],
+        "network": "tcp,udp",
+        "outboundTag": "dns-out",
+        "port": "53",
+        "type": "field"
+      },
+      {
+        "inboundTag": [
+          "dns-tunnel",
+          "dns-tunnel-1"
+        ],
+        "outboundTag": "proxy",
         "type": "field"
       },
       {

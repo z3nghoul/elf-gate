@@ -325,6 +325,7 @@ group = "subscription"
 server = "server {n}"
 
 [net]
+dns_bypass = "DNS goes around the tunnel: the system resolver cannot resolve blocked names"
 bad_socks = "unclear socks reply"
 http_client = "could not create the HTTP client: {error}"
 http_reply = "reply {status}"
