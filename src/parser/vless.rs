@@ -96,7 +96,18 @@ pub fn parse(link: &str) -> Result<Server, ParseError> {
         spider_x: get("spx"),
         allow_insecure: flag(get("allowInsecure")) || flag(get("insecure")),
     };
+    let mut extra = None;
+    let raw_extra = get("extra");
+    if !raw_extra.trim().is_empty() {
+        match serde_json::from_str::<serde_json::Value>(&raw_extra) {
+            Ok(v @ serde_json::Value::Object(_)) => extra = Some(v),
+            _ => {
+                unsupported.get_or_insert(crate::t!("parse.extra_invalid"));
+            }
+        }
+    }
     let params = TransportParams {
+        extra,
         path: get("path"),
         host: get("host"),
         mode: get("mode"),

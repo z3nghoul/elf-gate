@@ -97,6 +97,7 @@ proxy_restore_failed = "could not restore the system proxy: {error}"
 tray_unavailable = "the tray icon is unavailable: {error}"
 
 [detail]
+extra_count = "{count} parameters"
 address = "Address:"
 chain = "Chain:"
 chain_value = "the provider's ready config, nodes: {count}"
@@ -235,6 +236,7 @@ from_link = "{link}"
 unset = "not set"
 
 [fphint]
+no_traffic_tls = "The server is reachable, but no traffic passes. Check the SNI, path, host, mode and extra of the link, and the certificate on the server"
 no_traffic = "The server is reachable, but no traffic passes. Check the key, SNI, shortId and port on the server"
 retry = "The server is reachable, but the request through it failed. Try fp=firefox (key f)"
 
@@ -351,6 +353,7 @@ servers = "Servers"
 settings = "Settings"
 
 [parse]
+extra_invalid = "the xhttp extra parameter is not a JSON object"
 empty = "empty link"
 invalid_url = "invalid link: {error}"
 no_host = "the link has no server address"

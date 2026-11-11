@@ -111,6 +111,9 @@ fn stream_settings(s: &Server, fallback: Option<&str>) -> Value {
             x.insert("path".into(), json!(path_or_root));
             put(&mut x, "host", host);
             put(&mut x, "mode", &s.params.mode);
+            if let Some(extra) = &s.params.extra {
+                x.insert("extra".into(), extra.clone());
+            }
             stream.insert("xhttpSettings".into(), Value::Object(x));
         }
     }
@@ -683,6 +686,53 @@ mod tests {
             "proxy-backup"
         );
         assert_eq!(cfg["observatory"]["probeInterval"], "10s");
+    }
+
+    const EXTRA_JSON: &str = r#"{"scMaxEachPostBytes":"1000000","scMaxConcurrentPosts":"100","xPaddingBytes":"100-1000","noGRPCHeader":false,"sessionPlacement":"cookie","sessionKey":"sid","seqPlacement":"path","headers":{"X-A":"b"},"someFutureKey":{"n":[1,2]},"xmux":{"maxConcurrency":"16-32","hKeepAlivePeriod":0}}"#;
+
+    fn extra_link() -> String {
+        format!("vless://{UUID}@exchange.example.com:443?security=tls&type=xhttp&headerType=&path=%2Fapi%2Fsource&host=exchange.example.com&mode=packet-up&extra=%7B%22scMaxEachPostBytes%22%3A%221000000%22%2C%22scMaxConcurrentPosts%22%3A%22100%22%2C%22xPaddingBytes%22%3A%22100-1000%22%2C%22noGRPCHeader%22%3Afalse%2C%22sessionPlacement%22%3A%22cookie%22%2C%22sessionKey%22%3A%22sid%22%2C%22seqPlacement%22%3A%22path%22%2C%22headers%22%3A%7B%22X-A%22%3A%22b%22%7D%2C%22someFutureKey%22%3A%7B%22n%22%3A%5B1%2C2%5D%7D%2C%22xmux%22%3A%7B%22maxConcurrency%22%3A%2216-32%22%2C%22hKeepAlivePeriod%22%3A0%7D%7D&sni=exchange.example.com&fp=chrome&alpn=h2%2Chttp%2F1.1#x")
+    }
+
+    #[test]
+    fn xhttp_extra_is_passed_whole_into_the_outbound() {
+        let cfg = config_for(&extra_link());
+        let x = &cfg["outbounds"][0]["streamSettings"]["xhttpSettings"];
+        let want: Value = serde_json::from_str(EXTRA_JSON).unwrap();
+        assert_eq!(x["extra"], want, "unknown keys must survive too");
+        assert_eq!(x["mode"], "packet-up");
+        assert_eq!(x["path"], "/api/source");
+        assert_eq!(
+            cfg["outbounds"][0]["streamSettings"]["tlsSettings"]["fingerprint"],
+            "chrome"
+        );
+        let s = parse_link(&extra_link()).unwrap();
+        assert_eq!(s.params.extra_count(), 10);
+    }
+
+    #[test]
+    fn broken_extra_marks_the_server_unsupported_instead_of_dropping_it() {
+        let s = parse_link(&format!(
+            "vless://{UUID}@h.example.com:443?security=tls&type=xhttp&extra=%7Bnot-json#t"
+        ))
+        .unwrap();
+        assert!(!s.is_supported());
+    }
+
+    #[test]
+    fn an_automatic_fingerprint_never_replaces_the_links_fp() {
+        let mut s = parse_link(&extra_link()).unwrap();
+        s.fp_override = Some("firefox".into());
+        s.fp_auto = true;
+        assert_eq!(s.effective_fingerprint(), "chrome");
+        // Without an fp in the link the automatic one applies.
+        let mut s = parse_link(&format!(
+            "vless://{UUID}@h.example.com:443?security=tls&sni=h.example.com#t"
+        ))
+        .unwrap();
+        s.fp_override = Some("firefox".into());
+        s.fp_auto = true;
+        assert_eq!(s.effective_fingerprint(), "firefox");
     }
 
     #[test]

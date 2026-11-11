@@ -132,6 +132,18 @@ fn xray_test(xray: &Path, config: &Value, dir: &Path, name: &str) -> (bool, Stri
     (out.status.success(), text)
 }
 
+#[test]
+fn xhttp_link_with_extra_passes_xray_test() {
+    let xray = require_xray!();
+    let link = format!("vless://{UUID}@exchange.example.com:443?security=tls&type=xhttp&headerType=&path=%2Fapi%2Fsource&host=exchange.example.com&mode=packet-up&extra=%7B%22scMaxEachPostBytes%22%3A%221000000%22%2C%22scMaxConcurrentPosts%22%3A%22100%22%2C%22xPaddingBytes%22%3A%22100-1000%22%2C%22noGRPCHeader%22%3Afalse%2C%22sessionPlacement%22%3A%22cookie%22%2C%22sessionKey%22%3A%22sid%22%2C%22seqPlacement%22%3A%22path%22%2C%22headers%22%3A%7B%22X-A%22%3A%22b%22%7D%2C%22someFutureKey%22%3A%7B%22n%22%3A%5B1%2C2%5D%7D%2C%22xmux%22%3A%7B%22maxConcurrency%22%3A%2216-32%22%2C%22hKeepAlivePeriod%22%3A0%7D%7D&sni=exchange.example.com&fp=chrome&alpn=h2%2Chttp%2F1.1#x");
+    let server = parse_link(&link).unwrap();
+    let cfg = config::build(&server, &CoreConfig::default()).unwrap();
+    assert!(cfg["outbounds"][0]["streamSettings"]["xhttpSettings"]["extra"].is_object());
+    let dir = TempDir::new("xhttp-extra");
+    let (ok, text) = xray_test(&xray, &cfg, dir.path(), "xhttp-extra");
+    assert!(ok, "{text}");
+}
+
 /// Xray started as a throw-away local "server"; killed when dropped, even on panic.
 struct ServerProc(#[allow(dead_code)] Child);
 

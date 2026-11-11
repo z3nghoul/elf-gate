@@ -69,6 +69,19 @@ pub struct TransportParams {
     pub service_name: String,
     /// grpc `authority` (the HTTP/2 `:authority` header).
     pub authority: String,
+    /// xhttp `extra`: the JSON object from the link, kept whole (Xray validates the keys).
+    #[serde(default)]
+    pub extra: Option<serde_json::Value>,
+}
+
+impl TransportParams {
+    /// Number of top-level keys in `extra`.
+    pub fn extra_count(&self) -> usize {
+        self.extra
+            .as_ref()
+            .and_then(|v| v.as_object())
+            .map_or(0, |o| o.len())
+    }
 }
 
 /// uTLS fingerprints offered in the UI. `chrome` is Xray's default for Reality, but some
@@ -181,8 +194,13 @@ impl Server {
     }
 
     /// The fingerprint that goes into the config: the UI override, else the link's `fp`.
+    /// An automatically found one never replaces an `fp` the link states.
     pub fn effective_fingerprint(&self) -> &str {
-        self.fp_override.as_deref().unwrap_or(&self.tls.fingerprint)
+        match self.fp_override.as_deref() {
+            Some(_) if self.fp_auto && !self.tls.fingerprint.is_empty() => &self.tls.fingerprint,
+            Some(o) => o,
+            None => &self.tls.fingerprint,
+        }
     }
 
     pub fn is_supported(&self) -> bool {

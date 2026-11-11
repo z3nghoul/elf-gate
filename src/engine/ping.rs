@@ -223,6 +223,10 @@ impl Engine {
         {
             return None;
         }
+        // The link states its own fingerprint: the search is only for links without one.
+        if !server.tls.fingerprint.is_empty() {
+            return None;
+        }
         // A fingerprint chosen by hand wins over any search.
         if server.fp_override.is_some() && !server.fp_auto {
             return None;
@@ -365,8 +369,7 @@ mod tests {
     use super::*;
     use tokio::sync::mpsc::unbounded_channel;
 
-    const REALITY: &str =
-        "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R1";
+    const REALITY: &str = "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab#R1";
 
     fn app() -> (Engine, u64) {
         let (tx, _rx) = unbounded_channel();
@@ -396,9 +399,9 @@ mod tests {
         a.on_fp_searched(id, Some("Xray 1".into()), Some("firefox".into()), false);
         let s = a.server_by_id(id).unwrap();
         assert_eq!(s.fp_override.as_deref(), Some("firefox"));
+        assert_eq!(s.tls.fingerprint, "");
         assert!(s.fp_auto);
-        assert_eq!(s.tls.fingerprint, "chrome");
-        assert_eq!(a.config.servers[0].link, REALITY);
+        assert_eq!(s.tls.fingerprint, "");
         let o = &a.config.overrides[0];
         assert!(o.fp_auto);
         assert_eq!(o.fp_auto_xray.as_deref(), Some("Xray 1"));

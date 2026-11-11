@@ -97,6 +97,7 @@ proxy_restore_failed = "не удалось восстановить систе�
 tray_unavailable = "значок в трее недоступен: {error}"
 
 [detail]
+extra_count = "{count} параметров"
 address = "Адрес:"
 chain = "Цепочка:"
 chain_value = "готовый конфиг провайдера, узлов: {count}"
@@ -235,6 +236,7 @@ from_link = "{link}"
 unset = "не задан"
 
 [fphint]
+no_traffic_tls = "Сервер доступен, но трафик не проходит. Проверьте SNI, path, host, mode и extra в ссылке и сертификат на сервере"
 no_traffic = "Сервер доступен, но трафик не проходит. Проверьте ключ, SNI, shortId и порт на сервере"
 retry = "Сервер доступен, но запрос через него не прошёл. Попробуйте fp=firefox (клавиша f)"
 
@@ -351,6 +353,7 @@ servers = "Серверы"
 settings = "Настройки"
 
 [parse]
+extra_invalid = "параметр extra для xhttp не является JSON-объектом"
 empty = "пустая ссылка"
 invalid_url = "некорректная ссылка: {error}"
 no_host = "в ссылке нет адреса сервера"

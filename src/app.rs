@@ -5,7 +5,7 @@
 use crate::action::{map_key, Action};
 use crate::event::{now_hms, Event, Level, LinkEvent, LogLine};
 use crate::model::rule::{builtin_presets, validate, RoutingMode, Rule, RuleKind};
-use crate::model::server::{Security, Server, ServerRole, FINGERPRINTS};
+use crate::model::server::{Security, Server, ServerRole, Transport, FINGERPRINTS};
 use crate::model::subscription::Subscription;
 use crate::platform::{self, TunHost};
 use crate::proto::{Alert, Ask, Cmd, RuleRef, Traffic, Update, View};
@@ -1128,13 +1128,14 @@ impl AppState {
         // The link is not shown here, so "has a real fingerprint to change" comes from the kind.
         let fp_matters = matches!(server.security, Security::Tls | Security::Reality)
             && server.unsupported.is_none();
-        Some(
-            if fp_matters && server.effective_fingerprint() != "firefox" {
-                crate::t!("fphint.retry")
-            } else {
-                crate::t!("fphint.no_traffic")
-            },
-        )
+        let tls_xhttp = server.security == Security::Tls && server.transport == Transport::Xhttp;
+        Some(if tls_xhttp {
+            crate::t!("fphint.no_traffic_tls")
+        } else if fp_matters && server.effective_fingerprint() != "firefox" {
+            crate::t!("fphint.retry")
+        } else {
+            crate::t!("fphint.no_traffic")
+        })
     }
 
     /// The connected server (else the selected one) uses `flow=xtls-rprx-vision`, with which Xray

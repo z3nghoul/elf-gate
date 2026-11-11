@@ -115,6 +115,13 @@ fn server_lines<'a>(s: &Server, connected: bool, th: &Theme) -> Vec<Line<'a>> {
     opt(&mut lines, "Path:", &s.params.path, th);
     opt(&mut lines, "Host:", &s.params.host, th);
     opt(&mut lines, "Mode:", &s.params.mode, th);
+    if s.params.extra_count() > 0 {
+        lines.push(field(
+            "extra:",
+            crate::t!("detail.extra_count", count = s.params.extra_count()),
+            th,
+        ));
+    }
     opt(&mut lines, "Service:", &s.params.service_name, th);
     lines.push(field(
         &crate::t!("detail.role"),
