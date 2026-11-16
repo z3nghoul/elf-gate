@@ -7,7 +7,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  XRAY_VERSION: v26.11.9
 
 jobs:
   build:
@@ -18,6 +17,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # One place for the Xray version and hashes, shared with windows-test.yml.
+      - name: Load the pinned Xray version
+        shell: bash
+        run: cat .github/xray.env >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -27,38 +30,40 @@ jobs:
       - name: Install Xray (Linux)
         if: runner.os == 'Linux'
         shell: bash
-        env:
-          XRAY_SHA256: b651f7e1d9966ee2c1b1ee1bf8b52c72771824d3065dce96bbc8bcc19ed95f82
         run: |
           curl -fsSL -o "$RUNNER_TEMP/xray.zip" \
             "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip"
-          echo "${XRAY_SHA256}  $RUNNER_TEMP/xray.zip" | sha256sum -c -
+          echo "${XRAY_LINUX_SHA256}  $RUNNER_TEMP/xray.zip" | sha256sum -c -
           mkdir -p bin
           unzip -q -o "$RUNNER_TEMP/xray.zip" xray geoip.dat geosite.dat -d bin
           chmod +x bin/xray
           bin/xray version | head -1
-      # The Windows archive is only checksummed (no unpacking, no running): it pins the
-      # release we develop against until the Windows job gets its own Xray tests.
-      - name: Verify Xray Windows archive checksum
-        if: runner.os == 'Linux'
-        shell: bash
-        env:
-          XRAY_WIN_SHA256: 1262522266337b824f07beb8e1375786b437683b3890105469088f8e17e0a69d
+      # The Windows archive is verified and unpacked into bin/, where the integration tests look.
+      - name: Install Xray (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/xray-win.zip" \
-            "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-windows-64.zip"
-          echo "${XRAY_WIN_SHA256}  $RUNNER_TEMP/xray-win.zip" | sha256sum -c -
+          $zip = Join-Path $env:RUNNER_TEMP 'xray-win.zip'
+          Invoke-WebRequest -Uri "https://github.com/XTLS/Xray-core/releases/download/$env:XRAY_VERSION/Xray-windows-64.zip" -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLower()
+          if ($actual -ne $env:XRAY_WIN_SHA256) {
+            throw "Xray archive SHA256 mismatch. expected $env:XRAY_WIN_SHA256, got $actual"
+          }
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          Expand-Archive -Path $zip -DestinationPath bin -Force
+          .\bin\xray.exe version | Select-Object -First 1
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
       # With Xray installed the integration tests must really run, not print SKIPPED.
       - name: Xray integration tests (must not be skipped)
-        if: runner.os == 'Linux'
         shell: bash
         run: |
           cargo test xray::integration_tests -- --nocapture 2>&1 | tee xray-tests.log
           if grep -q SKIPPED xray-tests.log; then echo "Xray tests were skipped"; exit 1; fi
       - run: cargo build --release
+        env:
+          ELF_GATE_COMMIT: ${{ github.sha }}
       - uses: actions/upload-artifact@v4
         with:
           name: elf-gate-${{ matrix.os }}
