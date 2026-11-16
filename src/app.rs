@@ -227,9 +227,9 @@ impl AppState {
         self
     }
 
-    /// Demo data for the screen tests.
-    #[cfg(test)]
-    pub fn with_demo(cmd_tx: UnboundedSender<Cmd>) -> Self {
+    /// Demo data for the screens, with the given config (the screen tests use it). A demo run
+    /// of the program gets the same data from the background process: `build_info::demo_data`.
+    pub fn with_demo(cmd_tx: UnboundedSender<Cmd>, config: Config) -> Self {
         let mut app = Self::new(cmd_tx);
         let mut next_id = 0;
         let view = View {
@@ -240,7 +240,7 @@ impl AppState {
             tun_active: false,
             proxy_active: false,
             health: HealthState::Unknown,
-            config: crate::test_support::config_ru(),
+            config,
             traffic: Traffic::default(),
             process_unresolved: 0,
             tray: false,
@@ -730,8 +730,11 @@ impl AppState {
             FocusNext => self.cycle_focus(true),
             FocusPrev => self.cycle_focus(false),
             Redraw => self.redraw_requested = true,
-            #[cfg(debug_assertions)]
-            DebugPanic => panic!("debug panic requested with F12"),
+            DebugPanic => {
+                if crate::build_info::DEBUG_PANIC_KEY {
+                    panic!("debug panic requested with F12");
+                }
+            }
         }
     }
 

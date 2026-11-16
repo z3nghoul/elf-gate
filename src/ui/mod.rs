@@ -157,7 +157,7 @@ mod tests {
     #[tokio::test]
     async fn main_screen_renders_all_panels() {
         let (tx, _rx) = unbounded_channel();
-        let mut app = AppState::with_demo(tx);
+        let mut app = AppState::with_demo(tx, crate::test_support::config_ru());
         let out = draw(100, 30, &mut app);
         println!("{out}");
         for needle in [
@@ -176,7 +176,7 @@ mod tests {
     #[tokio::test]
     async fn too_small_window_shows_message() {
         let (tx, _rx) = unbounded_channel();
-        let mut app = AppState::with_demo(tx);
+        let mut app = AppState::with_demo(tx, crate::test_support::config_ru());
         let out = draw(70, 20, &mut app);
         assert!(out.contains("Увеличьте окно"));
         assert!(!out.contains("Серверы"));
@@ -185,7 +185,7 @@ mod tests {
     #[tokio::test]
     async fn every_screen_renders_at_minimum_size() {
         let (tx, _rx) = unbounded_channel();
-        let mut app = AppState::with_demo(tx);
+        let mut app = AppState::with_demo(tx, crate::test_support::config_ru());
         for s in [
             Screen::Main,
             Screen::Rules,
@@ -201,7 +201,7 @@ mod tests {
     #[tokio::test]
     async fn deprecated_and_rejected_servers_are_tagged() {
         let (tx, _rx) = unbounded_channel();
-        let mut app = AppState::with_demo(tx);
+        let mut app = AppState::with_demo(tx, crate::test_support::config_ru());
         // Mock list: FI-1 uses ws, Finland-3 uses grpc.
         let out = draw(80, MIN_HEIGHT, &mut app);
         println!("{out}");

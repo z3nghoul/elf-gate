@@ -687,7 +687,7 @@ async fn quitting_restores_the_system_proxy() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn crashed_core_does_not_leave_a_dead_system_proxy() {
     let xray = require_xray!();

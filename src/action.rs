@@ -40,7 +40,7 @@ pub enum Action {
     Back,
     FocusNext,
     FocusPrev,
-    #[cfg(debug_assertions)]
+    /// F12; does something only in a debug build (`build_info::DEBUG_PANIC_KEY`).
     DebugPanic,
     /// Ctrl+L: clear and redraw the whole screen (after the terminal garbled it).
     Redraw,
@@ -384,7 +384,6 @@ pub const BINDINGS: &[Binding] = &[
         // Only in the help screen: the bar has no room for a key needed once in a blue moon.
         scopes: 0,
     },
-    #[cfg(debug_assertions)]
     Binding {
         label: "F12",
         action: Action::DebugPanic,

@@ -71,7 +71,7 @@ fn sent(rx: &mut UnboundedReceiver<Cmd>) -> Vec<Cmd> {
 #[tokio::test]
 async fn filter_shows_only_matches() {
     let (tx, _rx) = unbounded_channel();
-    let mut a = AppState::with_demo(tx);
+    let mut a = AppState::with_demo(tx, crate::test_support::config_ru());
     a.filter = "de-".into();
     let rows = a.rows();
     assert_eq!(rows.len(), 2); // group + DE-1
@@ -81,7 +81,7 @@ async fn filter_shows_only_matches() {
 #[tokio::test]
 async fn collapsing_hides_servers_and_survives_a_new_view() {
     let (tx, _rx) = unbounded_channel();
-    let mut a = AppState::with_demo(tx);
+    let mut a = AppState::with_demo(tx, crate::test_support::config_ru());
     let all = a.rows().len();
     a.subs[0].collapsed = true;
     assert_eq!(a.rows().len(), all - a.subs[0].servers.len());

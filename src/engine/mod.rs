@@ -337,7 +337,7 @@ impl Engine {
     }
 
     /// PID of the running core (tests use it to simulate a crash).
-    #[cfg(all(test, unix))]
+    #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn core_pid(&self) -> Option<u32> {
         self.core.as_ref().and_then(|c| c.pid())
     }

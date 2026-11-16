@@ -287,7 +287,6 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
             | Action::QuitAll
             | Action::Help
             | Action::Redraw => None,
-            #[cfg(debug_assertions)]
             Action::DebugPanic => None,
         };
         if let Some(text) = text {
