@@ -74,6 +74,8 @@ struct Palette {
     panel: Rgb,
     text: Rgb,
     muted: Rgb,
+    /// Muted text on the selected row (Latte: plain text, its muted colour is 4.05:1 there).
+    muted_on_selection: Rgb,
     border: Rgb,
     accent: Rgb,
     selection: Rgb,
@@ -88,6 +90,7 @@ const MOCHA: Palette = Palette {
     panel: rgb(0x181825),
     text: rgb(0xcdd6f4),
     muted: rgb(0xa6adc8),
+    muted_on_selection: rgb(0xa6adc8),
     border: rgb(0x6c7086),
     accent: rgb(0xcba6f7),
     selection: rgb(0x313244),
@@ -104,6 +107,7 @@ const LATTE: Palette = Palette {
     // Deviation from the role table: subtext1, not subtext0 (#6c6f85 is 4.37:1 on base, below the
     // 4.5:1 that hints and explanations need). Mocha keeps subtext0.
     muted: rgb(0x5c5f77),
+    muted_on_selection: rgb(0x4c4f69),
     border: rgb(0x9ca0b0),
     accent: rgb(0x8839ef),
     selection: rgb(0xccd0da),
@@ -119,6 +123,8 @@ pub struct Theme {
     pub panel_bg: Color,
     pub text: Color,
     pub muted: Color,
+    /// What muted text becomes on the selected row.
+    pub muted_on_selection: Color,
     pub border: Color,
     pub border_active: Color,
     pub selection: Color,
@@ -174,6 +180,7 @@ impl Theme {
             panel_bg: q(p.panel),
             text: q(p.text),
             muted: q(p.muted),
+            muted_on_selection: q(p.muted_on_selection),
             border: q(p.border),
             border_active: q(p.accent),
             selection: q(p.selection),
@@ -204,6 +211,7 @@ impl Theme {
             panel_bg: Color::Reset,
             text: Color::Reset,
             muted: Color::DarkGray,
+            muted_on_selection: Color::DarkGray,
             border: Color::DarkGray,
             border_active: Color::Magenta,
             selection: Color::Reset,
@@ -226,6 +234,7 @@ impl Theme {
             panel_bg: Color::Reset,
             text: Color::Reset,
             muted: Color::Reset,
+            muted_on_selection: Color::Reset,
             border: Color::Reset,
             border_active: Color::Reset,
             selection: Color::Reset,
@@ -391,12 +400,11 @@ mod tests {
                     assert!(c >= 4.5, "{name}: {fg_name} on {bg_name} is {c:.2}:1");
                 }
             }
-            // On the selected row only plain text is held to 4.5:1: Latte's muted text on its
-            // official surface0 is 4.05:1 (checked below as the floor, listed in the report).
+            // On the selected row: plain text, and muted text in its selected-row colour.
             let c = contrast(p.text, p.selection);
             assert!(c >= 4.5, "{name}: text on selection is {c:.2}:1");
-            let c = contrast(p.muted, p.selection);
-            assert!(c >= 4.0, "{name}: muted on selection is {c:.2}:1");
+            let c = contrast(p.muted_on_selection, p.selection);
+            assert!(c >= 4.5, "{name}: muted on selection is {c:.2}:1");
         }
     }
 

@@ -153,3 +153,36 @@ async fn subscription_screen_in_every_theme_and_in_privacy_mode() {
         }
     }
 }
+
+#[tokio::test]
+async fn latte_muted_text_on_the_selected_row_is_drawn_in_the_text_colour() {
+    let (tx, _rx) = unbounded_channel();
+    let mut app = AppState::with_demo(tx, crate::test_support::config_ru());
+    app.config.ui.theme = "latte".into();
+    app.config
+        .subscriptions
+        .push(crate::storage::SubscriptionConfig {
+            name: "Alpha".into(),
+            url: "https://alpha.example/***".into(),
+            ..Default::default()
+        });
+    app.open_subscription("Alpha");
+    let ctx = RenderCtx::new(false, &app.config.ui, ColorMode::TrueColor);
+    let find = |app: &mut AppState, row: usize| {
+        app.sub_cursor = row;
+        let (text, buf) = tests_support::draw_buf(100, 30, app, &ctx);
+        let (y, line) = text
+            .lines()
+            .enumerate()
+            .find(|(_, l)| l.contains("(по умолчанию)") && l.contains("Интервал"))
+            .map(|(y, l)| (y as u16, l.to_string()))
+            .expect("the interval row");
+        let byte = line.find("(по умолчанию)").unwrap();
+        let x = line[..byte].chars().count() as u16;
+        buf[(x, y)].fg
+    };
+    // Selected: the tag is in the text colour. Not selected: it stays muted.
+    let hours = 3;
+    assert_eq!(find(&mut app, hours), ctx.theme.text);
+    assert_eq!(find(&mut app, 0), ctx.theme.muted);
+}

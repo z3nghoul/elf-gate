@@ -145,6 +145,14 @@ pub fn draw_lines(
                     .insert(0, Span::raw(if on { "> " } else { "  " }));
                 if on {
                     line = line.style(th.selected());
+                    // Muted text on the selection may be too pale: the theme says what to use.
+                    if th.muted_on_selection != th.muted {
+                        for span in &mut line.spans {
+                            if span.style.fg == Some(th.muted) {
+                                span.style.fg = Some(th.muted_on_selection);
+                            }
+                        }
+                    }
                 }
             }
             line
