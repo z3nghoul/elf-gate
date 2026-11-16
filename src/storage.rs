@@ -610,11 +610,13 @@ mod tests {
     use super::*;
     use crate::test_support::TempDir;
 
+    #[cfg(unix)]
     struct RecordingPrivileges {
         home: PathBuf,
         chowned: std::sync::Mutex<Vec<PathBuf>>,
     }
 
+    #[cfg(unix)]
     impl Privileges for RecordingPrivileges {
         fn is_elevated(&self) -> bool {
             true
