@@ -59,7 +59,7 @@ impl ProxyController {
     }
 
     pub fn enable(&self, addr: &ProxyAddr, bypass: &[String]) -> Result<(), ProxyError> {
-        let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::sync::lock(&self.lock);
         if self.closed.load(Ordering::SeqCst) {
             return Err(ProxyError::Closed);
         }
@@ -96,7 +96,7 @@ impl ProxyController {
 
     /// Restores the user's settings. `Ok(false)` if there was nothing to restore.
     pub fn disable(&self) -> Result<bool, ProxyError> {
-        let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::sync::lock(&self.lock);
         self.restore_locked()
     }
 

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use thiserror::Error;
 
 const APP_DIR: &str = "elf-gate";
@@ -568,14 +569,33 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let parent = path.parent();
+    if let Some(parent) = parent {
         create_private_dir(parent)?;
     }
+    // Unique per process and call: the interface (under sudo) and the daemon may save at once.
     let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
+    tmp.push(format!(
+        ".{}-{}.tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
     let tmp = PathBuf::from(tmp);
-    write_private(&tmp, text.as_bytes())?;
-    fs::rename(&tmp, path)?;
+    let write = || -> io::Result<()> {
+        write_private(&tmp, text.as_bytes())?;
+        // The data must be on disk before the rename, or a crash can leave an empty file.
+        fs::OpenOptions::new().write(true).open(&tmp)?.sync_all()?;
+        fs::rename(&tmp, path)
+    };
+    if let Err(e) = write() {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    #[cfg(unix)]
+    if let Some(parent) = parent {
+        let _ = fs::File::open(parent).and_then(|d| d.sync_all());
+    }
     fix_owner(path);
     Ok(())
 }
@@ -683,7 +703,12 @@ mod tests {
         cfg.core.socks_port = 1234;
         st.save(&cfg).unwrap();
         assert_eq!(st.load().unwrap(), cfg);
-        assert!(!dir.join("config.toml.tmp").exists());
+        let leftovers = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+        assert_eq!(leftovers, 0, "no temporary file may stay behind");
         let _ = fs::remove_dir_all(dir);
     }
 

@@ -62,7 +62,7 @@ impl Hub {
 
     pub fn subscribe(&self) -> Feed {
         // Take the backlog and the receiver under one lock so no line is lost or doubled.
-        let logs = self.logs.lock().unwrap();
+        let logs = crate::sync::lock(&self.logs);
         Feed {
             backlog: logs.iter().cloned().collect(),
             view: self.view_tx.subscribe(),
@@ -76,7 +76,7 @@ impl Hub {
     }
 
     fn push_log(&self, line: LogLine) {
-        let mut logs = self.logs.lock().unwrap();
+        let mut logs = crate::sync::lock(&self.logs);
         if logs.len() == LOG_CAPACITY {
             logs.pop_front();
         }

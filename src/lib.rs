@@ -17,6 +17,7 @@ pub mod platform;
 pub mod proto;
 pub mod redact;
 pub mod storage;
+pub mod sync;
 pub mod sysproxy;
 pub mod tray;
 pub mod tun;

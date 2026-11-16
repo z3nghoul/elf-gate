@@ -225,18 +225,15 @@ impl Checker {
     }
 
     pub fn flush(&self) {
-        self.cache.lock().unwrap().flush();
+        crate::sync::lock(&self.cache).flush();
     }
 
     pub async fn version_of(&self, binary: &Path) -> Option<String> {
-        if let Some(v) = self.versions.lock().unwrap().get(binary) {
+        if let Some(v) = crate::sync::lock(&self.versions).get(binary) {
             return Some(v.clone());
         }
         let v = xray_version(binary).await?;
-        self.versions
-            .lock()
-            .unwrap()
-            .insert(binary.to_path_buf(), v.clone());
+        crate::sync::lock(&self.versions).insert(binary.to_path_buf(), v.clone());
         Some(v)
     }
 
@@ -253,7 +250,7 @@ impl Checker {
         };
         let key = format!("{}-{}", config_key(cfg), environment_fingerprint(binary));
         {
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = crate::sync::lock(&self.cache);
             cache.use_version(&version);
             if let Some(v) = cache.lookup(&key) {
                 return v;
@@ -261,7 +258,7 @@ impl Checker {
         }
         let _permit = self.permits.acquire().await.ok();
         let verdict = validate::check_config(binary, cfg, run_dir).await;
-        self.cache.lock().unwrap().store(key, &verdict);
+        crate::sync::lock(&self.cache).store(key, &verdict);
         verdict
     }
 

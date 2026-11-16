@@ -46,7 +46,7 @@ async fn start_tray(
                 let ui = me.with_file_name(format!("elf-gate{}", std::env::consts::EXE_SUFFIX));
                 let _ = platform::open_interface(&ui);
             }
-        } else if let Some(c) = cmd_for(&a, &view.lock().unwrap()) {
+        } else if let Some(c) = cmd_for(&a, &crate::sync::lock(&view)) {
             let _ = cmds.send(c);
         }
     });
@@ -58,7 +58,7 @@ async fn start_tray(
                 while feed.changed().await.is_ok() {
                     let v = feed.borrow_and_update().clone();
                     let _ = model_tx.send(model_from_view(&v));
-                    *latest.lock().unwrap() = (*v).clone();
+                    *crate::sync::lock(&latest) = (*v).clone();
                 }
             });
         }

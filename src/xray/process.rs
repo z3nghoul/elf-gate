@@ -212,7 +212,7 @@ where
                 continue;
             }
             {
-                let mut t = tail.lock().unwrap();
+                let mut t = crate::sync::lock(&tail);
                 if t.len() == TAIL_LINES {
                     t.pop_front();
                 }
@@ -416,9 +416,7 @@ impl Core {
 
     /// Last output lines of the core, oldest first.
     pub fn tail(&self) -> String {
-        self.tail
-            .lock()
-            .unwrap()
+        crate::sync::lock(&self.tail)
             .iter()
             .cloned()
             .collect::<Vec<_>>()
