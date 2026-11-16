@@ -2,7 +2,9 @@ name: Release
 
 # A tag like v1.0.3 builds both archives, checks them and creates a DRAFT release.
 # Publishing the draft is a manual step (see docs/release.md).
-# workflow_dispatch must be started from a tag ("Use workflow from: Tag"), never from a branch.
+# workflow_dispatch with dry_run=false must be started from a tag ("Use workflow from: Tag").
+# dry_run=true can run from any branch: it builds both archives and SHA256SUMS, uploads them
+# as workflow artifacts and creates no release.
 on:
   push:
     tags: ['v*']
@@ -10,6 +12,10 @@ on:
     inputs:
       prerelease:
         description: 'Mark the release as a pre-release'
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Dry run: build and upload artifacts only, no release, no version = tag check'
         type: boolean
         default: false
 
@@ -26,6 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: The tag matches the version in Cargo.toml
+        if: ${{ !inputs.dry_run }}
         shell: bash
         run: |
           if [ "$GITHUB_REF_TYPE" != tag ]; then
@@ -38,6 +45,7 @@ jobs:
             exit 1
           fi
       - name: Release notes from CHANGELOG.md
+        if: ${{ !inputs.dry_run }}
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -53,6 +61,7 @@ jobs:
           fi
           cat release-notes.md
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ !inputs.dry_run }}
         with:
           name: release-notes
           path: release-notes.md
@@ -187,7 +196,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Draft release
+    name: Draft release (dry run: SHA256SUMS only)
     needs: [check, build]
     runs-on: ubuntu-latest
     permissions:
@@ -197,17 +206,29 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: SHA256SUMS and the draft
+      - name: SHA256SUMS
         shell: bash
+        working-directory: dist
+        run: |
+          ls -l
+          sha256sum elf-gate-linux-x86_64.tar.gz elf-gate-windows-x86_64.zip > SHA256SUMS
+          cat SHA256SUMS
+      # Dry run: the archives are already workflow artifacts (job build); add the sums.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ inputs.dry_run }}
+        with:
+          name: SHA256SUMS
+          path: dist/SHA256SUMS
+          if-no-files-found: error
+      - name: Create the draft release
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        working-directory: dist
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           DISPATCH_PRERELEASE: ${{ inputs.prerelease }}
         run: |
-          cd dist
-          ls -l
-          sha256sum elf-gate-linux-x86_64.tar.gz elf-gate-windows-x86_64.zip > SHA256SUMS
-          cat SHA256SUMS
           flags=()
           if [[ "$TAG" == *-* || "$DISPATCH_PRERELEASE" == true ]]; then flags+=(--prerelease); fi
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
