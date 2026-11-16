@@ -766,6 +766,16 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    /// The default TUN interface name is elf-gate's own, never a generic one (xray0, tun0) that
+    /// another program may use; a name already in a config stays as it is.
+    #[test]
+    fn the_default_tun_name_is_ours_and_a_configured_one_is_kept() {
+        assert_eq!(TunConfig::default().name, "elfgate0");
+        let dir = TempDir::new("tun-name");
+        fs::write(dir.join("config.toml"), "[tun]\nname = \"tun0\"\n").unwrap();
+        assert_eq!(Storage::new(dir.path()).load().unwrap().tun.name, "tun0");
+    }
+
     #[test]
     fn missing_file_gives_defaults() {
         let st = Storage::new(TempDir::new("missing").path());
