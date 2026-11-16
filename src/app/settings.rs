@@ -71,14 +71,15 @@ impl SettingId {
     ];
 
     /// What the setting does, in plain words, for the line under the table.
-    pub fn explain(&self) -> String {
+    pub fn explain(&self, windows: bool) -> String {
         crate::t!(match self {
             SettingId::Language => "explain.language",
             SettingId::Theme => "explain.theme",
             SettingId::TransparentBg => "explain.transparent_bg",
             SettingId::Privacy => "explain.privacy",
             SettingId::AutoConnect => "explain.auto_connect",
-            SettingId::Autostart => "explain.autostart",
+            SettingId::Autostart if windows => "explain.autostart_win",
+            SettingId::Autostart => "explain.autostart_unix",
             SettingId::SetSystemProxy => "explain.system_proxy",
             SettingId::ManageFirewall => "explain.firewall",
             SettingId::TunXrayPath => "explain.tun_xray_path",

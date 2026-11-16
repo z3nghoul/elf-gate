@@ -111,6 +111,9 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &Rende
     } else {
         crate::t!("settings.tray_absent")
     };
-    let text = rows.get(cursor).map(|r| r.0.explain()).unwrap_or_default();
+    let text = rows
+        .get(cursor)
+        .map(|r| r.0.explain(ctx.windows))
+        .unwrap_or_default();
     crate::ui::explain::render(f, foot, &text, Some(tray), th);
 }

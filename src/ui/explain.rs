@@ -1,4 +1,4 @@
-//! The explanation of the selected row: one fixed place under the list (four lines), so that it
+//! The explanation of the selected row: one fixed place under the list (three lines), so that it
 //! does not move when the list scrolls.
 
 use crate::ui::theme::Theme;
@@ -7,8 +7,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-/// Rows the box takes: four lines of text and the border.
-pub const HEIGHT: u16 = 6;
+/// Rows the box takes: three lines of text and the border.
+pub const HEIGHT: u16 = 5;
 
 /// `note` goes on the bottom border (the tray state on the settings screen).
 pub fn render(f: &mut Frame, area: Rect, text: &str, note: Option<String>, th: &Theme) {
@@ -29,17 +29,19 @@ mod tests {
     use crate::app::subscription::SubRow;
     use crate::app::SettingId;
 
-    /// The longest text that fits: four lines of the width of an 80-column screen.
-    const MAX_LINES: usize = 4;
+    /// The longest text that fits: three lines of the width of an 80-column screen.
+    const MAX_LINES: usize = 3;
     const WIDTH_80: usize = 80 - 2;
 
     #[test]
-    fn every_setting_and_subscription_row_is_explained_in_four_lines_in_every_language() {
+    fn every_setting_and_subscription_row_is_explained_in_three_lines_in_every_language() {
         for lang in crate::i18n::ALL {
             crate::i18n::bind_thread(lang);
             let texts = SettingId::ALL
                 .iter()
-                .map(|id| (format!("{id:?}"), id.explain()))
+                .flat_map(|id| {
+                    [false, true].map(|w| (format!("{id:?} windows={w}"), id.explain(w)))
+                })
                 .chain(SubRow::ALL.iter().map(|r| (format!("{r:?}"), r.explain())));
             for (name, text) in texts {
                 assert!(
