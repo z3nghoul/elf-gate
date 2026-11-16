@@ -36,6 +36,61 @@ pub enum SettingId {
     SubHours(String),
 }
 
+/// The groups of the settings screen, in the order they are shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Section {
+    Appearance,
+    Connection,
+    Subscriptions,
+    Tun,
+    Ping,
+    Core,
+    Updates,
+    Ports,
+    Device,
+}
+
+impl Section {
+    pub fn title(self) -> String {
+        crate::t!(match self {
+            Section::Appearance => "section.appearance",
+            Section::Connection => "section.connection",
+            Section::Subscriptions => "section.subscriptions",
+            Section::Tun => "section.tun",
+            Section::Ping => "section.ping",
+            Section::Core => "section.core",
+            Section::Updates => "section.updates",
+            Section::Ports => "section.ports",
+            Section::Device => "section.device",
+        })
+    }
+}
+
+pub fn section_of(id: &SettingId) -> Section {
+    use SettingId::*;
+    match id {
+        Language | Theme | TransparentBg | Privacy => Section::Appearance,
+        AutoConnect | Autostart | SetSystemProxy | ManageFirewall => Section::Connection,
+        SubUa(_) | SubHours(_) => Section::Subscriptions,
+        TunXrayPath | TunName | TunnelDns | ProxyWithTun => Section::Tun,
+        PingMode | PingUrl | PingTimeout | PingAuto => Section::Ping,
+        XrayPath | LogLevel | VerboseLog => Section::Core,
+        CheckUpdates | UpdateChannel => Section::Updates,
+        SocksPort | HttpPort | ApiPort => Section::Ports,
+        Hwid => Section::Device,
+    }
+}
+
+/// What the platform has: a setting that does nothing here is not shown (a dimmed row with
+/// an explanation would only take room on a 24-line screen).
+fn available(id: &SettingId, windows: bool) -> bool {
+    match id {
+        SettingId::ManageFirewall => windows,
+        SettingId::TunXrayPath => !windows,
+        _ => true,
+    }
+}
+
 const LOG_LEVELS: [&str; 5] = ["debug", "info", "warning", "error", "none"];
 
 fn onoff(b: bool) -> String {
@@ -47,8 +102,20 @@ fn onoff(b: bool) -> String {
 }
 
 impl AppState {
-    /// `(id, label, current value)` in display order.
+    /// `(id, label, current value)` in display order, for this platform.
     pub fn settings_rows(&self) -> Vec<(SettingId, String, String)> {
+        self.settings_rows_for(crate::platform::IS_WINDOWS)
+    }
+
+    /// The rows grouped by section (a stable sort keeps the order inside a section).
+    pub fn settings_rows_for(&self, windows: bool) -> Vec<(SettingId, String, String)> {
+        let mut rows = self.settings_rows_unsorted();
+        rows.retain(|r| available(&r.0, windows));
+        rows.sort_by_key(|r| section_of(&r.0) as u8);
+        rows
+    }
+
+    fn settings_rows_unsorted(&self) -> Vec<(SettingId, String, String)> {
         let c = &self.config;
         let mut rows = vec![
             (
@@ -200,6 +267,27 @@ impl AppState {
             ));
         }
         rows
+    }
+
+    /// Jump to the first row of the next or the previous section.
+    pub(super) fn settings_section(&mut self, forward: bool) {
+        let rows = self.settings_rows();
+        let cur = self.settings_cursor.min(rows.len().saturating_sub(1));
+        let sec = |i: usize| section_of(&rows[i].0);
+        let first_of = |sect: Section| rows.iter().position(|r| section_of(&r.0) == sect);
+        let Some(here) = rows.get(cur).map(|r| section_of(&r.0)) else {
+            return;
+        };
+        let target = if forward {
+            (cur + 1..rows.len()).map(sec).find(|s| *s != here)
+        } else if first_of(here) != Some(cur) {
+            Some(here)
+        } else {
+            (0..cur).rev().map(sec).find(|s| *s != here)
+        };
+        if let Some(i) = target.and_then(first_of) {
+            self.settings_cursor = i;
+        }
     }
 
     pub(super) fn settings_move(&mut self, delta: isize) {

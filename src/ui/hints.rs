@@ -166,7 +166,11 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
                 crate::t!("hint.select")
             }),
             Action::PageDown | Action::Bottom => logs_focus.then(|| b.short()),
-            Action::FocusNext => Some(b.short()),
+            Action::FocusNext => Some(if app.screen == Screen::Settings {
+                crate::t!("hint.section")
+            } else {
+                b.short()
+            }),
             Action::Back => Some(b.short()),
             Action::Enter => match app.screen {
                 Screen::Settings => {

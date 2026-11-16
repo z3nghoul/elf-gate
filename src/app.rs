@@ -12,7 +12,7 @@ use crate::proto::{Alert, Ask, Cmd, RuleRef, Traffic, Update, View};
 use crate::storage::Config;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
-mod settings;
+pub mod settings;
 pub use settings::SettingId;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -855,6 +855,10 @@ impl AppState {
     }
 
     fn cycle_focus(&mut self, forward: bool) {
+        if self.screen == Screen::Settings {
+            self.settings_section(forward);
+            return;
+        }
         if self.screen != Screen::Main {
             return;
         }

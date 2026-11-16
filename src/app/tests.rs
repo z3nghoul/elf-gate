@@ -662,3 +662,53 @@ async fn confirm_dialogs_answer_to_the_y_and_n_keys_on_every_layout() {
         assert!(!a.should_quit);
     }
 }
+
+#[tokio::test]
+async fn settings_are_grouped_and_hidden_by_platform() {
+    use crate::app::settings::{section_of, Section};
+    let (a, _rx) = app_with(&[REALITY]);
+    let lin = a.settings_rows_for(false);
+    let win = a.settings_rows_for(true);
+    let has = |rows: &[(SettingId, String, String)], id: SettingId| rows.iter().any(|r| r.0 == id);
+    assert!(has(&lin, SettingId::TunXrayPath) && !has(&win, SettingId::TunXrayPath));
+    assert!(has(&win, SettingId::ManageFirewall) && !has(&lin, SettingId::ManageFirewall));
+    // Sections come in the fixed order and each is one block.
+    let secs: Vec<u8> = lin.iter().map(|r| section_of(&r.0) as u8).collect();
+    assert!(secs.windows(2).all(|w| w[0] <= w[1]), "{secs:?}");
+    assert_eq!(section_of(&lin[0].0), Section::Appearance);
+}
+
+#[tokio::test]
+async fn settings_navigation_goes_over_every_row_and_sections_jump() {
+    use crate::app::settings::section_of;
+    let (mut a, _rx) = app_with(&[REALITY]);
+    a.screen = Screen::Settings;
+    let rows = a.settings_rows();
+    // j visits each row once: headers are not rows, so the cursor never stops on one.
+    let mut seen = vec![a.settings_cursor];
+    for _ in 0..rows.len() + 3 {
+        a.handle_action(Action::Down);
+        if seen.last() != Some(&a.settings_cursor) {
+            seen.push(a.settings_cursor);
+        }
+    }
+    assert_eq!(seen, (0..rows.len()).collect::<Vec<_>>());
+    // Tab goes to the first row of the next section, Shift+Tab to the start of this one, then back.
+    a.settings_cursor = 0;
+    a.handle_action(Action::FocusNext);
+    assert_ne!(
+        section_of(&rows[a.settings_cursor].0),
+        section_of(&rows[0].0)
+    );
+    let first = a.settings_cursor;
+    assert!(first == 0 || section_of(&rows[first - 1].0) != section_of(&rows[first].0));
+    a.settings_cursor = first + 1;
+    a.handle_action(Action::FocusPrev);
+    assert_eq!(a.settings_cursor, first);
+    a.handle_action(Action::FocusPrev);
+    assert_eq!(a.settings_cursor, 0);
+    // The last section: Tab stays.
+    a.settings_cursor = rows.len() - 1;
+    a.handle_action(Action::FocusNext);
+    assert_eq!(a.settings_cursor, rows.len() - 1);
+}

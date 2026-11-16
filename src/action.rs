@@ -172,16 +172,16 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         label: "Tab / Shift+Tab",
         action: Action::FocusNext,
-        keys: &[(KeyCode::Tab, N)],
+        keys: &[(KeyCode::Tab, N), (KeyCode::Char(']'), N)],
         hidden: false,
         bar: "Tab",
         prio: 7,
-        scopes: scope::MAIN,
+        scopes: scope::MAIN | scope::SETTINGS,
     },
     Binding {
         label: "",
         action: Action::FocusPrev,
-        keys: &[(KeyCode::BackTab, N)],
+        keys: &[(KeyCode::BackTab, N), (KeyCode::Char('['), N)],
         hidden: true,
         bar: "",
         prio: 9,
@@ -596,7 +596,7 @@ mod tests {
         assert_eq!(map_key(k('\u{434}', C)), Some(Action::Redraw)); // Ctrl + the L key
         assert_eq!(map_key(k('\u{456}', N)), Some(Action::Settings)); // Ukrainian i = s
                                                                       // A Cyrillic character on a key without a binding stays unbound.
-        assert_eq!(map_key(k('\u{44a}', N)), None);
+        assert_eq!(map_key(k('\u{451}', N)), None);
     }
 
     #[test]

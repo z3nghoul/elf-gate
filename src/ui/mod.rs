@@ -116,7 +116,7 @@ pub fn render(f: &mut Frame, app: &mut AppState, ctx: &RenderCtx) {
         }
         Screen::LogsFull => logs::render(f, body, app, &th),
         Screen::Rules => rules::render(f, body, app, &th, ctx),
-        Screen::Settings => settings::render(f, body, app, &th),
+        Screen::Settings => settings::render(f, body, app, &th, ctx),
         Screen::Help => help::render(f, body, &th),
     }
     let framed = |f: &mut Frame, rect| {

@@ -58,8 +58,9 @@ async fn screens_in_every_theme() {
     for (tname, theme, mode) in THEMES {
         for (sname, screen) in screens() {
             for windows in [false, true] {
-                // Only the rules screen depends on the platform.
-                if windows && sname != "rules" {
+                // Only these screens depend on the platform.
+                let platform = matches!(sname, "rules" | "settings");
+                if windows && !platform {
                     continue;
                 }
                 let (tx, _rx) = unbounded_channel();
@@ -68,7 +69,7 @@ async fn screens_in_every_theme() {
                 app.screen = screen;
                 let ctx = RenderCtx::new(windows, &app.config.ui, mode);
                 let (text, buf) = tests_support::draw_buf(100, 30, &mut app, &ctx);
-                let suffix = if sname == "rules" {
+                let suffix = if platform {
                     if windows {
                         "_windows"
                     } else {

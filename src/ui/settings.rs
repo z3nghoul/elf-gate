@@ -1,31 +1,82 @@
-use crate::app::{AppState, Screen};
+use crate::app::settings::section_of;
+use crate::app::{AppState, Screen, SettingId};
 use crate::ui::theme::Theme;
+use crate::ui::RenderCtx;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
-pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
+/// One line of the list: a section header (never selected) or a setting row.
+pub enum Item {
+    Header(crate::app::settings::Section),
+    Row(usize),
+}
+
+/// The rows with a header before each section.
+pub fn layout(rows: &[(SettingId, String, String)]) -> Vec<Item> {
+    let mut items = Vec::new();
+    let mut last = None;
+    for (i, r) in rows.iter().enumerate() {
+        let sec = section_of(&r.0);
+        if last != Some(sec) {
+            items.push(Item::Header(sec));
+            last = Some(sec);
+        }
+        items.push(Item::Row(i));
+    }
+    items
+}
+
+pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &RenderCtx) {
     debug_assert_eq!(app.screen, Screen::Settings);
     let [list_area, foot] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(4)]).areas(area);
-    let rows = app.settings_rows();
-    let items: Vec<ListItem> = rows
+    let rows = app.settings_rows_for(ctx.windows);
+    let inner_w = list_area.width.saturating_sub(4) as usize;
+    // The label column fits the longest label, but leaves room for a value.
+    let label_w = rows
         .iter()
-        .map(|(id, label, value)| {
-            let value = if app.privacy() && *id == crate::app::SettingId::Hwid {
-                crate::redact::hwid(value)
-            } else {
-                app.mask(value)
-            };
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{label:<34}"), th.text()),
-                Span::styled(value, th.title()),
-            ]))
+        .map(|r| r.1.width())
+        .max()
+        .unwrap_or(0)
+        .min(inner_w.saturating_sub(24))
+        + 2;
+    let cursor = app.settings_cursor.min(rows.len().saturating_sub(1));
+    let mut selected_item = 0;
+    let items: Vec<ListItem> = layout(&rows)
+        .iter()
+        .enumerate()
+        .map(|(n, item)| match item {
+            Item::Header(sec) => {
+                let title = format!("─ {} ", sec.title());
+                let fill = "─".repeat(inner_w.saturating_sub(title.width()));
+                ListItem::new(Line::from(Span::styled(
+                    format!("{title}{fill}"),
+                    th.border(false)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                )))
+            }
+            Item::Row(i) => {
+                if *i == cursor {
+                    selected_item = n;
+                }
+                let (id, label, value) = &rows[*i];
+                let value = if app.privacy() && *id == SettingId::Hwid {
+                    crate::redact::hwid(value)
+                } else {
+                    app.mask(value)
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(crate::ui::text::fit(label, label_w), th.text()),
+                    Span::styled(value, th.title()),
+                ]))
+            }
         })
         .collect();
     let mut state = ListState::default();
-    state.select(Some(app.settings_cursor.min(rows.len().saturating_sub(1))));
+    state.select(Some(selected_item));
     f.render_stateful_widget(
         List::new(items)
             .block(th.block(false).title(Span::styled(
@@ -43,7 +94,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         crate::t!("settings.tray_absent")
     };
     let on_transparent = matches!(
-        rows.get(app.settings_cursor).map(|r| &r.0),
+        rows.get(cursor).map(|r| &r.0),
         Some(crate::app::SettingId::TransparentBg)
     );
     let note = if on_transparent {

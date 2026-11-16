@@ -1,27 +1,26 @@
 ---
 source: src/ui/lang_tests.rs
-assertion_line: 27
 expression: frame
 ---
 ┌ Settings ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│  Language                          English                                                                           │
-│  Xray path                         xray                                                                              │
-│  Xray for TUN (Linux)              /usr/local/lib/elf-gate/xray                                                      │
-│  SOCKS port                        10808                                                                             │
-│  HTTP port                         10809                                                                             │
-│  API port (statistics)             10085                                                                             │
-│> Core log level                    warning                                                                           │
-│  Verbose core log (access)         off                                                                               │
-│  System proxy                      on                                                                                │
-│  System proxy together with TUN    on                                                                                │
-│  Ping mode                         tcp                                                                               │
-│  URL for URL ping                  https://www.gstatic.com/generate_204                                              │
-│  Ping timeout, ms                  3000                                                                              │
-│  Auto ping, s (0 = off)            60                                                                                │
-│  TUN interface name                elfgate0                                                                          │
-│  DNS through the tunnel            1.1.1.1                                                                           │
-│  Auto Windows Firewall setup       on                                                                                │
-│  Connect on start                  off                                                                               │
+│  ─ Appearance ───────────────────────────────────────────────────────────────────────────────────────────────────────│
+│  Language                        English                                                                             │
+│  Privacy mode (Ctrl+P)           off                                                                                 │
+│  Theme                           mocha                                                                               │
+│  Transparent background          off                                                                                 │
+│  ─ Connection ───────────────────────────────────────────────────────────────────────────────────────────────────────│
+│  System proxy                    on                                                                                  │
+│  Connect on start                off                                                                                 │
+│> Start at login                  off                                                                                 │
+│  ─ TUN ──────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│  Xray for TUN (Linux)            /usr/local/lib/elf-gate/xray                                                        │
+│  System proxy together with TUN  on                                                                                  │
+│  TUN interface name              elfgate0                                                                            │
+│  DNS through the tunnel          1.1.1.1                                                                             │
+│  ─ Ping ─────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│  Ping mode                       tcp                                                                                 │
+│  URL for URL ping                https://www.gstatic.com/generate_204                                                │
+│  Ping timeout, ms                3000                                                                                │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │tray icon: none (not supported by this desktop or not running)                                                        │
@@ -31,5 +30,5 @@ expression: frame
 │● Disconnected | PROXY                                                                                                │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│j/k select  Enter toggle  Ctrl+P priv.  Esc back  ? help  q/Q exit                                                    │
+│j/k select  Tab section  Enter toggle  Ctrl+P priv.  Esc back  ? help  q/Q exit                                       │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
