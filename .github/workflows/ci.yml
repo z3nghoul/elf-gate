@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual runs, to check a branch before it reaches main.
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
