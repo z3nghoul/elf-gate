@@ -1151,6 +1151,34 @@ mod tests {
         assert_eq!(*host.present_polls.lock().unwrap(), 1000, "never asked");
     }
 
+    /// A rule change confirmed with "apply" restarts the core through the same path as a
+    /// first connect: the adapter clean-up runs before the new core is started.
+    #[tokio::test]
+    async fn applying_changed_rules_restarts_through_the_adapter_cleanup() {
+        let dir = TempDir::new("apply");
+        let host = Arc::new(MockTunHost {
+            managed_adapter: true,
+            ..MockTunHost::healthy()
+        });
+        let (mut a, id) = tun_app(MockTunHost::healthy(), true, &dir);
+        a.tun_host = host.clone();
+        a.config.ui.tun_intro_done = true;
+        a.handle_cmd(Cmd::Answer {
+            ask: crate::proto::Ask::ApplyRules(id),
+            yes: true,
+        });
+        assert!(a.busy, "a start is under way");
+        let end = std::time::Instant::now() + Duration::from_secs(5);
+        while host.removed_names.lock().unwrap().is_empty() {
+            assert!(std::time::Instant::now() < end, "the clean-up never ran");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            *host.removed_names.lock().unwrap(),
+            [a.config.tun.name.clone()]
+        );
+    }
+
     #[tokio::test]
     async fn tun_toggle_switches_mode_and_remembers_it() {
         let dir = TempDir::new("toggle");
