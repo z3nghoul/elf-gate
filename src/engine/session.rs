@@ -14,6 +14,8 @@ use std::path::Path;
 struct Failure {
     message: String,
     needs_privileges: bool,
+    /// This machine's firewall, antivirus or another VPN refused the connection (10013).
+    local_block: bool,
 }
 
 impl From<String> for Failure {
@@ -21,6 +23,7 @@ impl From<String> for Failure {
         Failure {
             message,
             needs_privileges: false,
+            local_block: false,
         }
     }
 }
@@ -75,6 +78,7 @@ where
                 Err(again) if tun::looks_like_adapter_exists(&again.message) => Err(Failure {
                     message: crate::t!("eng.tun_adapter_stuck", raw = again.message),
                     needs_privileges: false,
+                    local_block: false,
                 }),
                 other => other,
             }
@@ -121,7 +125,16 @@ async fn start_core(request: StartRequest<'_>) -> Result<Core, Failure> {
     let ip = tun::resolve_server(&server.address, server.port).await?;
     tun::tcp_reachable(ip, server.port, Duration::from_secs(4))
         .await
-        .map_err(|e| crate::t!("eng.server_tcp_down", error = e))?;
+        .map_err(|e| Failure {
+            // A local block already says what happened: "the server is unreachable" would not.
+            message: if e.local_block {
+                e.text
+            } else {
+                crate::t!("eng.server_tcp_down", error = e.text)
+            },
+            needs_privileges: false,
+            local_block: e.local_block,
+        })?;
 
     // Ask Xray about the server itself first: a refusal greys the server out.
     if let Verdict::Rejected(reason) = checker.check(core_cfg, server, run_dir).await {
@@ -219,6 +232,7 @@ async fn start_core(request: StartRequest<'_>) -> Result<Core, Failure> {
             Failure {
                 needs_privileges: mode == Mode::Tun && tun::looks_like_missing_privileges(&text),
                 message: text,
+                local_block: false,
             }
         })?;
     if let (Some(store), Some(setup)) = (store, &setup) {
@@ -353,6 +367,7 @@ impl Engine {
                     id,
                     error: f.message,
                     needs_privileges: f.needs_privileges,
+                    local_block: f.local_block,
                 },
             };
             let _ = tx.send(ev);
@@ -432,7 +447,13 @@ impl Engine {
         self.spawn_health(id);
     }
 
-    pub(super) fn on_core_failed(&mut self, id: u64, error: String, needs_privileges: bool) {
+    pub(super) fn on_core_failed(
+        &mut self,
+        id: u64,
+        error: String,
+        needs_privileges: bool,
+        local_block: bool,
+    ) {
         self.log(Level::Error, format!("[Error] {error}"));
         if self.conn != Conn::Connecting(id) {
             return;
@@ -442,6 +463,12 @@ impl Engine {
         self.request_proxy_off();
         if needs_privileges {
             self.show_problem(&Problem::NeedsPrivileges);
+        } else if local_block && crate::platform::IS_WINDOWS {
+            // The button: one elevated run that sets the firewall right, then it ends.
+            self.alert(Alert::Ask {
+                text: crate::t!("eng.firewall_ask", error = error),
+                ask: Ask::ConfigureFirewall,
+            });
         } else {
             self.error_alert(error);
         }
@@ -851,6 +878,50 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// 10013 at the connect check: the server is not blamed, and where there is a firewall to
+    /// set up the dialog offers it.
+    #[tokio::test]
+    async fn a_local_block_offers_the_firewall_and_leaves_the_server_alone() {
+        let (tx, _rx) = unbounded_channel();
+        let mut a = Engine::build(tx, crate::test_support::config_ru(), None, false);
+        a.add_link("vless://u@10.0.0.5:443?security=none#Real".into());
+        let id = a.subs.last().unwrap().servers[0].id;
+        a.conn = Conn::Connecting(id);
+        a.on_core_failed(
+            id,
+            "Windows запретила elf-gate подключиться".into(),
+            false,
+            true,
+        );
+        let last = a.alerts().last().cloned();
+        if crate::platform::IS_WINDOWS {
+            let Some(Alert::Ask { text, ask }) = last else {
+                panic!("{:?}", a.alerts())
+            };
+            assert_eq!(ask, Ask::ConfigureFirewall);
+            assert!(text.contains("Windows запретила"), "{text}");
+        } else {
+            assert!(matches!(last, Some(Alert::Error(_))), "{last:?}");
+        }
+        let server = &a.subs.last().unwrap().servers[0];
+        assert!(server.unsupported.is_none(), "the server is not marked");
+        assert_eq!(server.ping, crate::model::server::Ping::Unknown);
+
+        a.handle_cmd(Cmd::Answer {
+            ask: Ask::ConfigureFirewall,
+            yes: false,
+        });
+        assert!(!a.firewall_setup_requested);
+        a.handle_cmd(Cmd::Answer {
+            ask: Ask::ConfigureFirewall,
+            yes: true,
+        });
+        assert!(
+            a.firewall_setup_requested,
+            "the loop starts the elevated run"
+        );
+    }
+
     #[tokio::test]
     async fn declining_elevation_explains_that_tun_needs_it() {
         let (tx, _rx) = unbounded_channel();
@@ -873,6 +944,7 @@ mod tests {
             id,
             "ядро завершилось сразу (operation not permitted)".into(),
             true,
+            false,
         );
         assert!(matches!(a.conn, Conn::Error(_)));
         assert!(!a.alerts().is_empty());
@@ -881,6 +953,7 @@ mod tests {
         a.on_core_failed(
             id,
             "порт 10808 (socks) уже занят другой программой".into(),
+            false,
             false,
         );
         assert!(matches!(a.alerts().last(), Some(Alert::Error(t)) if t.contains("10808")));
@@ -1033,6 +1106,7 @@ mod tests {
         Failure {
             message: text.into(),
             needs_privileges: false,
+            local_block: false,
         }
     }
 

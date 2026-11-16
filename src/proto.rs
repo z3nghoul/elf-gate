@@ -126,6 +126,8 @@ pub enum Ask {
     PresetOffer(u64),
     /// Windows: restart with administrator rights.
     RelaunchElevated,
+    /// Windows: run the firewall setup once with administrator rights (UAC).
+    ConfigureFirewall,
     /// Rules changed while connected: restart the core to apply them.
     ApplyRules(u64),
 }

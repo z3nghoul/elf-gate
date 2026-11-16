@@ -354,6 +354,23 @@ pub fn is_local_block(e: &std::io::Error) -> bool {
     e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(10013)
 }
 
+/// Why the server could not be reached over TCP.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Unreachable {
+    pub text: String,
+    /// This machine refused the connection (see [`is_local_block`]): the server was never asked.
+    pub local_block: bool,
+}
+
+impl Unreachable {
+    fn plain(text: String) -> Self {
+        Self {
+            text,
+            local_block: false,
+        }
+    }
+}
+
 /// The words for a refused connect: a local block (never the server's fault) or a plain failure.
 fn connect_failure(ip: IpAddr, port: u16, e: &std::io::Error) -> String {
     if is_local_block(e) {
@@ -365,16 +382,19 @@ fn connect_failure(ip: IpAddr, port: u16, e: &std::io::Error) -> String {
 
 /// Is the server reachable over TCP at all? Must run before the tunnel is up: afterwards
 /// this machine's own connections would go through the tunnel.
-pub async fn tcp_reachable(ip: IpAddr, port: u16, limit: Duration) -> Result<(), String> {
+pub async fn tcp_reachable(ip: IpAddr, port: u16, limit: Duration) -> Result<(), Unreachable> {
     match timeout(limit, TcpStream::connect((ip, port))).await {
         Ok(Ok(_)) => Ok(()),
-        Ok(Err(e)) => Err(connect_failure(ip, port, &e)),
-        Err(_) => Err(crate::t!(
+        Ok(Err(e)) => Err(Unreachable {
+            text: connect_failure(ip, port, &e),
+            local_block: is_local_block(&e),
+        }),
+        Err(_) => Err(Unreachable::plain(crate::t!(
             "tun.unreachable_timeout",
             ip = ip,
             port = port,
             secs = limit.as_secs()
-        )),
+        ))),
     }
 }
 
@@ -760,7 +780,8 @@ mod tests {
         let err = tcp_reachable(ip, port, Duration::from_secs(2))
             .await
             .unwrap_err();
-        assert!(err.contains("недоступен"), "{err}");
+        assert!(err.text.contains("недоступен"), "{}", err.text);
+        assert!(!err.local_block);
     }
 
     #[test]

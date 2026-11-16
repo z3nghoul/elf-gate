@@ -156,7 +156,18 @@ pub async fn run(args: &[String]) -> i32 {
                     tokio::spawn(crate::ipc::serve_client(stream, hub.clone(), cmd_tx.clone()));
                 }
             }
-            Some(cmd) = cmd_rx.recv() => engine.handle_cmd(cmd),
+            Some(cmd) = cmd_rx.recv() => {
+                engine.handle_cmd(cmd);
+                if std::mem::take(&mut engine.firewall_setup_requested) {
+                    match platform::privileges().relaunch_elevated(&["--firewall".to_string()]) {
+                        Ok(()) => engine.log(crate::event::Level::Info, "firewall setup started"),
+                        Err(e) => engine.log(
+                            crate::event::Level::Warning,
+                            format!("firewall setup not started: {e}"),
+                        ),
+                    }
+                }
+            }
             Some(ev) = bg_rx.recv() => { engine.on_bg(ev); engine.flush_view(); }
             _ = tick.tick() => engine.on_tick(),
         }

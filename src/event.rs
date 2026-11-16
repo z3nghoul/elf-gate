@@ -74,6 +74,8 @@ pub enum BgEvent {
         error: String,
         /// The core could not start for lack of rights (TUN): the UI explains how to get them.
         needs_privileges: bool,
+        /// The connection was refused by this machine (10013): the UI offers the firewall setup.
+        local_block: bool,
     },
     /// Result of the connection check through the local proxy.
     Health {

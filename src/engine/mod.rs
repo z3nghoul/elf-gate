@@ -110,6 +110,8 @@ pub struct Engine {
     pub should_exit: bool,
     /// Set by `Cmd::RelaunchElevated`: the process should restart with administrator rights.
     pub relaunch_elevated: bool,
+    /// The user chose "configure the firewall": the loop starts the elevated one-off run.
+    pub firewall_setup_requested: bool,
     tun_host: Arc<dyn TunHost>,
     state_store: Option<StateStore>,
     storage: Option<Storage>,
@@ -247,6 +249,7 @@ impl Engine {
             tray: false,
             should_exit: false,
             relaunch_elevated: false,
+            firewall_setup_requested: false,
             tun_host: Arc::from(crate::platform::tun_host()),
             state_store: None,
             storage,
@@ -712,9 +715,10 @@ impl Engine {
                 id,
                 error,
                 needs_privileges,
+                local_block,
             } => {
                 self.busy = false;
-                self.on_core_failed(id, error, needs_privileges);
+                self.on_core_failed(id, error, needs_privileges, local_block);
             }
             BgEvent::Health { id, result } => self.on_health(id, result),
             BgEvent::CoreStopped => self.busy = false,
@@ -804,6 +808,8 @@ impl Engine {
             (Ask::RelaunchElevated, false) => {
                 self.status(crate::t!("eng.no_admin_tun"));
             }
+            (Ask::ConfigureFirewall, true) => self.firewall_setup_requested = true,
+            (Ask::ConfigureFirewall, false) => {}
             (Ask::ApplyRules(id), true) => self.connect(id),
             (Ask::ApplyRules(_), false) => {}
         }
