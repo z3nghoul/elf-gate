@@ -73,13 +73,15 @@ pub struct CoreConfig {
 
 impl Default for CoreConfig {
     fn default() -> Self {
+        Self::for_platform(crate::platform::IS_WINDOWS)
+    }
+}
+
+impl CoreConfig {
+    /// The defaults of one platform (tests fix them, whatever runs the tests).
+    pub fn for_platform(windows: bool) -> Self {
         Self {
-            xray_path: if crate::platform::IS_WINDOWS {
-                "xray.exe"
-            } else {
-                "xray"
-            }
-            .to_string(),
+            xray_path: if windows { "xray.exe" } else { "xray" }.to_string(),
             socks_port: 10808,
             http_port: 10809,
             api_port: 10085,
@@ -139,8 +141,15 @@ pub struct TunConfig {
 
 impl Default for TunConfig {
     fn default() -> Self {
+        Self::for_platform(crate::platform::IS_WINDOWS)
+    }
+}
+
+impl TunConfig {
+    /// The defaults of one platform (tests fix them, whatever runs the tests).
+    pub fn for_platform(windows: bool) -> Self {
         Self {
-            xray_path: if crate::platform::IS_WINDOWS {
+            xray_path: if windows {
                 String::new()
             } else {
                 "/usr/local/lib/elf-gate/xray".into()

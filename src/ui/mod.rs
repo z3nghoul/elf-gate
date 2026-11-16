@@ -1,13 +1,10 @@
-/// A screen snapshot. The screens show the platform's own data (the process names of a preset,
-/// the default path of the core, the TUN core), so they are compared on Linux only; the other
-/// assertions of the tests run everywhere.
+/// A screen snapshot, compared on every runner. The test data does not depend on the host
+/// (`test_support::config_ru` fixes the platform data); what the platform changes on screen
+/// goes through `RenderCtx`, and such screens have a `_linux` and a `_windows` snapshot.
 #[cfg(test)]
 macro_rules! snap {
     ($name:expr, $frame:expr) => {
-        #[cfg(not(windows))]
         insta::assert_snapshot!($name, $frame);
-        #[cfg(windows)]
-        let _ = (&$name, &$frame);
     };
 }
 
@@ -38,7 +35,23 @@ use theme::Theme;
 pub const MIN_WIDTH: u16 = 60;
 pub const MIN_HEIGHT: u16 = 24;
 
-pub fn render(f: &mut Frame, app: &mut AppState) {
+/// What a screen needs to know besides the application state. Grows with the theme and the
+/// colour mode; for now only the platform (the screens show its process names and paths).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderCtx {
+    pub windows: bool,
+}
+
+impl RenderCtx {
+    /// The platform this program runs on.
+    pub const fn native() -> Self {
+        Self {
+            windows: crate::platform::IS_WINDOWS,
+        }
+    }
+}
+
+pub fn render(f: &mut Frame, app: &mut AppState, ctx: &RenderCtx) {
     let th = Theme::by_name(&app.config.ui.theme);
     let area = f.area();
 
@@ -92,7 +105,7 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
             logs::render(f, bottom, app, &th);
         }
         Screen::LogsFull => logs::render(f, body, app, &th),
-        Screen::Rules => rules::render(f, body, app, &th),
+        Screen::Rules => rules::render(f, body, app, &th, ctx),
         Screen::Settings => settings::render(f, body, app, &th),
         Screen::Help => help::render(f, body, &th),
     }
@@ -116,9 +129,14 @@ pub mod tests_support {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
+    /// Draws as on Linux.
     pub fn draw(w: u16, h: u16, app: &mut AppState) -> String {
+        draw_on(w, h, app, &RenderCtx { windows: false })
+    }
+
+    pub fn draw_on(w: u16, h: u16, app: &mut AppState, ctx: &RenderCtx) -> String {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-        term.draw(|f| render(f, app)).unwrap();
+        term.draw(|f| render(f, app, ctx)).unwrap();
         let buf = term.backend().buffer().clone();
         (0..h)
             .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())

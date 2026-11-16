@@ -10,6 +10,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 pub fn config_ru() -> Config {
     let mut config = Config::default();
     config.ui.language = Lang::Ru;
+    // Screens show these: the tests must not depend on the host (Linux data everywhere).
+    config.core = crate::storage::CoreConfig::for_platform(false);
+    config.tun = crate::storage::TunConfig::for_platform(false);
     config
 }
 

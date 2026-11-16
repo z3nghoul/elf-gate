@@ -14,7 +14,7 @@ fn mark(on: bool) -> &'static str {
     }
 }
 
-pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
+pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &super::RenderCtx) {
     debug_assert_eq!(app.screen, Screen::Rules);
     let routing = app.config.mode.routing;
     let tun = app.mode == TrafficMode::Tun;
@@ -65,7 +65,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                     .expect("builtin preset");
                 let on = app.config.presets.enabled.contains(id);
                 let active = p.active_in(routing);
-                let has_processes = !p.processes(crate::platform::IS_WINDOWS).is_empty();
+                let has_processes = !p.processes(ctx.windows).is_empty();
                 let mut note = String::new();
                 if !active {
                     note = format!("  {}", crate::t!("rules.inactive_in", mode = mode_name));
@@ -132,7 +132,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             .iter()
             .find(|p| &p.id == id)
             .map(|p| {
-                let names = p.processes(crate::platform::IS_WINDOWS).join(", ");
+                let names = p.processes(ctx.windows).join(", ");
                 let mut text = if names.is_empty() {
                     String::new()
                 } else {

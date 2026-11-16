@@ -2,7 +2,7 @@
 //! keys, and the keys it shows are the keys the table maps to the very same actions.
 
 use super::hints::{bar_text, hints};
-use super::tests_support::draw;
+use super::tests_support::{draw, draw_on};
 use crate::action::{map_key, Action};
 use crate::app::tests::view_with;
 use crate::app::{AppState, Conn, Focus, LinkState, Popup, Screen};
@@ -202,7 +202,14 @@ fn every_screen_and_state_has_a_key_bar_and_matches_its_snapshot() {
                 "{name}: a dialog needs its own keys, got `{last}`"
             );
         }
-        snap!(name, frame);
+        if name.starts_with("rules_") {
+            // The rules screen shows the platform's process names: one snapshot per platform.
+            snap!(format!("{name}_linux"), frame);
+            let windows = draw_on(w, h, &mut a, &super::RenderCtx { windows: true });
+            snap!(format!("{name}_windows"), windows);
+        } else {
+            snap!(name, frame);
+        }
     }
 }
 
