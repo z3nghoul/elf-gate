@@ -1419,11 +1419,12 @@ impl Engine {
                 crate::i18n::bind_thread(lang);
             }
             Theme(v) => {
-                if v != "dark" && v != "light" {
+                if !crate::ui::theme::THEMES.contains(&v.as_str()) {
                     return;
                 }
                 self.config.ui.theme = v;
             }
+            TransparentBg(v) => self.config.ui.transparent_bg = v,
             Autostart(on) => {
                 let result = crate::autostart::apply(
                     on,
@@ -1634,13 +1635,13 @@ mod settings_tests {
         assert_eq!(e.config.core.socks_port, 10808);
         assert!(matches!(e.alerts().last(), Some(Alert::Error(_))));
         e.handle_cmd(Cmd::Set(Setting::SocksPort(2000)));
-        e.handle_cmd(Cmd::Set(Setting::Theme("light".into())));
+        e.handle_cmd(Cmd::Set(Setting::Theme("latte".into())));
         e.handle_cmd(Cmd::Set(Setting::PingAutoIntervalSecs(0)));
         e.handle_cmd(Cmd::Set(Setting::LogLevel("loud".into())));
         assert_eq!(e.config.core.log_level, "warning");
         let saved = Storage::new(dir.path()).load().unwrap();
         assert_eq!(saved.core.socks_port, 2000);
-        assert_eq!(saved.ui.theme, "light");
+        assert_eq!(saved.ui.theme, "latte");
         assert_eq!(saved.ping.auto_interval_secs, 0);
     }
 

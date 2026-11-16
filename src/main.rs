@@ -57,7 +57,7 @@ fn setup_terminal() -> Result<Term> {
     Ok(Terminal::new(CrosstermBackend::new(io::stdout()))?)
 }
 
-async fn run(terminal: &mut Term, tun_from_cli: bool) -> Result<()> {
+async fn run(terminal: &mut Term, tun_from_cli: bool, colors: ui::theme::ColorMode) -> Result<()> {
     let (mut events, link_tx) = EventLoop::new();
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel::<Cmd>();
     let mut app = AppState::new(cmd_tx.clone());
@@ -70,11 +70,22 @@ async fn run(terminal: &mut Term, tun_from_cli: bool) -> Result<()> {
         Spawn::default_for_current_exe(),
     ));
 
+    let mut forced_logged = false;
     while !app.should_quit {
         if app.take_redraw() {
             terminal.clear()?;
         }
-        terminal.draw(|f| ui::render(f, &mut app, &ui::RenderCtx::native()))?;
+        terminal.draw(|f| {
+            let ctx = ui::RenderCtx::native(&app.config.ui, colors);
+            if !forced_logged && ui::theme::Theme::resolve(&app.config.ui.theme, colors, false).1 {
+                forced_logged = true;
+                tracing::warn!(
+                    "the terminal has no 256 colours: the terminal theme is used instead of {}",
+                    app.config.ui.theme
+                );
+            }
+            ui::render(f, &mut app, &ctx)
+        })?;
         match events.next().await {
             Some(ev) => app.handle_event(ev),
             None => break,
@@ -102,7 +113,9 @@ async fn main() -> Result<()> {
     install_panic_hook();
     let mut terminal = setup_terminal()?;
     let tun = args.iter().any(|a| a == "--tun");
-    let result = run(&mut terminal, tun).await;
+    let colors = ui::theme::ColorMode::detect();
+    tracing::info!("colour mode: {colors:?}");
+    let result = run(&mut terminal, tun, colors).await;
     restore_terminal();
     if let Err(e) = &result {
         tracing::error!("fatal: {e:#}");

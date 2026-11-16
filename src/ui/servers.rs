@@ -3,7 +3,7 @@ use crate::model::server::Ping;
 use crate::ui::theme::Theme;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 /// `31 tcp · 98 vpn`; with no room for both (a narrow column) only `98 vpn`, the tcp number
@@ -40,7 +40,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
                 .style(th.text())
                 .wrap(Wrap { trim: false })
                 .block(
-                    Block::bordered()
+                    th.block(false)
                         .title(Span::styled(
                             format!(" {} ", crate::t!("panel.servers")),
                             th.title(),
@@ -172,7 +172,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
 
     let list = List::new(items)
         .block(
-            Block::bordered()
+            th.block(false)
                 .title(Span::styled(title, th.title()))
                 .border_style(th.border(focused)),
         )

@@ -3,7 +3,7 @@ use crate::model::rule::{builtin_presets, RoutingMode, TrafficMode};
 use crate::ui::theme::Theme;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 fn mark(on: bool) -> &'static str {
@@ -47,7 +47,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &super
                 if tun { th.good() } else { th.warn() },
             )),
         ])
-        .block(Block::bordered().title(Span::styled(
+        .block(th.block(false).title(Span::styled(
             format!(" {} ", crate::t!("panel.rules")),
             th.title(),
         ))),
@@ -116,7 +116,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &super
     state.select(Some(app.rules_cursor.min(rows.len().saturating_sub(1))));
     f.render_stateful_widget(
         List::new(rows)
-            .block(Block::bordered().title(Span::styled(
+            .block(th.block(false).title(Span::styled(
                 format!(" {} ", crate::t!("panel.rules_list")),
                 th.title(),
             )))
@@ -152,7 +152,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &super
     f.render_widget(
         Paragraph::new(Span::styled(hint, th.muted()))
             .wrap(Wrap { trim: false })
-            .block(Block::bordered()),
+            .block(th.block(false)),
         foot,
     );
 }

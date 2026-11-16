@@ -2,7 +2,7 @@ use crate::app::{AppState, Popup};
 use crate::ui::theme::Theme;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 fn centered(area: Rect, w: u16, h: u16) -> Rect {
@@ -117,7 +117,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     f.render_widget(Clear, rect);
     f.render_widget(
         Paragraph::new(lines).wrap(Wrap { trim: false }).block(
-            Block::bordered()
+            th.block(false)
                 .title(Span::styled(format!(" {title} "), th.title()))
                 .border_style(border),
         ),
@@ -129,7 +129,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
 /// bottom, while the link and the hint keep their own rows.
 fn render_update(f: &mut Frame, area: Rect, w: u16, release: &crate::update::Release, th: &Theme) {
     let rect = centered(area, w, area.height.saturating_sub(2).min(24));
-    let block = Block::bordered()
+    let block = th
+        .block(false)
         .title(Span::styled(
             format!(
                 " {} ",

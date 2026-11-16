@@ -191,8 +191,10 @@ pub struct UiConfig {
     pub tun_intro_done: bool,
     /// Connect to `last_server` in the last traffic mode when the program starts. Off by default.
     pub auto_connect: bool,
-    /// `dark` or `light`.
+    /// `mocha`, `latte` or `terminal` (the old `dark` and `light` mean mocha and latte).
     pub theme: String,
+    /// Do not fill the screen with the theme's background (mocha and latte only).
+    pub transparent_bg: bool,
     /// Privacy mode (screenshots, streams): the screens hide addresses, ids, keys and URLs.
     pub privacy_mode: bool,
     /// Interface language: `en`, `ru` or `uk`. English unless chosen; never read from the system.
@@ -205,7 +207,8 @@ impl Default for UiConfig {
             last_server: None,
             tun_intro_done: false,
             auto_connect: false,
-            theme: "dark".into(),
+            theme: "mocha".into(),
+            transparent_bg: false,
             privacy_mode: false,
             language: crate::i18n::Lang::default(),
         }

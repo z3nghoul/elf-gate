@@ -205,7 +205,8 @@ fn every_screen_and_state_has_a_key_bar_and_matches_its_snapshot() {
         if name.starts_with("rules_") {
             // The rules screen shows the platform's process names: one snapshot per platform.
             snap!(format!("{name}_linux"), frame);
-            let windows = draw_on(w, h, &mut a, &super::RenderCtx { windows: true });
+            let ctx = super::RenderCtx::new(true, &a.config.ui, super::theme::ColorMode::TrueColor);
+            let windows = draw_on(w, h, &mut a, &ctx);
             snap!(format!("{name}_windows"), windows);
         } else {
             snap!(name, frame);
@@ -404,7 +405,7 @@ fn every_shown_key_is_the_key_the_table_maps_to_that_action() {
 fn the_status_line_wraps_into_rows_instead_of_being_cut() {
     use super::statusbar::rows;
     use super::theme::Theme;
-    let th = Theme::by_name("dark");
+    let th = Theme::mocha(super::theme::ColorMode::TrueColor, false);
     let mut a = app(&[REALITY]);
     a.conn = Conn::Connected(1);
     a.traffic.speed_up = 320;

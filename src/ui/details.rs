@@ -5,7 +5,7 @@ use crate::ui::statusbar::format_bytes;
 use crate::ui::theme::Theme;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 fn field<'a>(label: &str, value: String, th: &Theme) -> Line<'a> {
@@ -260,7 +260,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     };
     f.render_widget(
         Paragraph::new(lines).wrap(Wrap { trim: false }).block(
-            Block::bordered()
+            th.block(false)
                 .title(Span::styled(
                     format!(" {} ", crate::t!("detail.title")),
                     th.title(),

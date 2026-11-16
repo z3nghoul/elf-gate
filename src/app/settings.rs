@@ -29,6 +29,7 @@ pub enum SettingId {
     UpdateChannel,
     Hwid,
     Theme,
+    TransparentBg,
     Language,
     Privacy,
     SubUa(String),
@@ -175,9 +176,17 @@ impl AppState {
             (
                 SettingId::Theme,
                 crate::t!("setting.theme"),
-                c.ui.theme.clone(),
+                crate::ui::theme::canonical(&c.ui.theme).to_string(),
             ),
         ];
+        // Only the themes that have a background of their own can make it transparent.
+        if crate::ui::theme::canonical(&c.ui.theme) != "terminal" {
+            rows.push((
+                SettingId::TransparentBg,
+                crate::t!("setting.transparent_bg"),
+                onoff(c.ui.transparent_bg),
+            ));
+        }
         for s in &c.subscriptions {
             rows.push((
                 SettingId::SubUa(s.name.clone()),
@@ -240,7 +249,11 @@ impl AppState {
                 return;
             }
             SettingId::Language => Setting::Language(c.ui.language.next()),
-            SettingId::Theme => Setting::Theme(cycle(&["dark", "light"], &c.ui.theme)),
+            SettingId::Theme => Setting::Theme(cycle(
+                &crate::ui::theme::THEMES,
+                crate::ui::theme::canonical(&c.ui.theme),
+            )),
+            SettingId::TransparentBg => Setting::TransparentBg(!c.ui.transparent_bg),
             SettingId::LogLevel => Setting::LogLevel(cycle(&LOG_LEVELS, &c.core.log_level)),
             other => {
                 self.popup = Some(Popup::Input {

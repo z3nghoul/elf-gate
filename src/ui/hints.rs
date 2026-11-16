@@ -184,6 +184,7 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
                             | SettingId::VerboseLog
                             | SettingId::PingMode
                             | SettingId::Theme
+                            | SettingId::TransparentBg
                             | SettingId::LogLevel,
                         ) => crate::t!("hint.switch"),
                         Some(SettingId::Hwid) => crate::t!("hint.about_hwid"),

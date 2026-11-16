@@ -2,7 +2,7 @@ use crate::app::{AppState, Screen};
 use crate::ui::theme::Theme;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
 pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
@@ -28,7 +28,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     state.select(Some(app.settings_cursor.min(rows.len().saturating_sub(1))));
     f.render_stateful_widget(
         List::new(items)
-            .block(Block::bordered().title(Span::styled(
+            .block(th.block(false).title(Span::styled(
                 format!(" {} ", crate::t!("panel.settings")),
                 th.title(),
             )))
@@ -42,13 +42,25 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     } else {
         crate::t!("settings.tray_absent")
     };
+    let on_transparent = matches!(
+        rows.get(app.settings_cursor).map(|r| &r.0),
+        Some(crate::app::SettingId::TransparentBg)
+    );
+    let note = if on_transparent {
+        Line::from(Span::styled(
+            crate::t!("setting.transparent_bg_hint"),
+            th.info(),
+        ))
+    } else {
+        Line::from(Span::styled(tray, th.muted()))
+    };
     f.render_widget(
         Paragraph::new(vec![
-            Line::from(Span::styled(tray, th.muted())),
+            note,
             Line::from(Span::styled(crate::t!("settings.footer"), th.text())),
         ])
         .wrap(ratatui::widgets::Wrap { trim: false })
-        .block(Block::bordered()),
+        .block(th.block(false)),
         foot,
     );
 }

@@ -3,7 +3,7 @@ use crate::event::Level;
 use crate::ui::theme::Theme;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
@@ -47,7 +47,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
     }
     f.render_widget(
         Paragraph::new(lines).block(
-            Block::bordered()
+            th.block(false)
                 .title(Span::styled(title, th.title()))
                 .border_style(th.border(focused)),
         ),

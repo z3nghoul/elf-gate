@@ -457,7 +457,7 @@ async fn settings_rows_switch_cycle_and_edit() {
         sent(&mut rx),
         vec![
             Cmd::Set(crate::proto::Setting::AutoConnect(true)),
-            Cmd::Set(crate::proto::Setting::Theme("light".into())),
+            Cmd::Set(crate::proto::Setting::Theme("latte".into())),
             Cmd::Set(crate::proto::Setting::Autostart(true)),
         ]
     );

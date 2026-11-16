@@ -1,0 +1,73 @@
+---
+source: src/ui/theme_tests.rs
+expression: "styled_frame(&text, &buf)"
+---
+┌ Серверы ──────────────────────────────────┐┌ Детали ─────────────────────────────────────────────┐
+│> ▼ main (4)                               ││Подписка:      main                                  │
+│    DE-1                              -    ││Серверов:      4                                     │
+│    NL-2                              -    ││Трафик:        11.5 GB / 93.1 GB                     │
+│    FI-1†                             -    ││Истекает:      2027-01-15                            │
+│    Finland-3†                        -    ││                                                     │
+│  ▼ backup (3)                             ││                                                     │
+│    PL-1                              -    ││                                                     │
+│    SE-1                              -    ││                                                     │
+│    US-1†                             -    ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+└───────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
+┌ Логи ────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│● Отключено | PROXY | ↑0 B/s ↓0 B/s | VPN 0 B↑ 0 B↓ | напрямую 0 B↑ 0 B↓                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│j/k выбор  Tab панель  Enter свернуть  t PROXY→TUN  p пинг  o по пингу  a добавить                │
+│x удал. группу  r правила  s настр.  l журнал  / фильтр  Ctrl+P прив.  ? помощь  q/Q выход        │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+--- styles
+ABBBBBBBBBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACBBBBBBBBCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+ADDEEEEEEEEEEDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDACCCCCCCCCCCCCCCCFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+AFFGGFFFFFFFFFFFFFFFFFFFFFFFFFFFCCCCCCCCCCCCACCCCCCCCCCCCCCCCFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+AFFGGFFFFFFFFFFFFFFFFFFFFFFFFFFFCCCCCCCCCCCCACCCCCCCCCCCCCCCCFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+AFFGGFFFFFFFFFFFFFFFFFFFFFFFFFFFCCCCCCCCCCCCACCCCCCCCCCCCCCCCFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+AFFGGFFFFFFFFFFFFFFFFFFFFFFFFFFFCCCCCCCCCCCCACFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+AFFBBBBBBBBBBBBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFACFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+AFFGGFFFFFFFFFFFFFFFFFFFFFFFFFFFCCCCCCCCCCCCACFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+AFFGGFFFFFFFFFFFFFFFFFFFFFFFFFFFCCCCCCCCCCCCACFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+AFFGGFFFFFFFFFFFFFFFFFFFFFFFFFFFCCCCCCCCCCCCACFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+AFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFACFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+AFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFACFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+CBBBBBBCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+CFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+CFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+CFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+CFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+CFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+CFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+CFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+CFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+CCCFFFFFFFFFCCCBBBBBCCCFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC
+CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+CBBBFFFFFFCCBBBFFFFFFFCCBBBBBFFFFFFFFFCCBFFFFFFFFFFCCBFFFFFCCBFFFFFFFFFCCBFFFFFFFFFFFFFFFFFFFFFFFFFC
+CBFFFFFFFFFFFFFCCBFFFFFFFFCCBFFFFFFFCCBFFFFFFFCCBFFFFFFFCCBBBBBBFFFFFFCCBFFFFFFFCCBBBFFFFFFFFFFFFFFC
+CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+--- legend
+A fg=Magenta bg=Reset mod=NONE
+B fg=Magenta bg=Reset mod=BOLD
+C fg=DarkGray bg=Reset mod=NONE
+D fg=Reset bg=Reset mod=BOLD | REVERSED
+E fg=Magenta bg=Reset mod=BOLD | REVERSED
+F fg=Reset bg=Reset mod=NONE
+G fg=Green bg=Reset mod=NONE

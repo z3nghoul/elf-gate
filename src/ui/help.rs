@@ -3,7 +3,7 @@ use crate::build_info;
 use crate::ui::theme::Theme;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 pub fn render(f: &mut Frame, area: Rect, th: &Theme) {
@@ -35,7 +35,7 @@ pub fn render(f: &mut Frame, area: Rect, th: &Theme) {
         Span::styled(crate::t!("help.legend_grey"), th.text()),
     ]));
     f.render_widget(
-        Paragraph::new(lines).block(Block::bordered().title(Span::styled(
+        Paragraph::new(lines).block(th.block(false).title(Span::styled(
             format!(" {} ", crate::t!("panel.help")),
             th.title(),
         ))),

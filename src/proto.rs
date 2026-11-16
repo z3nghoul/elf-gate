@@ -63,6 +63,7 @@ pub enum Setting {
     CheckUpdates(bool),
     UpdateChannel(crate::storage::UpdateChannel),
     Theme(String),
+    TransparentBg(bool),
     Language(crate::i18n::Lang),
     PrivacyMode(bool),
     /// `[[subscriptions]]` entry by name.

@@ -26,36 +26,44 @@ mod statusbar;
 pub mod text;
 pub mod theme;
 #[cfg(test)]
+mod theme_tests;
+#[cfg(test)]
 mod update_tests;
 
 use crate::app::{AppState, Screen};
 use ratatui::layout::{Alignment, Constraint, Layout};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 use theme::Theme;
 
 pub const MIN_WIDTH: u16 = 60;
 pub const MIN_HEIGHT: u16 = 24;
 
-/// What a screen needs to know besides the application state. Grows with the theme and the
-/// colour mode; for now only the platform (the screens show its process names and paths).
+/// What a screen needs to know besides the application state: the platform (the screens show
+/// its process names and paths) and the theme (already resolved for the colours the terminal has).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderCtx {
     pub windows: bool,
+    pub theme: Theme,
 }
 
 impl RenderCtx {
-    /// The platform this program runs on.
-    pub const fn native() -> Self {
-        Self {
-            windows: crate::platform::IS_WINDOWS,
-        }
+    /// This platform, the theme from the settings. Built for every frame: the theme setting
+    /// applies at once.
+    pub fn native(ui: &crate::storage::UiConfig, mode: theme::ColorMode) -> Self {
+        Self::new(crate::platform::IS_WINDOWS, ui, mode)
+    }
+
+    pub fn new(windows: bool, ui: &crate::storage::UiConfig, mode: theme::ColorMode) -> Self {
+        let (theme, _) = Theme::resolve(&ui.theme, mode, ui.transparent_bg);
+        Self { windows, theme }
     }
 }
 
 pub fn render(f: &mut Frame, app: &mut AppState, ctx: &RenderCtx) {
-    let th = Theme::by_name(&app.config.ui.theme);
+    let th = ctx.theme;
     let area = f.area();
+    f.render_widget(Block::new().style(th.base()), area);
 
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
         let msg = crate::t!(
@@ -112,7 +120,7 @@ pub fn render(f: &mut Frame, app: &mut AppState, ctx: &RenderCtx) {
         Screen::Help => help::render(f, body, &th),
     }
     let framed = |f: &mut Frame, rect| {
-        let block = ratatui::widgets::Block::bordered().border_style(th.border(false));
+        let block = th.block(false);
         let inner = block.inner(rect);
         f.render_widget(block, rect);
         inner
@@ -127,23 +135,40 @@ pub fn render(f: &mut Frame, app: &mut AppState, ctx: &RenderCtx) {
 
 #[cfg(test)]
 pub mod tests_support {
+    use super::theme::ColorMode;
     use super::*;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
     /// Draws as on Linux.
     pub fn draw(w: u16, h: u16, app: &mut AppState) -> String {
-        draw_on(w, h, app, &RenderCtx { windows: false })
+        draw_on(
+            w,
+            h,
+            app,
+            &RenderCtx::new(false, &app.config.ui, ColorMode::TrueColor),
+        )
     }
 
     pub fn draw_on(w: u16, h: u16, app: &mut AppState, ctx: &RenderCtx) -> String {
+        draw_buf(w, h, app, ctx).0
+    }
+
+    /// The text and the buffer (for the colours).
+    pub fn draw_buf(
+        w: u16,
+        h: u16,
+        app: &mut AppState,
+        ctx: &RenderCtx,
+    ) -> (String, ratatui::buffer::Buffer) {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
         term.draw(|f| render(f, app, ctx)).unwrap();
         let buf = term.backend().buffer().clone();
-        (0..h)
+        let text = (0..h)
             .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n");
+        (text, buf)
     }
 }
 
