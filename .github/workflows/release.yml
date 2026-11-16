@@ -196,7 +196,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Draft release (dry run: SHA256SUMS only)
+    name: "Draft release (dry run: SHA256SUMS only)"
     needs: [check, build]
     runs-on: ubuntu-latest
     permissions:
