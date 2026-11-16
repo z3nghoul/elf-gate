@@ -209,3 +209,32 @@ fn every_string_is_filled_in_and_the_macro_substitutes() {
     assert_eq!(s, "7 servers");
     set(Lang::Ru);
 }
+
+/// The wording of the typed errors lives here and in the snapshots; the logic tests check the
+/// variants.
+#[test]
+fn typed_errors_are_worded_in_the_current_language() {
+    use crate::model::rule::RuleError;
+    use crate::net::fetch::FetchError;
+    use crate::net::health::HealthError;
+    with_lang(Lang::Ru, || {
+        assert!(HealthError::ServerRefused { code: 4 }
+            .to_string()
+            .contains("код socks 4"));
+        assert!(HealthError::NoAnswer { secs: 8 }
+            .to_string()
+            .contains("нет ответа"));
+        assert!(FetchError::NoConnection
+            .to_string()
+            .contains("нет соединения"));
+        assert!(RuleError::Prefix { max: 32 }
+            .to_string()
+            .contains("префикса"));
+    });
+    with_lang(Lang::En, || {
+        assert_ne!(
+            RuleError::Prefix { max: 32 }.to_string(),
+            with_lang(Lang::Ru, || RuleError::Prefix { max: 32 }.to_string())
+        );
+    });
+}

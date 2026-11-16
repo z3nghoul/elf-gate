@@ -133,9 +133,10 @@ mod tests {
         a.submit_rule(RuleKind::Domain, "ok.example".into());
         a.submit_rule(RuleKind::Domain, "ok.example".into());
         assert_eq!(a.config.rules.len(), 1);
+        // Both refusals are error alerts; their wording is checked in the i18n tests.
         let alerts = a.alerts();
-        assert!(matches!(&alerts[0], Alert::Error(t) if t.contains("префикса")));
-        assert!(matches!(&alerts[1], Alert::Error(t) if t.contains("уже есть")));
+        assert_eq!(alerts.len(), 2);
+        assert!(alerts.iter().all(|al| matches!(al, Alert::Error(_))));
     }
 
     #[tokio::test]

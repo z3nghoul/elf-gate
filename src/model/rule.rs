@@ -276,11 +276,38 @@ pub fn bypass_additions(mode: RoutingMode, rules: &EffectiveRules) -> Vec<String
 
 // ---------------------------------------------------------------- validation
 
-/// Checks a user-typed rule value; the error text is shown in the UI.
-pub fn validate(kind: RuleKind, value: &str) -> Result<String, String> {
+/// Why a user-typed rule value was refused. The text is made when it is shown (`Display`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuleError {
+    Empty,
+    Domain,
+    Ip,
+    /// The prefix length must be 0 to `max`.
+    Prefix {
+        max: u8,
+    },
+    Set,
+    Process,
+}
+
+impl std::fmt::Display for RuleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&match self {
+            Self::Empty => crate::t!("rulecheck.empty"),
+            Self::Domain => crate::t!("rulecheck.domain"),
+            Self::Ip => crate::t!("rulecheck.ip"),
+            Self::Prefix { max } => crate::t!("rulecheck.prefix", max = max),
+            Self::Set => crate::t!("rulecheck.set"),
+            Self::Process => crate::t!("rulecheck.process"),
+        })
+    }
+}
+
+/// Checks a user-typed rule value; the error is shown in the UI.
+pub fn validate(kind: RuleKind, value: &str) -> Result<String, RuleError> {
     let v = value.trim();
     if v.is_empty() {
-        return Err(crate::t!("rulecheck.empty"));
+        return Err(RuleError::Empty);
     }
     match kind {
         RuleKind::Domain => {
@@ -294,19 +321,19 @@ pub fn validate(kind: RuleKind, value: &str) -> Result<String, String> {
                         && l.chars().all(|c| c.is_alphanumeric() || c == '-')
                 })
                 && d.contains('.');
-            ok.then_some(d).ok_or_else(|| crate::t!("rulecheck.domain"))
+            ok.then_some(d).ok_or(RuleError::Domain)
         }
         RuleKind::Ip => {
             let (addr, prefix) = match v.split_once('/') {
                 Some((a, p)) => (a, Some(p)),
                 None => (v, None),
             };
-            let ip: IpAddr = addr.parse().map_err(|_| crate::t!("rulecheck.ip"))?;
+            let ip: IpAddr = addr.parse().map_err(|_| RuleError::Ip)?;
             if let Some(p) = prefix {
                 let max = if ip.is_ipv4() { 32 } else { 128 };
                 match p.parse::<u8>() {
                     Ok(n) if n <= max => {}
-                    _ => return Err(crate::t!("rulecheck.prefix", max = max)),
+                    _ => return Err(RuleError::Prefix { max }),
                 }
             }
             Ok(v.to_string())
@@ -315,14 +342,12 @@ pub fn validate(kind: RuleKind, value: &str) -> Result<String, String> {
             let ok = v
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '!' || c == '@' || c == '_');
-            ok.then(|| v.to_ascii_lowercase())
-                .ok_or_else(|| crate::t!("rulecheck.set"))
+            ok.then(|| v.to_ascii_lowercase()).ok_or(RuleError::Set)
         }
         RuleKind::Process => {
             let name = v.strip_suffix(".exe").unwrap_or(v);
             let ok = !name.is_empty() && !name.contains(['/', '\\']);
-            ok.then(|| name.to_string())
-                .ok_or_else(|| crate::t!("rulecheck.process"))
+            ok.then(|| name.to_string()).ok_or(RuleError::Process)
         }
     }
 }
@@ -485,7 +510,10 @@ mod tests {
         assert!(validate(RuleKind::Domain, "-x.com").is_err());
         assert!(validate(RuleKind::Ip, "10.0.0.0/8").is_ok());
         assert!(validate(RuleKind::Ip, "2001:db8::/32").is_ok());
-        assert!(validate(RuleKind::Ip, "10.0.0.0/33").is_err());
+        assert_eq!(
+            validate(RuleKind::Ip, "10.0.0.0/33"),
+            Err(RuleError::Prefix { max: 32 })
+        );
         assert!(validate(RuleKind::Ip, "not-an-ip").is_err());
         assert_eq!(
             validate(RuleKind::Geosite, "Category-RU").unwrap(),

@@ -54,6 +54,30 @@ pub fn parse_title(header: &str) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+/// Why a subscription could not be downloaded. The text is made when it is shown (`Display`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchError {
+    HttpClient(String),
+    Status(reqwest::StatusCode),
+    TooBig,
+    Timeout,
+    NoConnection,
+    Failed(String),
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&match self {
+            Self::HttpClient(e) => crate::t!("net.http_client", error = e),
+            Self::Status(status) => crate::t!("net.sub_status", status = status),
+            Self::TooBig => crate::t!("net.sub_too_big"),
+            Self::Timeout => crate::t!("net.sub_timeout"),
+            Self::NoConnection => crate::t!("net.sub_no_connect"),
+            Self::Failed(e) => crate::t!("net.sub_failed", error = e),
+        })
+    }
+}
+
 /// Direct request: the system proxy (which may be elf-gate's own) is never used, so the
 /// subscription is fetched the same way in every mode. In TUN mode the routing rules send
 /// elf-gate's own process outside the tunnel.
@@ -61,7 +85,7 @@ pub async fn fetch(
     url: &str,
     user_agent: &str,
     device: &crate::net::device::DeviceInfo,
-) -> Result<Fetched, String> {
+) -> Result<Fetched, FetchError> {
     let mut headers = reqwest::header::HeaderMap::new();
     for (name, value) in [
         ("x-hwid", &device.hwid),
@@ -83,14 +107,14 @@ pub async fn fetch(
             user_agent
         })
         .build()
-        .map_err(|e| crate::t!("net.http_client", error = e))?;
+        .map_err(|e| FetchError::HttpClient(e.to_string()))?;
     let resp = client
         .get(url)
         .send()
         .await
         .map_err(|e| describe(e.without_url()))?;
     if !resp.status().is_success() {
-        return Err(crate::t!("net.sub_status", status = resp.status()));
+        return Err(FetchError::Status(resp.status()));
     }
     let header = |name: &str| {
         resp.headers()
@@ -101,11 +125,11 @@ pub async fn fetch(
     let info = header("subscription-userinfo").and_then(|h| parse_userinfo(&h));
     let title = header("profile-title").and_then(|h| parse_title(&h));
     if resp.content_length().is_some_and(|n| n as usize > MAX_BODY) {
-        return Err(crate::t!("net.sub_too_big"));
+        return Err(FetchError::TooBig);
     }
     let bytes = resp.bytes().await.map_err(|e| describe(e.without_url()))?;
     if bytes.len() > MAX_BODY {
-        return Err(crate::t!("net.sub_too_big"));
+        return Err(FetchError::TooBig);
     }
     Ok(Fetched {
         body: String::from_utf8_lossy(&bytes).into_owned(),
@@ -114,13 +138,13 @@ pub async fn fetch(
     })
 }
 
-fn describe(e: reqwest::Error) -> String {
+fn describe(e: reqwest::Error) -> FetchError {
     if e.is_timeout() {
-        crate::t!("net.sub_timeout")
+        FetchError::Timeout
     } else if e.is_connect() {
-        crate::t!("net.sub_no_connect")
+        FetchError::NoConnection
     } else {
-        crate::t!("net.sub_failed", error = e)
+        FetchError::Failed(e.to_string())
     }
 }
 
@@ -225,7 +249,8 @@ mod tests {
             &dev(),
         )
         .await
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
         assert!(
             !err.contains("SECRETTOKEN") && !err.contains("127.0.0.1"),
             "{err}"
@@ -237,13 +262,16 @@ mod tests {
         let url =
             serve_once("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
                 .await;
-        assert!(fetch(&url, "", &dev()).await.unwrap_err().contains("403"));
+        assert_eq!(
+            fetch(&url, "", &dev()).await.unwrap_err(),
+            FetchError::Status(reqwest::StatusCode::FORBIDDEN)
+        );
         let dead = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = dead.local_addr().unwrap().port();
         drop(dead);
         let err = fetch(&format!("http://127.0.0.1:{port}/"), "", &dev())
             .await
             .unwrap_err();
-        assert!(err.contains("нет соединения"), "{err}");
+        assert_eq!(err, FetchError::NoConnection);
     }
 }

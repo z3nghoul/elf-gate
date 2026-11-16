@@ -34,8 +34,66 @@ pub async fn system_dns_resolves() -> bool {
     false
 }
 
+/// Where an I/O failure of the connection check happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stage {
+    LocalProxy,
+    Socks,
+    ViaServer,
+    Request,
+    Reply,
+}
+
+/// Why the connection check failed. The text is made when it is shown (`Display`), so logic and
+/// its tests deal with the variant, not with a translation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HealthError {
+    NoAnswer {
+        secs: u64,
+    },
+    Io {
+        stage: Stage,
+        error: String,
+    },
+    ProxyRefused,
+    ServerRefused {
+        code: u8,
+    },
+    BadSocks,
+    Unexpected {
+        first: String,
+    },
+    /// The tunnel works, but the system resolver bypasses it.
+    DnsBypass,
+}
+
+impl std::fmt::Display for HealthError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoAnswer { secs } => f.write_str(&crate::t!("net.no_answer", secs = secs)),
+            Self::Io { stage, error } => {
+                let what = match stage {
+                    Stage::LocalProxy => crate::t!("net.proxy_down"),
+                    Stage::Socks => "socks".to_string(),
+                    Stage::ViaServer => crate::t!("net.via_server"),
+                    Stage::Request => crate::t!("net.request"),
+                    Stage::Reply => crate::t!("net.reply"),
+                };
+                write!(f, "{what}: {error}")
+            }
+            Self::ProxyRefused => f.write_str(&crate::t!("net.proxy_refused")),
+            Self::ServerRefused { code } => {
+                f.write_str(&crate::t!("net.server_refused", code = code))
+            }
+            Self::BadSocks => f.write_str(&crate::t!("net.bad_socks")),
+            Self::Unexpected { first } => f.write_str(&crate::t!("net.unexpected", first = first)),
+            Self::DnsBypass => f.write_str(&crate::t!("net.dns_bypass")),
+        }
+    }
+}
+
 /// `Ok(latency)` if the endpoint answered 204 through the proxy.
-pub async fn check(socks_port: u16, limit: Duration) -> Result<Duration, String> {
+pub async fn check(socks_port: u16, limit: Duration) -> Result<Duration, HealthError> {
     check_host(socks_port, HEALTH_HOST, HEALTH_PATH, limit).await
 }
 
@@ -83,43 +141,46 @@ pub async fn check_host(
     host: &str,
     path: &str,
     limit: Duration,
-) -> Result<Duration, String> {
+) -> Result<Duration, HealthError> {
     // The latency is the request itself (the proxy connection and the far side's dial are
     // set up before the clock starts), so it does not jump with connection set-up.
     match timeout(limit, request(socks_port, host, path)).await {
         Ok(Ok(latency)) => Ok(latency),
         Ok(Err(e)) => Err(e),
-        Err(_) => Err(crate::t!("net.no_answer", secs = limit.as_secs())),
+        Err(_) => Err(HealthError::NoAnswer {
+            secs: limit.as_secs(),
+        }),
     }
 }
 
-async fn request(socks_port: u16, host: &str, path: &str) -> Result<Duration, String> {
-    let io = |what: String| move |e: std::io::Error| format!("{what}: {e}");
+async fn request(socks_port: u16, host: &str, path: &str) -> Result<Duration, HealthError> {
+    let io = |stage: Stage| {
+        move |e: std::io::Error| HealthError::Io {
+            stage,
+            error: e.to_string(),
+        }
+    };
     let mut s = TcpStream::connect(("127.0.0.1", socks_port))
         .await
-        .map_err(io(crate::t!("net.proxy_down")))?;
+        .map_err(io(Stage::LocalProxy))?;
     // SOCKS5: no authentication, CONNECT to a domain name (resolved on the far side).
-    s.write_all(&[5, 1, 0])
-        .await
-        .map_err(io("socks".to_string()))?;
+    s.write_all(&[5, 1, 0]).await.map_err(io(Stage::Socks))?;
     let mut method = [0u8; 2];
-    s.read_exact(&mut method)
-        .await
-        .map_err(io("socks".to_string()))?;
+    s.read_exact(&mut method).await.map_err(io(Stage::Socks))?;
     if method != [5, 0] {
-        return Err(crate::t!("net.proxy_refused"));
+        return Err(HealthError::ProxyRefused);
     }
     let name = host.as_bytes();
     let mut req = vec![5, 1, 0, 3, name.len() as u8];
     req.extend_from_slice(name);
     req.extend_from_slice(&80u16.to_be_bytes());
-    s.write_all(&req).await.map_err(io("socks".to_string()))?;
+    s.write_all(&req).await.map_err(io(Stage::Socks))?;
     let mut head = [0u8; 4];
     s.read_exact(&mut head)
         .await
-        .map_err(io(crate::t!("net.via_server")))?;
+        .map_err(io(Stage::ViaServer))?;
     if head[1] != 0 {
-        return Err(crate::t!("net.server_refused", code = head[1]));
+        return Err(HealthError::ServerRefused { code: head[1] });
     }
     // Skip the bound address of the reply.
     let skip = match head[3] {
@@ -127,17 +188,13 @@ async fn request(socks_port: u16, host: &str, path: &str) -> Result<Duration, St
         4 => 16 + 2,
         3 => {
             let mut len = [0u8; 1];
-            s.read_exact(&mut len)
-                .await
-                .map_err(io("socks".to_string()))?;
+            s.read_exact(&mut len).await.map_err(io(Stage::Socks))?;
             len[0] as usize + 2
         }
-        _ => return Err(crate::t!("net.bad_socks")),
+        _ => return Err(HealthError::BadSocks),
     };
     let mut rest = vec![0u8; skip];
-    s.read_exact(&mut rest)
-        .await
-        .map_err(io("socks".to_string()))?;
+    s.read_exact(&mut rest).await.map_err(io(Stage::Socks))?;
 
     let get = format!(
         "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nUser-Agent: elf-gate\r\n\r\n"
@@ -145,16 +202,18 @@ async fn request(socks_port: u16, host: &str, path: &str) -> Result<Duration, St
     let started = Instant::now();
     s.write_all(get.as_bytes())
         .await
-        .map_err(io(crate::t!("net.request")))?;
+        .map_err(io(Stage::Request))?;
     let mut buf = [0u8; 64];
-    let n = s.read(&mut buf).await.map_err(io(crate::t!("net.reply")))?;
+    let n = s.read(&mut buf).await.map_err(io(Stage::Reply))?;
     let latency = started.elapsed();
     let line = String::from_utf8_lossy(&buf[..n]);
     if line.starts_with("HTTP/1.1 204") || line.starts_with("HTTP/1.0 204") {
         Ok(latency)
     } else {
         let first = line.lines().next().unwrap_or("").trim();
-        Err(crate::t!("net.unexpected", first = format!("{first:?}")))
+        Err(HealthError::Unexpected {
+            first: format!("{first:?}"),
+        })
     }
 }
 
@@ -227,14 +286,14 @@ mod tests {
         )
         .await;
         let err = check(port, Duration::from_secs(3)).await.unwrap_err();
-        assert!(err.contains("неожиданный ответ"), "{err}");
+        assert!(matches!(err, HealthError::Unexpected { .. }), "{err:?}");
     }
 
     #[tokio::test]
     async fn socks_failure_code_is_reported() {
         let port = fake_socks("", 4).await;
         let err = check(port, Duration::from_secs(3)).await.unwrap_err();
-        assert!(err.contains("код socks 4"), "{err}");
+        assert_eq!(err, HealthError::ServerRefused { code: 4 });
     }
 
     #[tokio::test]
@@ -246,7 +305,7 @@ mod tests {
             tokio::time::sleep(Duration::from_secs(10)).await;
         });
         let err = check(port, Duration::from_millis(400)).await.unwrap_err();
-        assert!(err.contains("нет ответа"), "{err}");
+        assert_eq!(err, HealthError::NoAnswer { secs: 0 });
     }
 
     #[tokio::test]
@@ -256,6 +315,15 @@ mod tests {
         drop(l);
         // Windows retries a refused connection for a couple of seconds, so allow for that.
         let err = check(port, Duration::from_secs(10)).await.unwrap_err();
-        assert!(err.contains("локальный прокси недоступен"), "{err}");
+        assert!(
+            matches!(
+                err,
+                HealthError::Io {
+                    stage: Stage::LocalProxy,
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
     }
 }

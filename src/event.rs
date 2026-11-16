@@ -78,7 +78,7 @@ pub enum BgEvent {
     /// Result of the connection check through the local proxy.
     Health {
         id: u64,
-        result: Result<std::time::Duration, String>,
+        result: Result<std::time::Duration, crate::net::health::HealthError>,
     },
     /// A background stop finished; the core ports are free again.
     CoreStopped,

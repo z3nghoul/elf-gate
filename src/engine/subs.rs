@@ -14,7 +14,9 @@ pub(super) async fn download(
     user_agent: &str,
     device: &crate::net::device::DeviceInfo,
 ) -> Result<Box<SubUpdate>, String> {
-    let fetched = fetch::fetch(url, user_agent, device).await?;
+    let fetched = fetch::fetch(url, user_agent, device)
+        .await
+        .map_err(|e| e.to_string())?;
     let parsed = parse_body(&fetched.body).map_err(|e| e.to_string())?;
     Ok(Box::new(SubUpdate {
         servers: parsed.servers,

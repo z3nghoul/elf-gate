@@ -1,7 +1,7 @@
 //! Connecting, TUN mode, the connection check, first-run questions, privileges.
 
 use super::*;
-use crate::net::health;
+use crate::net::health::{self, HealthError};
 use crate::storage::{CoreConfig, PresetsConfig};
 use crate::tun::{self, Problem};
 use crate::xray::config::{build_with, Failover};
@@ -402,13 +402,13 @@ impl Engine {
                 }
             }
             // The first request right after the start can race with the routes settling.
-            let mut last = String::new();
+            let mut last = HealthError::NoAnswer { secs: 0 };
             for attempt in 0..2 {
                 match health::check(socks_port, health::HEALTH_TIMEOUT).await {
                     Ok(latency) => {
                         // The tunnel works; names must resolve through the system path too.
                         let result = if in_tun && !health::system_dns_resolves().await {
-                            Err(crate::t!("net.dns_bypass"))
+                            Err(HealthError::DnsBypass)
                         } else {
                             Ok(latency)
                         };
@@ -428,7 +428,7 @@ impl Engine {
         });
     }
 
-    pub(super) fn on_health(&mut self, id: u64, result: Result<Duration, String>) {
+    pub(super) fn on_health(&mut self, id: u64, result: Result<Duration, HealthError>) {
         if self.conn != Conn::Connected(id) {
             return;
         }
@@ -445,7 +445,7 @@ impl Engine {
                     Level::Warning,
                     format!("[Warning] connection check failed: {e}"),
                 );
-                self.health = HealthState::Failed(e);
+                self.health = HealthState::Failed(e.to_string());
                 // The server answers over TCP but nothing passes: another fingerprint may help.
                 // (Not in TUN mode: a temporary core's own traffic would enter the tunnel.)
                 if self.conn_mode == Mode::Proxy {
@@ -834,11 +834,11 @@ mod tests {
         a.conn = Conn::Connected(id);
         a.on_health(id, Ok(Duration::from_millis(80)));
         assert_eq!(a.health, HealthState::Ok(Duration::from_millis(80)));
-        a.on_health(id, Err("нет ответа за 8 с".into()));
+        a.on_health(id, Err(HealthError::NoAnswer { secs: 8 }));
         assert!(matches!(a.health, HealthState::Failed(_)));
         a.conn = Conn::Disconnected;
         a.health = HealthState::Unknown;
-        a.on_health(id, Err("late".into()));
+        a.on_health(id, Err(HealthError::BadSocks));
         assert_eq!(a.health, HealthState::Unknown);
     }
 
