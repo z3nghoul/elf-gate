@@ -308,6 +308,37 @@ pub struct DeviceConfig {
     pub hwid: String,
 }
 
+/// Which releases the update notice may mention.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    /// Releases that are not marked as pre-release.
+    #[default]
+    Stable,
+    /// Pre-releases too.
+    Test,
+}
+
+/// `[updates]`: the notice about a new version (nothing is downloaded).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct UpdatesConfig {
+    pub check: bool,
+    pub channel: UpdateChannel,
+    /// The version the user asked not to be reminded about.
+    pub skipped: Option<String>,
+}
+
+impl Default for UpdatesConfig {
+    fn default() -> Self {
+        Self {
+            check: true,
+            channel: UpdateChannel::Stable,
+            skipped: None,
+        }
+    }
+}
+
 /// `[[subscriptions]]`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -341,6 +372,7 @@ pub struct Config {
     pub ui: UiConfig,
     pub ping: PingConfig,
     pub device: DeviceConfig,
+    pub updates: UpdatesConfig,
     pub subscriptions: Vec<SubscriptionConfig>,
     pub servers: Vec<ServerEntry>,
     pub overrides: Vec<ServerOverride>,
@@ -384,6 +416,8 @@ pub struct TunState {
 pub struct State {
     pub proxy: Option<ProxyState>,
     pub tun: Option<TunState>,
+    /// Unix time of the last successful check for a new version.
+    pub last_update_check: Option<i64>,
 }
 
 #[derive(Debug, Clone)]

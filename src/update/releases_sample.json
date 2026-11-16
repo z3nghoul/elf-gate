@@ -1,0 +1,48 @@
+[
+  {
+    "url": "https://api.github.com/repos/z3nghoul/elf-gate/releases/300",
+    "html_url": "https://github.com/z3nghoul/elf-gate/releases/tag/v1.1.0-rc.1",
+    "id": 300,
+    "tag_name": "v1.1.0-rc.1",
+    "name": "1.1.0 release candidate",
+    "draft": false,
+    "prerelease": true,
+    "published_at": "2026-12-01T10:00:00Z",
+    "assets": [{"name": "SHA256SUMS", "size": 200}],
+    "body": "Candidate.\r\n\r\n- new thing\u001b[31m red"
+  },
+  {
+    "html_url": "https://github.com/z3nghoul/elf-gate/releases/tag/v1.0.4",
+    "id": 299,
+    "tag_name": "v1.0.4",
+    "name": "1.0.4",
+    "draft": true,
+    "prerelease": false,
+    "body": "Draft, not public yet."
+  },
+  {
+    "html_url": "https://github.com/z3nghoul/elf-gate/releases/tag/v1.0.3",
+    "id": 298,
+    "tag_name": "v1.0.3",
+    "name": "1.0.3",
+    "draft": false,
+    "prerelease": false,
+    "body": "## 1.0.3\n\n- mixed mode\n- autostart with TUN"
+  },
+  {
+    "html_url": "https://evil.example/elf-gate",
+    "id": 297,
+    "tag_name": "v1.0.2",
+    "draft": false,
+    "prerelease": false,
+    "body": null
+  },
+  {
+    "html_url": "https://github.com/z3nghoul/elf-gate/releases/tag/nightly",
+    "id": 296,
+    "tag_name": "nightly",
+    "draft": false,
+    "prerelease": true,
+    "body": "Not a version."
+  }
+]
