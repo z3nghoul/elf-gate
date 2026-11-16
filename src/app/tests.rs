@@ -712,3 +712,142 @@ async fn settings_navigation_goes_over_every_row_and_sections_jump() {
     a.handle_action(Action::FocusNext);
     assert_eq!(a.settings_cursor, rows.len() - 1);
 }
+
+/// An app with two remote subscriptions, `Alpha` and `Beta`.
+fn app_with_subs() -> (AppState, UnboundedReceiver<Cmd>) {
+    let (mut a, rx) = app_with(&[REALITY]);
+    for n in ["Alpha", "Beta"] {
+        a.config
+            .subscriptions
+            .push(crate::storage::SubscriptionConfig {
+                name: n.into(),
+                url: format!("https://{}.example/***", n.to_lowercase()),
+                ..Default::default()
+            });
+        a.subs.insert(
+            0,
+            crate::model::subscription::Subscription {
+                name: n.into(),
+                servers: Vec::new(),
+                collapsed: false,
+                info: None,
+                updated: None,
+                is_remote: true,
+            },
+        );
+    }
+    (a, rx)
+}
+
+#[tokio::test]
+async fn subscription_screen_marks_defaults_and_overrides_and_resets() {
+    use crate::app::subscription::{Origin, SubRow};
+    let (mut a, mut rx) = app_with_subs();
+    a.open_subscription("Alpha");
+    assert_eq!(a.screen, Screen::Subscription);
+    let origin = |a: &AppState, r: SubRow| {
+        a.sub_fields()
+            .into_iter()
+            .find(|f| f.row == r)
+            .unwrap()
+            .origin
+    };
+    assert_eq!(origin(&a, SubRow::UserAgent), Origin::Default);
+    a.config.subscriptions[0].user_agent = Some("my-ua".into());
+    assert_eq!(origin(&a, SubRow::UserAgent), Origin::Own);
+    a.sub_cursor = a
+        .sub_fields()
+        .iter()
+        .position(|f| f.row == SubRow::UserAgent)
+        .unwrap();
+    a.handle_action(Action::Rules); // `r` on this screen resets
+    assert_eq!(
+        sent(&mut rx),
+        vec![Cmd::Set(crate::proto::Setting::SubscriptionUserAgent {
+            name: "Alpha".into(),
+            value: None
+        })]
+    );
+    // The HWID row: default -> the opposite -> default.
+    a.sub_cursor = a
+        .sub_fields()
+        .iter()
+        .position(|f| f.row == SubRow::Hwid)
+        .unwrap();
+    a.handle_action(Action::Enter);
+    assert_eq!(
+        sent(&mut rx),
+        vec![Cmd::Set(crate::proto::Setting::SubscriptionHwid {
+            name: "Alpha".into(),
+            value: Some(false)
+        })]
+    );
+}
+
+#[tokio::test]
+async fn enter_and_e_on_a_subscription_header_open_its_screen_and_u_offers_a_menu() {
+    let (mut a, mut rx) = app_with_subs();
+    a.selected = 0; // Beta's header (inserted first)
+    assert!(matches!(a.selected_row(), Some(Row::Group(_))));
+    a.handle_action(Action::Enter);
+    assert_eq!(
+        (a.screen, a.sub_name.as_str()),
+        (Screen::Subscription, "Beta")
+    );
+    a.handle_action(Action::Back);
+    assert_eq!(a.screen, Screen::Main);
+    a.handle_action(Action::Edit);
+    assert_eq!(a.screen, Screen::Subscription);
+    a.handle_action(Action::Back);
+    a.handle_action(Action::UpdateSubs);
+    assert!(matches!(
+        &a.popup,
+        Some(Popup::Select { options, .. }) if options.len() == 3
+    ));
+    press(&mut a, KeyCode::Enter); // "update all"
+    assert_eq!(sent(&mut rx), vec![Cmd::UpdateSubs]);
+}
+
+#[test]
+fn an_override_touches_one_subscription_and_a_new_default_the_rest() {
+    use crate::storage::{Config, SubscriptionConfig};
+    let mut c = Config {
+        subscriptions: vec![
+            SubscriptionConfig {
+                name: "A".into(),
+                ..Default::default()
+            },
+            SubscriptionConfig {
+                name: "B".into(),
+                ..Default::default()
+            },
+        ],
+        ..Config::default()
+    };
+    c.subscriptions[0].user_agent = Some("own".into());
+    let d = &c.sub_defaults;
+    assert_eq!(c.subscriptions[0].user_agent(d), "own");
+    assert_eq!(
+        c.subscriptions[1].user_agent(d),
+        crate::net::fetch::DEFAULT_USER_AGENT
+    );
+    c.sub_defaults.user_agent = "new-default".into();
+    c.sub_defaults.auto_update_hours = 3;
+    let d = &c.sub_defaults;
+    assert_eq!(
+        c.subscriptions[0].user_agent(d),
+        "own",
+        "the override stays"
+    );
+    assert_eq!(c.subscriptions[1].user_agent(d), "new-default");
+    assert_eq!(c.subscriptions[1].hours(d), 3);
+    assert!(c.subscriptions[1].sends_hwid(d));
+    // Files from before the defaults: the built-in values are not overrides.
+    let old: Config = toml::from_str(
+        "[[subscriptions]]\nname = \"X\"\nurl = \"u\"\nuser_agent = \"v2rayNG/1.10.4\"\nauto_update_hours = 12\n",
+    )
+    .unwrap();
+    assert_eq!(old.subscriptions[0].auto_update_hours, None);
+    let ser = toml::to_string(&old.subscriptions[0]).unwrap();
+    assert!(!ser.contains("auto_update_hours"), "{ser}");
+}

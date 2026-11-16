@@ -77,8 +77,31 @@ impl Engine {
     }
 
     /// How this installation introduces itself to subscription panels.
-    fn device(&self) -> crate::net::device::DeviceInfo {
-        crate::net::device::DeviceInfo::current(&self.config.device.hwid)
+    /// What this subscription's panel is told about the device; without the device id when the
+    /// subscription (or the default) says so.
+    fn device_for(&self, send_hwid: bool) -> crate::net::device::DeviceInfo {
+        let mut d = crate::net::device::DeviceInfo::current(&self.config.device.hwid);
+        if !send_hwid {
+            d.hwid.clear();
+        }
+        d
+    }
+
+    pub(super) fn sub_config_mut(&mut self, name: &str) -> Option<&mut SubscriptionConfig> {
+        self.config
+            .subscriptions
+            .iter_mut()
+            .find(|s| s.name == name)
+    }
+
+    /// `u` on one subscription.
+    pub(super) fn update_one_subscription(&mut self, name: &str) {
+        let started = self.spawn_update(name);
+        self.status(if started {
+            crate::t!("eng.subs_updating")
+        } else {
+            crate::t!("eng.subs_already")
+        });
     }
 
     pub(super) fn save_subscription_cache(&mut self) {
@@ -138,9 +161,11 @@ impl Engine {
             return false;
         }
         let tx = self.tx.clone();
-        let device = self.device();
+        let defaults = &self.config.sub_defaults;
+        let device = self.device_for(sc.sends_hwid(defaults));
+        let user_agent = sc.user_agent(defaults).to_string();
         self.spawn(async move {
-            let result = download(&sc.url, &sc.user_agent, &device).await;
+            let result = download(&sc.url, &user_agent, &device).await;
             let _ = tx.send(BgEvent::SubFetched {
                 name: sc.name,
                 result,
@@ -163,14 +188,16 @@ impl Engine {
             .config
             .subscriptions
             .iter()
-            .filter(|sc| sc.auto_update_hours > 0)
+            .filter(|sc| sc.hours(&self.config.sub_defaults) > 0)
             .filter(|sc| {
                 let updated = self
                     .subs
                     .iter()
                     .find(|g| g.name == sc.name)
                     .and_then(|g| g.updated);
-                updated.is_none_or(|t| now - t >= i64::from(sc.auto_update_hours) * 3600)
+                updated.is_none_or(|t| {
+                    now - t >= i64::from(sc.hours(&self.config.sub_defaults)) * 3600
+                })
             })
             // A subscription that failed recently is not retried every minute.
             .filter(|sc| {
@@ -284,24 +311,15 @@ impl Engine {
         }
         self.status(crate::t!("eng.sub_loading"));
         let tx = self.tx.clone();
-        let user_agent = fetch::DEFAULT_USER_AGENT.to_string();
-        let device = self.device();
+        let user_agent = self.config.sub_defaults.user_agent.clone();
+        let device = self.device_for(self.config.sub_defaults.send_hwid);
         self.spawn(async move {
             let result = download(&url, &user_agent, &device).await;
-            let _ = tx.send(BgEvent::SubAdded {
-                url,
-                user_agent,
-                result,
-            });
+            let _ = tx.send(BgEvent::SubAdded { url, result });
         });
     }
 
-    pub(super) fn on_sub_added(
-        &mut self,
-        url: String,
-        user_agent: String,
-        result: Result<Box<SubUpdate>, String>,
-    ) {
+    pub(super) fn on_sub_added(&mut self, url: String, result: Result<Box<SubUpdate>, String>) {
         let update = match result {
             Ok(u) => u,
             Err(e) => {
@@ -326,7 +344,6 @@ impl Engine {
         self.config.subscriptions.push(SubscriptionConfig {
             name: name.clone(),
             url,
-            user_agent,
             ..SubscriptionConfig::default()
         });
         self.subs.insert(
@@ -389,11 +406,7 @@ mod tests {
     async fn adding_a_subscription_creates_a_group_a_config_entry_and_a_cache() {
         let d = dir("add");
         let mut a = app_in(&d);
-        a.on_sub_added(
-            "https://prov.example/sub".into(),
-            "ua".into(),
-            Ok(update(&[A, B])),
-        );
+        a.on_sub_added("https://prov.example/sub".into(), Ok(update(&[A, B])));
         assert_eq!(a.subs.len(), 1);
         assert_eq!(a.subs[0].name, "Prov");
         assert!(a.subs[0].is_remote);
@@ -415,19 +428,11 @@ mod tests {
     async fn a_failed_download_adds_nothing_and_a_failed_update_keeps_the_old_list() {
         let d = dir("fail");
         let mut a = app_in(&d);
-        a.on_sub_added(
-            "https://x.example/s".into(),
-            "ua".into(),
-            Err("нет сети".into()),
-        );
+        a.on_sub_added("https://x.example/s".into(), Err("нет сети".into()));
         assert!(matches!(a.alerts().last(), Some(Alert::Error(_))));
         assert!(a.subs.is_empty() && a.config.subscriptions.is_empty());
 
-        a.on_sub_added(
-            "https://x.example/s".into(),
-            "ua".into(),
-            Ok(update(&[A, B])),
-        );
+        a.on_sub_added("https://x.example/s".into(), Ok(update(&[A, B])));
         let name = a.subs[0].name.clone();
         a.updating.insert(name.clone());
         a.on_sub_fetched(name.clone(), Err("timeout".into()));
@@ -441,11 +446,7 @@ mod tests {
     async fn an_update_keeps_ids_of_unchanged_servers_and_overrides() {
         let d = dir("ids");
         let mut a = app_in(&d);
-        a.on_sub_added(
-            "https://x.example/s".into(),
-            "ua".into(),
-            Ok(update(&[A, B])),
-        );
+        a.on_sub_added("https://x.example/s".into(), Ok(update(&[A, B])));
         let name = a.subs[0].name.clone();
         let id_b = a.subs[0].servers[1].id;
         a.config.overrides.push({
@@ -472,8 +473,8 @@ mod tests {
     async fn duplicate_names_get_a_suffix() {
         let d = dir("dup");
         let mut a = app_in(&d);
-        a.on_sub_added("https://x.example/1".into(), "ua".into(), Ok(update(&[A])));
-        a.on_sub_added("https://x.example/2".into(), "ua".into(), Ok(update(&[B])));
+        a.on_sub_added("https://x.example/1".into(), Ok(update(&[A])));
+        a.on_sub_added("https://x.example/2".into(), Ok(update(&[B])));
         let names: Vec<_> = a.subs.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names, ["Prov", "Prov 2"]);
         let _ = std::fs::remove_dir_all(d);
@@ -483,7 +484,7 @@ mod tests {
     async fn the_schedule_updates_only_what_is_due() {
         let d = dir("auto");
         let mut a = app_in(&d);
-        a.on_sub_added("https://x.example/1".into(), "ua".into(), Ok(update(&[A])));
+        a.on_sub_added("https://x.example/1".into(), Ok(update(&[A])));
         let name = a.subs[0].name.clone();
         // Fresh: nothing is due.
         a.last_auto_check = None;
@@ -496,7 +497,7 @@ mod tests {
         assert!(a.updating.contains(&name));
         // Switched off: never.
         a.updating.clear();
-        a.config.subscriptions[0].auto_update_hours = 0;
+        a.config.subscriptions[0].auto_update_hours = Some(0);
         a.last_auto_check = None;
         a.auto_update_tick();
         assert!(a.updating.is_empty());
@@ -507,7 +508,7 @@ mod tests {
     async fn deleting_a_subscription_removes_its_config_entry() {
         let d = dir("del");
         let mut a = app_in(&d);
-        a.on_sub_added("https://x.example/1".into(), "ua".into(), Ok(update(&[A])));
+        a.on_sub_added("https://x.example/1".into(), Ok(update(&[A])));
         let n = a.subs[0].name.clone();
         a.delete_group(&n);
         assert!(a.subs.is_empty());
@@ -536,7 +537,7 @@ mod tests {
             info: None,
             title: Some("Panel".into()),
         });
-        a.on_sub_added("https://panel.example/sub".into(), "ua".into(), Ok(update));
+        a.on_sub_added("https://panel.example/sub".into(), Ok(update));
         let g = &a.subs[0];
         assert_eq!(g.servers.len(), 3);
         assert!(g.servers[0].info_only && g.servers[1].full.is_some());
@@ -604,11 +605,7 @@ mod tests {
     async fn a_deleted_subscription_server_stays_gone_after_a_restart_and_an_update() {
         let d = dir("hide");
         let mut a = app_in(&d);
-        a.on_sub_added(
-            "https://x.example/s".into(),
-            "ua".into(),
-            Ok(update(&[A, B])),
-        );
+        a.on_sub_added("https://x.example/s".into(), Ok(update(&[A, B])));
         let name = a.subs[0].name.clone();
         let id_a = a.subs[0].servers[0].id;
         a.handle_cmd(Cmd::DeleteServer(id_a));
@@ -646,7 +643,7 @@ mod tests {
         for state in ["empty", "all hidden", "only placeholders", "failed update"] {
             let d = dir(&format!("del-{}", state.replace(' ', "-")));
             let mut a = app_in(&d);
-            a.on_sub_added("https://x.example/s".into(), "ua".into(), Ok(update(&[A])));
+            a.on_sub_added("https://x.example/s".into(), Ok(update(&[A])));
             let name = a.subs[0].name.clone();
             match state {
                 "empty" => {
@@ -693,11 +690,7 @@ mod tests {
     async fn deleting_the_connected_server_disconnects_first() {
         let d = dir("conn");
         let mut a = app_in(&d);
-        a.on_sub_added(
-            "https://x.example/s".into(),
-            "ua".into(),
-            Ok(update(&[A, B])),
-        );
+        a.on_sub_added("https://x.example/s".into(), Ok(update(&[A, B])));
         let id = a.subs[0].servers[0].id;
         a.conn = Conn::Connected(id);
         a.handle_cmd(Cmd::DeleteServer(id));

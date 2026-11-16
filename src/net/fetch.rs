@@ -93,6 +93,10 @@ pub async fn fetch(
         ("x-ver-os", &device.os_version),
         ("x-device-model", &device.model),
     ] {
+        // An empty value is a header that is switched off (no device id for this subscription).
+        if value.is_empty() {
+            continue;
+        }
         if let Ok(v) = reqwest::header::HeaderValue::from_str(value) {
             headers.insert(name, v);
         }

@@ -122,3 +122,34 @@ async fn no_color_draws_nothing_in_colour() {
         }
     }
 }
+
+#[tokio::test]
+async fn subscription_screen_in_every_theme_and_in_privacy_mode() {
+    for (tname, theme, mode) in THEMES {
+        for privacy in [false, true] {
+            if privacy && tname != "mocha" {
+                continue;
+            }
+            let (tx, _rx) = unbounded_channel();
+            let mut app = AppState::with_demo(tx, crate::test_support::config_ru());
+            app.config.ui.theme = theme.into();
+            app.config.ui.privacy_mode = privacy;
+            app.config
+                .subscriptions
+                .push(crate::storage::SubscriptionConfig {
+                    name: "Alpha".into(),
+                    url: "https://alpha.example/***".into(),
+                    user_agent: Some("custom-ua/1.0".into()),
+                    ..Default::default()
+                });
+            app.open_subscription("Alpha");
+            let ctx = RenderCtx::new(false, &app.config.ui, mode);
+            let (text, buf) = tests_support::draw_buf(100, 30, &mut app, &ctx);
+            let p = if privacy { "_privacy" } else { "" };
+            insta::assert_snapshot!(
+                format!("theme_subscription_{tname}{p}"),
+                styled_frame(&text, &buf)
+            );
+        }
+    }
+}

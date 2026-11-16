@@ -28,6 +28,10 @@ pub enum Action {
     Fingerprint,
     /// Privacy mode: hide addresses, ids, keys and URLs on the screen.
     Privacy,
+    /// Open the settings of the selected subscription.
+    Edit,
+    /// Fold or unfold the selected subscription.
+    Fold,
     /// Show or hide the servers the user removed from the selected subscription.
     ShowHidden,
     /// Choose the server's role in the primary + backup scheme.
@@ -55,7 +59,8 @@ pub mod scope {
     pub const SETTINGS: u8 = 4;
     pub const LOGS: u8 = 8;
     pub const HELP: u8 = 16;
-    pub const ALL: u8 = MAIN | RULES | SETTINGS | LOGS | HELP;
+    pub const SUB: u8 = 32;
+    pub const ALL: u8 = MAIN | RULES | SETTINGS | LOGS | HELP | SUB;
 }
 
 impl Binding {
@@ -122,7 +127,7 @@ pub const BINDINGS: &[Binding] = &[
         hidden: false,
         bar: "j/k",
         prio: 5,
-        scopes: scope::MAIN | scope::RULES | scope::SETTINGS | scope::LOGS,
+        scopes: scope::MAIN | scope::RULES | scope::SETTINGS | scope::LOGS | scope::SUB,
     },
     Binding {
         label: "",
@@ -194,7 +199,7 @@ pub const BINDINGS: &[Binding] = &[
         hidden: false,
         bar: "Enter",
         prio: 1,
-        scopes: scope::MAIN | scope::SETTINGS,
+        scopes: scope::MAIN | scope::SETTINGS | scope::SUB,
     },
     Binding {
         label: "d",
@@ -276,7 +281,7 @@ pub const BINDINGS: &[Binding] = &[
         hidden: false,
         bar: "r",
         prio: 5,
-        scopes: scope::MAIN,
+        scopes: scope::MAIN | scope::SUB,
     },
     Binding {
         label: "s",
@@ -321,6 +326,24 @@ pub const BINDINGS: &[Binding] = &[
         hidden: false,
         bar: "f",
         prio: 7,
+        scopes: scope::MAIN,
+    },
+    Binding {
+        label: "e",
+        action: Action::Edit,
+        keys: &[(KeyCode::Char('e'), N)],
+        hidden: false,
+        bar: "e",
+        prio: 6,
+        scopes: scope::MAIN,
+    },
+    Binding {
+        label: "← / →",
+        action: Action::Fold,
+        keys: &[(KeyCode::Left, N), (KeyCode::Right, N)],
+        hidden: false,
+        bar: "←→",
+        prio: 8,
         scopes: scope::MAIN,
     },
     Binding {
@@ -384,7 +407,7 @@ pub const BINDINGS: &[Binding] = &[
         hidden: false,
         bar: "Esc",
         prio: 1,
-        scopes: scope::RULES | scope::SETTINGS | scope::LOGS | scope::HELP,
+        scopes: scope::RULES | scope::SETTINGS | scope::LOGS | scope::HELP | scope::SUB,
     },
     Binding {
         label: "Ctrl+L",

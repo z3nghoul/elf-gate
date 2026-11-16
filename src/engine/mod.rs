@@ -844,11 +844,7 @@ impl Engine {
             } => self.on_fp_searched(id, xray_version, found, skipped),
             BgEvent::UpdateChecked(result) => self.on_update_checked(result),
             BgEvent::SubFetched { name, result } => self.on_sub_fetched(name, result),
-            BgEvent::SubAdded {
-                url,
-                user_agent,
-                result,
-            } => self.on_sub_added(url, user_agent, result),
+            BgEvent::SubAdded { url, result } => self.on_sub_added(url, result),
         }
     }
 
@@ -861,6 +857,7 @@ impl Engine {
             Cmd::ToggleMode => self.toggle_mode(),
             Cmd::PingAll => self.ping_all(),
             Cmd::UpdateSubs => self.update_subscriptions(),
+            Cmd::UpdateSub(name) => self.update_one_subscription(&name),
             Cmd::AddLink(text) => self.add_link(text),
             Cmd::DeleteServer(id) => self.delete_server(id),
             Cmd::DeleteGroup(name) => self.delete_group(&name),
@@ -1449,25 +1446,23 @@ impl Engine {
                 return;
             }
             SubscriptionUserAgent { name, value } => {
-                if let Some(s) = self
-                    .config
-                    .subscriptions
-                    .iter_mut()
-                    .find(|s| s.name == name)
-                {
-                    s.user_agent = value;
+                if let Some(s) = self.sub_config_mut(&name) {
+                    s.user_agent = value.filter(|v| !v.is_empty());
                 }
             }
             SubscriptionHours { name, hours } => {
-                if let Some(s) = self
-                    .config
-                    .subscriptions
-                    .iter_mut()
-                    .find(|s| s.name == name)
-                {
+                if let Some(s) = self.sub_config_mut(&name) {
                     s.auto_update_hours = hours;
                 }
             }
+            SubscriptionHwid { name, value } => {
+                if let Some(s) = self.sub_config_mut(&name) {
+                    s.send_hwid = value;
+                }
+            }
+            SubDefaultUserAgent(v) => self.config.sub_defaults.user_agent = v,
+            SubDefaultHours(h) => self.config.sub_defaults.auto_update_hours = h,
+            SubDefaultHwid(on) => self.config.sub_defaults.send_hwid = on,
         }
         self.save_config();
         self.status(crate::t!("eng.setting_saved"));

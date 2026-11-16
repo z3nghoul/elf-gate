@@ -69,12 +69,21 @@ pub enum Setting {
     /// `[[subscriptions]]` entry by name.
     SubscriptionUserAgent {
         name: String,
-        value: String,
+        /// `None`: back to the default.
+        value: Option<String>,
     },
     SubscriptionHours {
         name: String,
-        hours: u32,
+        hours: Option<u32>,
     },
+    SubscriptionHwid {
+        name: String,
+        value: Option<bool>,
+    },
+    /// `[sub_defaults]`: used by subscriptions that do not override the value.
+    SubDefaultUserAgent(String),
+    SubDefaultHours(u32),
+    SubDefaultHwid(bool),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -84,6 +93,8 @@ pub enum Cmd {
     ToggleMode,
     PingAll,
     UpdateSubs,
+    /// Update one subscription (by name).
+    UpdateSub(String),
     /// A server link or a subscription URL typed by the user.
     AddLink(String),
     DeleteServer(u64),

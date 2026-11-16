@@ -23,6 +23,7 @@ mod rules;
 mod servers;
 mod settings;
 mod statusbar;
+mod subscription;
 pub mod text;
 pub mod theme;
 #[cfg(test)]
@@ -117,6 +118,7 @@ pub fn render(f: &mut Frame, app: &mut AppState, ctx: &RenderCtx) {
         Screen::LogsFull => logs::render(f, body, app, &th),
         Screen::Rules => rules::render(f, body, app, &th, ctx),
         Screen::Settings => settings::render(f, body, app, &th, ctx),
+        Screen::Subscription => subscription::render(f, body, app, &th),
         Screen::Help => help::render(f, body, &th),
     }
     let framed = |f: &mut Frame, rect| {

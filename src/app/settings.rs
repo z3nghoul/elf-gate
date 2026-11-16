@@ -32,8 +32,9 @@ pub enum SettingId {
     TransparentBg,
     Language,
     Privacy,
-    SubUa(String),
-    SubHours(String),
+    SubDefaultUa,
+    SubDefaultHours,
+    SubDefaultHwid,
 }
 
 /// The groups of the settings screen, in the order they are shown.
@@ -71,7 +72,7 @@ pub fn section_of(id: &SettingId) -> Section {
     match id {
         Language | Theme | TransparentBg | Privacy => Section::Appearance,
         AutoConnect | Autostart | SetSystemProxy | ManageFirewall => Section::Connection,
-        SubUa(_) | SubHours(_) => Section::Subscriptions,
+        SubDefaultUa | SubDefaultHours | SubDefaultHwid => Section::Subscriptions,
         TunXrayPath | TunName | TunnelDns | ProxyWithTun => Section::Tun,
         PingMode | PingUrl | PingTimeout | PingAuto => Section::Ping,
         XrayPath | LogLevel | VerboseLog => Section::Core,
@@ -254,18 +255,22 @@ impl AppState {
                 onoff(c.ui.transparent_bg),
             ));
         }
-        for s in &c.subscriptions {
-            rows.push((
-                SettingId::SubUa(s.name.clone()),
-                format!("«{}»: User-Agent", self.group_title(&s.name)),
-                s.user_agent.clone(),
-            ));
-            rows.push((
-                SettingId::SubHours(s.name.clone()),
-                crate::t!("setting.sub_hours", name = self.group_title(&s.name)),
-                s.auto_update_hours.to_string(),
-            ));
-        }
+        let d = &c.sub_defaults;
+        rows.push((
+            SettingId::SubDefaultUa,
+            crate::t!("setting.sub_default_ua"),
+            d.user_agent.clone(),
+        ));
+        rows.push((
+            SettingId::SubDefaultHours,
+            crate::t!("setting.sub_default_hours"),
+            d.auto_update_hours.to_string(),
+        ));
+        rows.push((
+            SettingId::SubDefaultHwid,
+            crate::t!("setting.sub_default_hwid"),
+            onoff(d.send_hwid),
+        ));
         rows
     }
 
@@ -325,6 +330,7 @@ impl AppState {
                 PingMode::Url => PingMode::Tcp,
             }),
             SettingId::Privacy => Setting::PrivacyMode(!c.ui.privacy_mode),
+            SettingId::SubDefaultHwid => Setting::SubDefaultHwid(!c.sub_defaults.send_hwid),
             SettingId::Hwid => {
                 self.popup = Some(Popup::Notice(crate::t!(
                     "setting.hwid_info",
@@ -371,11 +377,10 @@ impl AppState {
             SettingId::PingAuto => num(&text).map(Setting::PingAutoIntervalSecs),
             SettingId::TunName => Ok(Setting::TunName(text)),
             SettingId::TunnelDns => Ok(Setting::TunnelDns(text)),
-            SettingId::SubUa(name) => Ok(Setting::SubscriptionUserAgent { name, value: text }),
-            SettingId::SubHours(name) => num(&text).map(|h| Setting::SubscriptionHours {
-                name,
-                hours: h.min(u64::from(u32::MAX)) as u32,
-            }),
+            SettingId::SubDefaultUa => Ok(Setting::SubDefaultUserAgent(text)),
+            SettingId::SubDefaultHours => {
+                num(&text).map(|h| Setting::SubDefaultHours(h.min(u64::from(u32::MAX)) as u32))
+            }
             _ => return,
         };
         match set {

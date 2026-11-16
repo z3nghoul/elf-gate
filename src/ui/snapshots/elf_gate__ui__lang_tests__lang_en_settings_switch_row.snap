@@ -4,23 +4,23 @@ expression: frame
 ---
 ┌ Settings ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │  ─ Appearance ───────────────────────────────────────────────────────────────────────────────────────────────────────│
-│  Language                        English                                                                             │
-│  Privacy mode (Ctrl+P)           off                                                                                 │
-│  Theme                           mocha                                                                               │
-│  Transparent background          off                                                                                 │
+│  Language                              English                                                                       │
+│  Privacy mode (Ctrl+P)                 off                                                                           │
+│  Theme                                 mocha                                                                         │
+│  Transparent background                off                                                                           │
 │  ─ Connection ───────────────────────────────────────────────────────────────────────────────────────────────────────│
-│  System proxy                    on                                                                                  │
-│  Connect on start                off                                                                                 │
-│> Start at login                  off                                                                                 │
+│  System proxy                          on                                                                            │
+│  Connect on start                      off                                                                           │
+│> Start at login                        off                                                                           │
+│  ─ Subscriptions ────────────────────────────────────────────────────────────────────────────────────────────────────│
+│  Default User-Agent                    v2rayNG/1.10.4                                                                │
+│  Default update interval, h (0 = off)  12                                                                            │
+│  Send HWID by default                  on                                                                            │
 │  ─ TUN ──────────────────────────────────────────────────────────────────────────────────────────────────────────────│
-│  Xray for TUN (Linux)            /usr/local/lib/elf-gate/xray                                                        │
-│  System proxy together with TUN  on                                                                                  │
-│  TUN interface name              elfgate0                                                                            │
-│  DNS through the tunnel          1.1.1.1                                                                             │
-│  ─ Ping ─────────────────────────────────────────────────────────────────────────────────────────────────────────────│
-│  Ping mode                       tcp                                                                                 │
-│  URL for URL ping                https://www.gstatic.com/generate_204                                                │
-│  Ping timeout, ms                3000                                                                                │
+│  Xray for TUN (Linux)                  /usr/local/lib/elf-gate/xray                                                  │
+│  System proxy together with TUN        on                                                                            │
+│  TUN interface name                    elfgate0                                                                      │
+│  DNS through the tunnel                1.1.1.1                                                                       │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │tray icon: none (not supported by this desktop or not running)                                                        │

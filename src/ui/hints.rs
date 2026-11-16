@@ -123,6 +123,7 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
         Screen::Main => scope::MAIN,
         Screen::Rules => scope::RULES,
         Screen::Settings => scope::SETTINGS,
+        Screen::Subscription => scope::SUB,
         Screen::LogsFull => scope::LOGS,
         Screen::Help => scope::HELP,
     };
@@ -189,14 +190,28 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
                             | SettingId::PingMode
                             | SettingId::Theme
                             | SettingId::TransparentBg
+                            | SettingId::SubDefaultHwid
                             | SettingId::LogLevel,
                         ) => crate::t!("hint.switch"),
                         Some(SettingId::Hwid) => crate::t!("hint.about_hwid"),
                         _ => crate::t!("hint.edit"),
                     })
                 }
+                Screen::Subscription => {
+                    use crate::app::subscription::SubRow;
+                    app.sub_fields().get(app.sub_cursor).and_then(|f| match f.row {
+                        SubRow::UserAgent | SubRow::Hours => Some(crate::t!("hint.edit")),
+                        SubRow::Hwid => Some(crate::t!("hint.switch")),
+                        SubRow::Hidden => Some(crate::t!("hint.show_hidden")),
+                        SubRow::Update | SubRow::Delete => Some(crate::t!("hint.run")),
+                        SubRow::Name | SubRow::Url => None,
+                    })
+                }
                 _ if !servers_focus => None,
                 _ => match (row, server) {
+                    (Some(Row::Group(i)), _) if app.subs[i].is_remote => {
+                        Some(crate::t!("hint.open_sub"))
+                    }
                     (Some(Row::Group(i)), _) => Some(if app.subs[i].collapsed {
                         crate::t!("hint.expand")
                     } else {
@@ -271,7 +286,26 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
                     }
                 }
             }
+            Action::Rules if app.screen == Screen::Subscription => {
+                use crate::app::subscription::Origin;
+                app.sub_fields()
+                    .get(app.sub_cursor)
+                    .is_some_and(|f| f.origin == Origin::Own)
+                    .then(|| crate::t!("hint.reset"))
+            }
             Action::Rules | Action::Settings | Action::Logs => on_main.then(|| b.short()),
+            Action::Edit => {
+                (servers_focus && matches!(row, Some(Row::Group(i)) | Some(Row::Server(i, _)) if app.subs[i].is_remote))
+                    .then(|| b.short())
+            }
+            Action::Fold => match row {
+                Some(Row::Group(i)) if servers_focus => Some(if app.subs[i].collapsed {
+                    crate::t!("hint.expand")
+                } else {
+                    crate::t!("hint.fold")
+                }),
+                _ => None,
+            },
             Action::Filter => (on_main && any_servers).then(|| b.short()),
             Action::Fingerprint => (servers_focus
                 && server.is_some_and(|s| !s.hidden && tls_like(s)))

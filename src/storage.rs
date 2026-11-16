@@ -342,25 +342,67 @@ impl Default for UpdatesConfig {
     }
 }
 
-/// `[[subscriptions]]`.
+/// `[sub_defaults]`: what a subscription uses unless it overrides the value.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SubDefaults {
+    pub user_agent: String,
+    /// 0 turns automatic updates off.
+    pub auto_update_hours: u32,
+    /// Send the device id (`x-hwid`) when the subscription is fetched.
+    pub send_hwid: bool,
+}
+
+impl Default for SubDefaults {
+    fn default() -> Self {
+        Self {
+            user_agent: crate::net::fetch::DEFAULT_USER_AGENT.into(),
+            auto_update_hours: 12,
+            send_hwid: true,
+        }
+    }
+}
+
+/// Files from before the defaults existed hold the built-in values in every entry: those are
+/// not overrides.
+fn legacy_ua<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    let v = Option::<String>::deserialize(d)?;
+    Ok(v.filter(|s| s != crate::net::fetch::DEFAULT_USER_AGENT))
+}
+
+fn legacy_hours<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u32>, D::Error> {
+    Ok(Option::<u32>::deserialize(d)?.filter(|h| *h != 12))
+}
+
+/// `[[subscriptions]]`. `None` in an option means "the value from `[sub_defaults]`".
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct SubscriptionConfig {
     pub name: String,
     pub url: String,
-    pub user_agent: String,
-    /// 0 turns automatic updates off.
-    pub auto_update_hours: u32,
+    #[serde(
+        deserialize_with = "legacy_ua",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub user_agent: Option<String>,
+    #[serde(
+        deserialize_with = "legacy_hours",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub auto_update_hours: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_hwid: Option<bool>,
 }
 
-impl Default for SubscriptionConfig {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            url: String::new(),
-            user_agent: crate::net::fetch::DEFAULT_USER_AGENT.into(),
-            auto_update_hours: 12,
-        }
+impl SubscriptionConfig {
+    pub fn user_agent<'a>(&'a self, d: &'a SubDefaults) -> &'a str {
+        self.user_agent.as_deref().unwrap_or(&d.user_agent)
+    }
+    pub fn hours(&self, d: &SubDefaults) -> u32 {
+        self.auto_update_hours.unwrap_or(d.auto_update_hours)
+    }
+    pub fn sends_hwid(&self, d: &SubDefaults) -> bool {
+        self.send_hwid.unwrap_or(d.send_hwid)
     }
 }
 
@@ -376,6 +418,7 @@ pub struct Config {
     pub ping: PingConfig,
     pub device: DeviceConfig,
     pub updates: UpdatesConfig,
+    pub sub_defaults: SubDefaults,
     pub subscriptions: Vec<SubscriptionConfig>,
     pub servers: Vec<ServerEntry>,
     pub overrides: Vec<ServerOverride>,
@@ -387,14 +430,30 @@ pub struct Config {
 
 impl Config {
     /// The copy the interface may see: no server links and no subscription URLs (they carry
-    /// keys and tokens). Everything else the screens need stays.
+    /// keys and tokens): of a URL only the scheme and the host stay (the subscription screen
+    /// shows them), the path and the query are replaced by `***`. Everything else stays.
     pub fn redacted(&self) -> Config {
         let mut c = self.clone();
         c.servers.clear();
         for s in &mut c.subscriptions {
-            s.url.clear();
+            s.url = masked_url(&s.url);
         }
         c
+    }
+}
+
+/// `https://host/***`: where the subscription is, without the token.
+fn masked_url(u: &str) -> String {
+    match url::Url::parse(u) {
+        Ok(p) if p.host_str().is_some() => {
+            let tail = if p.path() == "/" && p.query().is_none() {
+                ""
+            } else {
+                "/***"
+            };
+            format!("{}://{}{tail}", p.scheme(), p.host_str().unwrap_or(""))
+        }
+        _ => String::new(),
     }
 }
 

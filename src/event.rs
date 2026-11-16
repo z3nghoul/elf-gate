@@ -110,7 +110,6 @@ pub enum BgEvent {
     /// The first download of a subscription the user just added.
     SubAdded {
         url: String,
-        user_agent: String,
         result: Result<Box<SubUpdate>, String>,
     },
 }

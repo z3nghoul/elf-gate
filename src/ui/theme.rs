@@ -101,7 +101,9 @@ const LATTE: Palette = Palette {
     bg: rgb(0xeff1f5),
     panel: rgb(0xe6e9ef),
     text: rgb(0x4c4f69),
-    muted: rgb(0x6c6f85),
+    // Deviation from the role table: subtext1, not subtext0 (#6c6f85 is 4.37:1 on base, below the
+    // 4.5:1 that hints and explanations need). Mocha keeps subtext0.
+    muted: rgb(0x5c5f77),
     border: rgb(0x9ca0b0),
     accent: rgb(0x8839ef),
     selection: rgb(0xccd0da),
@@ -381,21 +383,20 @@ mod tests {
     }
 
     #[test]
-    fn plain_text_contrast_is_at_least_4_5_in_mocha_and_latte() {
+    fn text_and_muted_text_contrast_is_at_least_4_5_in_mocha_and_latte() {
         for (name, p) in [("mocha", &MOCHA), ("latte", &LATTE)] {
-            for (bg_name, bg) in [("bg", p.bg), ("panel", p.panel), ("selection", p.selection)] {
-                let c = contrast(p.text, bg);
-                assert!(c >= 4.5, "{name}: text on {bg_name} is {c:.2}:1");
+            for (bg_name, bg) in [("bg", p.bg), ("panel", p.panel)] {
+                for (fg_name, fg) in [("text", p.text), ("muted", p.muted)] {
+                    let c = contrast(fg, bg);
+                    assert!(c >= 4.5, "{name}: {fg_name} on {bg_name} is {c:.2}:1");
+                }
             }
-        }
-    }
-
-    #[test]
-    fn muted_text_is_readable_on_the_background() {
-        // The official subtext0; Latte's is 4.37:1 on its base, so it is not "plain" text.
-        for (name, p) in [("mocha", &MOCHA), ("latte", &LATTE)] {
-            let c = contrast(p.muted, p.bg);
-            assert!(c >= 4.0, "{name}: muted is {c:.2}:1");
+            // On the selected row only plain text is held to 4.5:1: Latte's muted text on its
+            // official surface0 is 4.05:1 (checked below as the floor, listed in the report).
+            let c = contrast(p.text, p.selection);
+            assert!(c >= 4.5, "{name}: text on selection is {c:.2}:1");
+            let c = contrast(p.muted, p.selection);
+            assert!(c >= 4.0, "{name}: muted on selection is {c:.2}:1");
         }
     }
 

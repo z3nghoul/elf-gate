@@ -13,6 +13,7 @@ use crate::storage::Config;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 pub mod settings;
+pub mod subscription;
 pub use settings::SettingId;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -38,6 +39,8 @@ pub enum Screen {
     Main,
     Rules,
     Settings,
+    /// The settings of one subscription (`AppState::sub_name`).
+    Subscription,
     Help,
     LogsFull,
 }
@@ -67,6 +70,10 @@ pub enum InputPurpose {
     Rule(RuleKind),
     /// A text or number setting.
     Setting(SettingId),
+    /// The User-Agent of the subscription (by name); empty means the default.
+    SubUserAgent(String),
+    /// The update interval of the subscription (by name); empty means the default.
+    SubHours(String),
 }
 
 /// What a selection popup applies its choice to.
@@ -77,6 +84,8 @@ pub enum SelectKind {
     Role(u64),
     /// Which kind of rule to add.
     NewRuleKind,
+    /// `u`: update all, or open one subscription (index 0 is "all", then `config.subscriptions`).
+    Subscriptions,
     /// Pick a running program for a process rule.
     RuleProcess,
 }
@@ -171,6 +180,9 @@ pub struct AppState {
     pub should_quit: bool,
     pub rules_cursor: usize,
     pub settings_cursor: usize,
+    /// The subscription of [`Screen::Subscription`] and the row on it.
+    pub sub_name: String,
+    pub sub_cursor: usize,
     pub link: LinkState,
     /// Servers are listed by ping instead of in their own order.
     pub sorted_by_ping: bool,
@@ -218,6 +230,8 @@ impl AppState {
             should_quit: false,
             rules_cursor: 0,
             settings_cursor: 0,
+            sub_name: String::new(),
+            sub_cursor: 0,
             link: LinkState::Connecting,
             sorted_by_ping: false,
             show_hidden: std::collections::HashSet::new(),
@@ -368,6 +382,10 @@ impl AppState {
         self.update = update;
         self.mock = mock;
         self.got_view = true;
+        // The subscription of the open screen is gone (deleted): back to the list.
+        if self.screen == Screen::Subscription && self.sub_config().is_none() {
+            self.screen = Screen::Main;
+        }
         self.clamp_selection();
         let len = self.rule_items().len();
         if self.cursor_to_end {
@@ -605,6 +623,9 @@ impl AppState {
                         InputPurpose::Link => self.submit_input(buf),
                         InputPurpose::Rule(kind) => self.submit_rule(kind, buf),
                         InputPurpose::Setting(id) => self.submit_setting(id, buf),
+                        p @ (InputPurpose::SubUserAgent(_) | InputPurpose::SubHours(_)) => {
+                            self.submit_sub_input(p, buf)
+                        }
                     }
                     self.show_next_alert();
                 }
@@ -672,6 +693,8 @@ impl AppState {
                 | PingAll
                 | SortPing
                 | UpdateSubs
+                | Edit
+                | Fold
                 | Fingerprint
                 | ShowHidden
                 | Role
@@ -680,6 +703,9 @@ impl AppState {
         if main_only && self.screen != Screen::Main {
             if action == Enter && self.screen == Screen::Settings {
                 self.settings_activate();
+            }
+            if action == Enter && self.screen == Screen::Subscription {
+                self.sub_activate();
             }
             return;
         }
@@ -725,7 +751,19 @@ impl AppState {
                     crate::t!("status.sort_original")
                 });
             }
-            UpdateSubs => self.send(Cmd::UpdateSubs),
+            UpdateSubs => self.open_subscriptions_menu(),
+            Edit => match self.selected_row() {
+                Some(Row::Group(i)) | Some(Row::Server(i, _)) => {
+                    let name = self.subs[i].name.clone();
+                    self.open_subscription(&name);
+                }
+                None => {}
+            },
+            Fold => {
+                if let Some(Row::Group(i)) = self.selected_row() {
+                    self.subs[i].collapsed = !self.subs[i].collapsed;
+                }
+            }
             Add => {
                 if self.screen == Screen::Rules {
                     self.rules_add_menu();
@@ -741,6 +779,8 @@ impl AppState {
             Delete => self.ask_delete(),
             Toggle => self.rules_toggle(),
             RoutingMode => self.rules_toggle_routing(),
+            // On the subscription screen the key of "rules" resets the row to the default.
+            Rules if self.screen == Screen::Subscription => self.sub_reset(),
             Rules => self.toggle_screen(Screen::Rules),
             Settings => self.toggle_screen(Screen::Settings),
             Logs => self.toggle_screen(Screen::LogsFull),
@@ -883,6 +923,8 @@ impl AppState {
             self.rules_move(delta);
         } else if self.screen == Screen::Settings {
             self.settings_move(delta);
+        } else if self.screen == Screen::Subscription {
+            self.sub_move(delta);
         } else if self.logs_active() {
             self.scroll_logs(delta < 0, 1);
         } else if self.servers_active() {
@@ -920,6 +962,11 @@ impl AppState {
             return;
         }
         match self.selected_row() {
+            // A subscription header opens the subscription's screen (← → fold it).
+            Some(Row::Group(i)) if self.subs[i].is_remote => {
+                let name = self.subs[i].name.clone();
+                self.open_subscription(&name);
+            }
             Some(Row::Group(i)) => self.subs[i].collapsed = !self.subs[i].collapsed,
             Some(Row::Server(..)) => {
                 if let Some(s) = self.selected_server() {
@@ -986,24 +1033,26 @@ impl AppState {
                 };
                 self.popup = Some(Popup::Confirm { text, kind });
             }
-            Some(Row::Group(i)) => {
-                let g = &self.subs[i];
-                let live = matches!(self.conn, Conn::Connected(c) | Conn::Connecting(c) if g.servers.iter().any(|s| s.id == c));
-                self.popup = Some(Popup::Confirm {
-                    text: crate::t!(
-                        "confirm.delete_group",
-                        name = self.group_title(&g.name),
-                        stop = if live {
-                            crate::t!("confirm.live_group")
-                        } else {
-                            String::new()
-                        }
-                    ),
-                    kind: ConfirmKind::DeleteGroup(g.name.clone()),
-                });
-            }
+            Some(Row::Group(i)) => self.ask_delete_group(i),
             None => {}
         }
+    }
+
+    pub(crate) fn ask_delete_group(&mut self, i: usize) {
+        let g = &self.subs[i];
+        let live = matches!(self.conn, Conn::Connected(c) | Conn::Connecting(c) if g.servers.iter().any(|s| s.id == c));
+        self.popup = Some(Popup::Confirm {
+            text: crate::t!(
+                "confirm.delete_group",
+                name = self.group_title(&g.name),
+                stop = if live {
+                    crate::t!("confirm.live_group")
+                } else {
+                    String::new()
+                }
+            ),
+            kind: ConfirmKind::DeleteGroup(g.name.clone()),
+        });
     }
 
     /// `h` on a subscription: show or hide the servers the user removed from it.
@@ -1040,7 +1089,12 @@ impl AppState {
                 self.send(Cmd::DeleteServer(id))
             }
             ConfirmKind::UnhideServer(id) => self.send(Cmd::UnhideServer(id)),
-            ConfirmKind::DeleteGroup(name) => self.send(Cmd::DeleteGroup(name)),
+            ConfirmKind::DeleteGroup(name) => {
+                if self.screen == Screen::Subscription {
+                    self.screen = Screen::Main;
+                }
+                self.send(Cmd::DeleteGroup(name))
+            }
         }
         self.clamp_selection();
     }
@@ -1083,6 +1137,27 @@ impl AppState {
             options,
             selected,
             kind: SelectKind::Fingerprint(server.id),
+        });
+    }
+
+    /// `u`: update everything or pick one subscription.
+    fn open_subscriptions_menu(&mut self) {
+        if self.config.subscriptions.is_empty() {
+            self.send(Cmd::UpdateSubs);
+            return;
+        }
+        let mut options = vec![crate::t!("sub.menu_all")];
+        options.extend(
+            self.config
+                .subscriptions
+                .iter()
+                .map(|s| self.group_title(&s.name)),
+        );
+        self.popup = Some(Popup::Select {
+            title: crate::t!("sub.menu_title"),
+            options,
+            selected: 0,
+            kind: SelectKind::Subscriptions,
         });
     }
 
@@ -1146,6 +1221,14 @@ impl AppState {
                 self.send(Cmd::SetRole { id, role });
             }
             SelectKind::NewRuleKind => self.rules_kind_chosen(index),
+            SelectKind::Subscriptions => match index.checked_sub(1) {
+                None => self.send(Cmd::UpdateSubs),
+                Some(i) => {
+                    if let Some(name) = self.config.subscriptions.get(i).map(|s| s.name.clone()) {
+                        self.open_subscription(&name);
+                    }
+                }
+            },
             SelectKind::RuleProcess => self.rules_process_chosen(index, option),
         }
     }

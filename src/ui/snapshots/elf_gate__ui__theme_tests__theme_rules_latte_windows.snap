@@ -66,11 +66,11 @@ AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 --- legend
 A fg=Rgb(156, 160, 176) bg=Rgb(230, 233, 239) mod=NONE
 B fg=Rgb(136, 57, 239) bg=Rgb(230, 233, 239) mod=BOLD
-C fg=Rgb(108, 111, 133) bg=Rgb(230, 233, 239) mod=NONE
+C fg=Rgb(92, 95, 119) bg=Rgb(230, 233, 239) mod=NONE
 D fg=Rgb(76, 79, 105) bg=Rgb(230, 233, 239) mod=NONE
 E fg=Rgb(223, 142, 29) bg=Rgb(230, 233, 239) mod=BOLD
 F fg=Rgb(76, 79, 105) bg=Rgb(204, 208, 218) mod=BOLD
 G fg=Rgb(64, 160, 43) bg=Rgb(204, 208, 218) mod=BOLD
-H fg=Rgb(108, 111, 133) bg=Rgb(204, 208, 218) mod=BOLD
+H fg=Rgb(92, 95, 119) bg=Rgb(204, 208, 218) mod=BOLD
 I fg=Rgb(223, 142, 29) bg=Rgb(204, 208, 218) mod=BOLD
 J fg=Rgb(64, 160, 43) bg=Rgb(230, 233, 239) mod=NONE
