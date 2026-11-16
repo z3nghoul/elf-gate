@@ -779,6 +779,10 @@ mod tests {
                 "{text}"
             );
         }
+        // Nothing was started: the check is ours, Xray never ran.
+        assert!(!a.busy, "no start task");
+        assert!(a.core.is_none(), "no core");
+        assert_ne!(a.conn, Conn::Connecting(id));
         // The server is remembered so an elevated restart can reconnect to it.
         assert_eq!(a.config.ui.last_server.as_deref(), Some("manual/Real"));
         let _ = std::fs::remove_dir_all(dir);
