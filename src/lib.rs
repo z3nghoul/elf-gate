@@ -21,6 +21,8 @@ pub mod sync;
 pub mod sysproxy;
 #[cfg(test)]
 pub mod test_support;
+#[doc(hidden)]
+pub mod testing;
 pub mod tray;
 pub mod tun;
 pub mod ui;

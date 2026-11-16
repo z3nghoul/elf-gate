@@ -1,4 +1,6 @@
-//! Helpers shared by the integration tests.
+//! Helpers shared by the unit tests (inside the crate) and the integration tests (`tests/`).
+//! Public only because `tests/` sees nothing else; hidden from the documentation. A small
+//! internal crate would be the alternative, but one function does not earn a crate.
 
 use std::path::{Path, PathBuf};
 

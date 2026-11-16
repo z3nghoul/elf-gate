@@ -2,8 +2,6 @@
 //! no desktop, so the system proxy is never touched), driven over the local link.
 #![cfg(unix)]
 
-mod common;
-
 use elf_gate::proto::{decode, encode, Cmd, Conn, Update, View};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -216,7 +214,7 @@ fn process_count(pattern: &str) -> usize {
 
 #[tokio::test]
 async fn vpn_outlives_the_interface_and_dies_with_the_daemon() {
-    let Some(xray) = common::xray_bin() else {
+    let Some(xray) = elf_gate::testing::xray_bin() else {
         eprintln!("SKIPPED: no Xray binary");
         return;
     };

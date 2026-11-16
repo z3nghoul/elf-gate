@@ -16,7 +16,7 @@ use crate::storage::{Config, ProxyConfig, StateStore};
 use crate::sysproxy::{ProxyController, ProxyHandle};
 use serde_json::{json, Value};
 use std::net::TcpListener as StdListener;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command as StdCommand;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,21 +29,7 @@ use tokio::time::{sleep, timeout, Instant};
 
 const UUID: &str = "b831381d-6324-4d53-ad4f-8cda48b30811";
 
-fn xray_bin() -> Option<PathBuf> {
-    if let Some(p) = std::env::var("XRAY_PATH").ok().filter(|v| !v.is_empty()) {
-        let p = PathBuf::from(p);
-        assert!(
-            p.is_file(),
-            "XRAY_PATH is set but is not a file: {}",
-            p.display()
-        );
-        return Some(p);
-    }
-    let fallback = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("bin")
-        .join(format!("xray{}", std::env::consts::EXE_SUFFIX));
-    fallback.is_file().then_some(fallback)
-}
+use crate::testing::xray_bin;
 
 macro_rules! require_xray {
     () => {
