@@ -1,3 +1,4 @@
+pub mod adapter;
 pub mod autostart;
 pub mod child;
 pub mod device;

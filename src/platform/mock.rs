@@ -92,6 +92,14 @@ pub struct MockTunHost {
     pub supervisor: bool,
     pub kill_result: bool,
     pub killed: Mutex<Vec<u32>>,
+    /// Windows-like: the adapter must be waited for and may need removing.
+    pub managed_adapter: bool,
+    /// `interface_exists` answers true this many more times (the adapter is going away).
+    pub present_polls: Mutex<u32>,
+    /// What `remove_stale_adapter` finds to remove (once): a ghost or a leftover.
+    pub stale_devices: Mutex<usize>,
+    /// Names `remove_stale_adapter` was asked about.
+    pub removed_names: Mutex<Vec<String>>,
 }
 
 impl MockTunHost {
@@ -111,11 +119,22 @@ impl MockTunHost {
             supervisor: false,
             kill_result: true,
             killed: Mutex::new(Vec::new()),
+            managed_adapter: false,
+            present_polls: Mutex::new(0),
+            stale_devices: Mutex::new(0),
+            removed_names: Mutex::new(Vec::new()),
         }
     }
 }
 
 impl TunHost for MockTunHost {
+    fn adapter_lifecycle_managed(&self) -> bool {
+        self.managed_adapter
+    }
+    fn remove_stale_adapter(&self, name: &str) -> Result<usize, String> {
+        crate::sync::lock(&self.removed_names).push(name.to_string());
+        Ok(std::mem::take(&mut *crate::sync::lock(&self.stale_devices)))
+    }
     fn tun_device_present(&self) -> bool {
         self.tun_device
     }
@@ -144,6 +163,11 @@ impl TunHost for MockTunHost {
         self.ipv6
     }
     fn interface_exists(&self, _name: &str) -> bool {
+        let mut polls = crate::sync::lock(&self.present_polls);
+        if *polls > 0 {
+            *polls -= 1;
+            return true;
+        }
         self.iface_present
     }
     fn running_processes(&self) -> Vec<String> {

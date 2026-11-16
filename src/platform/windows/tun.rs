@@ -250,6 +250,14 @@ impl TunHost for Host {
         names
     }
 
+    fn adapter_lifecycle_managed(&self) -> bool {
+        true
+    }
+
+    fn remove_stale_adapter(&self, name: &str) -> Result<usize, String> {
+        crate::platform::windows::adapter::remove_named(name)
+    }
+
     fn kill_stale(&self, _pid: u32, _names: &[&str]) -> bool {
         // A Job Object ends the core together with elf-gate, so nothing is left behind.
         false

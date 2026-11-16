@@ -10,6 +10,7 @@ use crate::xray::process::{resolve_binary, StartOptions};
 use std::path::Path;
 
 /// Why a start failed, in words for the user.
+#[derive(Debug)]
 struct Failure {
     message: String,
     needs_privileges: bool,
@@ -30,6 +31,33 @@ fn log_warning(tx: &BgTx, text: String) {
         level: Level::Warning,
         text,
     }));
+}
+
+/// Replaces the core: stops the old one, makes sure its TUN adapter is gone, starts the new one.
+/// In this order and always through here: a changed rule or server, a reconnect and a first
+/// start all take this path. A core killed outright leaves its adapter behind on Windows, and
+/// starting before it is gone fails with "file already exists".
+async fn start_after_stop<T, F, Fut>(
+    stop: impl std::future::Future<Output = ()>,
+    tun_name: Option<&str>,
+    host: &dyn TunHost,
+    (wait, poll): (Duration, Duration),
+    log: impl Fn(String),
+    mut start: F,
+) -> Result<T, Failure>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, Failure>>,
+{
+    stop.await;
+    if let Some(name) = tun_name {
+        match tun::free_adapter(host, name, wait, poll).await {
+            Ok(0) => {}
+            Ok(n) => log(format!("removed {n} leftover TUN adapter(s) named {name}")),
+            Err(e) => log(format!("could not clean up the TUN adapter {name}: {e}")),
+        }
+    }
+    start().await
 }
 
 /// What `start_core` needs.
@@ -255,30 +283,42 @@ impl Engine {
         let checker = self.checker.clone();
         let backup = self.backup_for(id);
         let known_hosts = self.known_hosts();
+        let tun_name = (mode == Mode::Tun).then(|| self.config.tun.name.clone());
         if let Some(b) = &backup {
             self.logt(Level::Info, || crate::t!("eng.backup_log", name = b.name));
         }
         self.spawn(async move {
-            if let Some(old) = old {
-                old.stop().await;
-                if let Some(store) = &store {
-                    tun::mark_down(store);
+            let stop = async {
+                if let Some(old) = old {
+                    old.stop().await;
+                    if let Some(store) = &store {
+                        tun::mark_down(store);
+                    }
                 }
-            }
-            let result = start_core(StartRequest {
-                server: &server,
-                mode,
-                setup,
-                core_cfg: &core_cfg,
-                config: &config,
-                host: host.as_ref(),
-                run_dir: &run_dir,
-                tx: &tx,
-                store: store.as_ref(),
-                checker: &checker,
-                backup,
-                known_hosts,
-            })
+            };
+            let result = start_after_stop(
+                stop,
+                tun_name.as_deref(),
+                host.as_ref(),
+                (tun::ADAPTER_WAIT, tun::ADAPTER_POLL),
+                |text| log_warning(&tx, text),
+                || {
+                    start_core(StartRequest {
+                        server: &server,
+                        mode,
+                        setup: setup.clone(),
+                        core_cfg: &core_cfg,
+                        config: &config,
+                        host: host.as_ref(),
+                        run_dir: &run_dir,
+                        tx: &tx,
+                        store: store.as_ref(),
+                        checker: &checker,
+                        backup: backup.clone(),
+                        known_hosts: known_hosts.clone(),
+                    })
+                },
+            )
             .await;
             checker.flush();
             let ev = match result {
@@ -896,6 +936,93 @@ mod tests {
             error.starts_with(uk.trim_end_matches([' ', ':'])),
             "{error}"
         );
+    }
+
+    fn tiny() -> (Duration, Duration) {
+        (Duration::from_millis(200), Duration::from_millis(2))
+    }
+
+    /// stop, then the wait for the adapter, then the start; never a start before the adapter
+    /// is gone.
+    #[tokio::test]
+    async fn the_new_core_starts_after_the_old_one_stopped_and_its_adapter_is_gone() {
+        use std::sync::Mutex;
+        let log: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let host = MockTunHost {
+            managed_adapter: true,
+            present_polls: Mutex::new(3),
+            ..MockTunHost::healthy()
+        };
+        let r: Result<u8, Failure> = start_after_stop(
+            async { log.lock().unwrap().push("stop".into()) },
+            Some("elfgate0"),
+            &host,
+            tiny(),
+            |t| log.lock().unwrap().push(format!("log: {t}")),
+            || async {
+                // The adapter is gone by now: the scripted polls ran out.
+                assert_eq!(*host.present_polls.lock().unwrap(), 0);
+                log.lock().unwrap().push("start".into());
+                Ok(1)
+            },
+        )
+        .await;
+        assert_eq!(r.unwrap(), 1);
+        assert_eq!(*log.lock().unwrap(), ["stop", "start"]);
+        // Nothing left: the cleanup ran (it also looks for ghosts) and found nothing.
+        assert_eq!(*host.removed_names.lock().unwrap(), ["elfgate0"]);
+    }
+
+    #[tokio::test]
+    async fn an_adapter_that_stays_or_a_ghost_is_removed_before_the_start() {
+        use std::sync::Mutex;
+        let log: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let host = MockTunHost {
+            managed_adapter: true,
+            present_polls: Mutex::new(u32::MAX),
+            stale_devices: Mutex::new(1),
+            ..MockTunHost::healthy()
+        };
+        let r: Result<u8, Failure> = start_after_stop(
+            async { log.lock().unwrap().push("stop".into()) },
+            Some("elfgate0"),
+            &host,
+            tiny(),
+            |t| log.lock().unwrap().push(format!("log: {t}")),
+            || async {
+                log.lock().unwrap().push("start".into());
+                Ok(1)
+            },
+        )
+        .await;
+        assert!(r.is_ok());
+        let log = log.lock().unwrap();
+        assert_eq!(log[0], "stop");
+        assert!(
+            log[1].contains("removed 1 leftover") && log[1].contains("elfgate0"),
+            "{log:?}"
+        );
+        assert_eq!(log[2], "start");
+        assert_eq!(*host.removed_names.lock().unwrap(), ["elfgate0"]);
+    }
+
+    /// Linux and the proxy mode: nothing is waited for, nothing is removed.
+    #[tokio::test]
+    async fn without_a_managed_adapter_or_in_proxy_mode_nothing_is_waited_for() {
+        use std::sync::Mutex;
+        let host = MockTunHost {
+            present_polls: Mutex::new(1000),
+            ..MockTunHost::healthy()
+        };
+        let start = std::time::Instant::now();
+        for name in [Some("elfgate0"), None] {
+            let r: Result<u8, Failure> =
+                start_after_stop(async {}, name, &host, tiny(), |_| {}, || async { Ok(1) }).await;
+            assert!(r.is_ok());
+        }
+        assert!(start.elapsed() < Duration::from_millis(150));
+        assert!(host.removed_names.lock().unwrap().is_empty());
+        assert_eq!(*host.present_polls.lock().unwrap(), 1000, "never asked");
     }
 
     #[tokio::test]

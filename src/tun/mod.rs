@@ -345,6 +345,29 @@ pub async fn tcp_reachable(ip: IpAddr, port: u16, limit: Duration) -> Result<(),
     }
 }
 
+/// How long a start waits for the previous adapter of the same name to go away.
+pub const ADAPTER_WAIT: Duration = Duration::from_secs(5);
+pub const ADAPTER_POLL: Duration = Duration::from_millis(250);
+
+/// Before a TUN start: waits (up to `wait`) until no adapter called `name` exists, then removes
+/// whatever of ours is still there, present or a ghost. Returns how many devices were removed.
+/// Does nothing where the adapter goes away with the core (`adapter_lifecycle_managed`).
+pub async fn free_adapter(
+    host: &dyn TunHost,
+    name: &str,
+    wait: Duration,
+    poll: Duration,
+) -> Result<usize, String> {
+    if !host.adapter_lifecycle_managed() {
+        return Ok(0);
+    }
+    let deadline = tokio::time::Instant::now() + wait;
+    while host.interface_exists(name) && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(poll).await;
+    }
+    host.remove_stale_adapter(name)
+}
+
 // ------------------------------------------------------------------- state / cleanup
 
 pub fn mark_up(store: &StateStore, pid: u32, interface: &str) {

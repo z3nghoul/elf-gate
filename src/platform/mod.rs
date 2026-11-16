@@ -168,6 +168,17 @@ pub trait TunHost: Send + Sync {
         Ok(())
     }
     fn interface_exists(&self, name: &str) -> bool;
+    /// Windows: a killed core leaves its TUN adapter behind, so before a start the adapter must be
+    /// gone (`interface_exists`) or be removed (`remove_stale_adapter`). Elsewhere the adapter
+    /// disappears with the core and nothing is waited for.
+    fn adapter_lifecycle_managed(&self) -> bool {
+        false
+    }
+    /// Windows: removes a leftover TUN adapter called `name`, present or ghost, and nothing
+    /// else. Returns how many devices were removed.
+    fn remove_stale_adapter(&self, _name: &str) -> Result<usize, String> {
+        Ok(0)
+    }
     /// Names of running programs as the core sees them (real file name, no `.exe`).
     fn running_processes(&self) -> Vec<String>;
     /// Stops a core left over from a crashed run, if `pid` is still one of `names`.
