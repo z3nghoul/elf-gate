@@ -21,6 +21,7 @@ pub enum SettingId {
     PingAuto,
     TunName,
     TunnelDns,
+    ManageFirewall,
     AutoConnect,
     Autostart,
     Hwid,
@@ -151,6 +152,18 @@ impl AppState {
                 c.ui.theme.clone(),
             ),
         ];
+        if crate::platform::IS_WINDOWS {
+            rows.insert(
+                rows.iter()
+                    .position(|r| r.0 == SettingId::AutoConnect)
+                    .unwrap_or(rows.len()),
+                (
+                    SettingId::ManageFirewall,
+                    crate::t!("setting.firewall"),
+                    onoff(c.tun.manage_firewall),
+                ),
+            );
+        }
         for s in &c.subscriptions {
             rows.push((
                 SettingId::SubUa(s.name.clone()),
@@ -187,6 +200,7 @@ impl AppState {
         let set = match id {
             SettingId::VerboseLog => Setting::VerboseLog(!c.core.verbose_log),
             SettingId::SetSystemProxy => Setting::SetSystemProxy(!c.proxy.set_system_proxy),
+            SettingId::ManageFirewall => Setting::ManageFirewall(!c.tun.manage_firewall),
             SettingId::AutoConnect => Setting::AutoConnect(!c.ui.auto_connect),
             SettingId::Autostart => Setting::Autostart(!self.autostart),
             SettingId::PingMode => Setting::PingMode(match c.ping.mode {

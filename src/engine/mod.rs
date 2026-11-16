@@ -1289,6 +1289,7 @@ impl Engine {
                 self.config.tun.name = v;
             }
             TunnelDns(v) => self.config.tun.tunnel_dns = v,
+            ManageFirewall(v) => self.config.tun.manage_firewall = v,
             AutoConnect(v) => self.config.ui.auto_connect = v,
             PrivacyMode(v) => self.config.ui.privacy_mode = v,
             Language(lang) => {
@@ -1535,6 +1536,21 @@ mod settings_tests {
         assert_eq!(saved.core.socks_port, 2000);
         assert_eq!(saved.ui.theme, "light");
         assert_eq!(saved.ping.auto_interval_secs, 0);
+    }
+
+    #[tokio::test]
+    async fn the_firewall_setting_is_on_by_default_and_saved() {
+        let dir = crate::test_support::TempDir::new("fwset");
+        let (tx, _rx) = unbounded_channel();
+        let mut e = Engine::build(
+            tx,
+            crate::test_support::config_ru(),
+            Some(Storage::new(dir.path())),
+            false,
+        );
+        assert!(e.config.tun.manage_firewall);
+        e.handle_cmd(Cmd::Set(Setting::ManageFirewall(false)));
+        assert!(!Storage::new(dir.path()).load().unwrap().tun.manage_firewall);
     }
 
     #[tokio::test]

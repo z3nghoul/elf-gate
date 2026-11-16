@@ -56,6 +56,7 @@ pub enum Setting {
     PingAutoIntervalSecs(u64),
     TunName(String),
     TunnelDns(String),
+    ManageFirewall(bool),
     AutoConnect(bool),
     Autostart(bool),
     Theme(String),
