@@ -1006,3 +1006,176 @@ async fn help_on_80x24_is_whole_when_scrolled() {
     let again = crate::ui::tests_support::draw(80, 24, &mut a);
     assert_eq!(again, end);
 }
+
+// ---------- paste from the clipboard ----------
+
+const LINK_A: &str =
+    "vless://11111111-1111-1111-1111-111111111111@one.example.com:443?security=tls#one";
+const LINK_B: &str =
+    "vless://22222222-2222-2222-2222-222222222222@two.example.com:443?security=tls#two";
+
+fn paste_app(clip: crate::platform::mock::MockClipboard) -> (AppState, UnboundedReceiver<Cmd>) {
+    let (a, rx) = app_with(&[]);
+    (a.with_clipboard(Arc::new(clip)), rx)
+}
+
+fn ctrl_v(a: &mut AppState) {
+    a.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL));
+}
+
+fn confirm_text(a: &AppState) -> String {
+    match &a.popup {
+        Some(Popup::Confirm { text, .. }) => text.clone(),
+        other => panic!("not a confirmation: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn ctrl_v_in_the_add_dialog_asks_and_enter_adds_every_link() {
+    let clip = crate::platform::mock::MockClipboard::with_text(&format!("{LINK_A}\n{LINK_B}"));
+    let (mut a, mut rx) = paste_app(clip);
+    a.handle_action(Action::Add);
+    ctrl_v(&mut a);
+    assert!(matches!(
+        a.popup,
+        Some(Popup::Confirm {
+            kind: ConfirmKind::Paste(_),
+            ..
+        })
+    ));
+    assert!(sent(&mut rx).is_empty(), "nothing is added before Enter");
+    press(&mut a, KeyCode::Enter);
+    assert!(a.popup.is_none());
+    assert_eq!(
+        sent(&mut rx),
+        vec![Cmd::AddLink(LINK_A.into()), Cmd::AddLink(LINK_B.into())]
+    );
+}
+
+#[tokio::test]
+async fn esc_cancels_the_paste() {
+    let clip = crate::platform::mock::MockClipboard::with_text(LINK_A);
+    let (mut a, mut rx) = paste_app(clip);
+    a.handle_action(Action::Add);
+    ctrl_v(&mut a);
+    press(&mut a, KeyCode::Esc);
+    assert!(a.popup.is_none());
+    assert!(sent(&mut rx).is_empty());
+}
+
+#[tokio::test]
+async fn a_subscription_url_is_sent_as_it_is() {
+    let clip = crate::platform::mock::MockClipboard::with_text("https://sub.example.com/t/abc");
+    let (mut a, mut rx) = paste_app(clip);
+    a.handle_action(Action::Add);
+    ctrl_v(&mut a);
+    assert!(confirm_text(&a).contains("sub.example.com"));
+    press(&mut a, KeyCode::Enter);
+    assert_eq!(
+        sent(&mut rx),
+        vec![Cmd::AddLink("https://sub.example.com/t/abc".into())]
+    );
+}
+
+#[tokio::test]
+async fn duplicates_are_not_added_and_are_reported() {
+    let clip = crate::platform::mock::MockClipboard::with_text(&format!("{LINK_A} {LINK_B}"));
+    let (mut a, mut rx) = paste_app(clip);
+    a.config.servers.push(crate::storage::ServerEntry {
+        link: LINK_A.into(),
+    });
+    a.handle_action(Action::Add);
+    ctrl_v(&mut a);
+    let text = confirm_text(&a);
+    assert!(
+        text.contains(&crate::t!("paste.skipped", count = 1)),
+        "{text}"
+    );
+    press(&mut a, KeyCode::Enter);
+    assert_eq!(sent(&mut rx), vec![Cmd::AddLink(LINK_B.into())]);
+}
+
+#[tokio::test]
+async fn everything_already_added_is_a_notice_and_sends_nothing() {
+    let clip = crate::platform::mock::MockClipboard::with_text(LINK_A);
+    let (mut a, mut rx) = paste_app(clip);
+    a.config.servers.push(crate::storage::ServerEntry {
+        link: LINK_A.into(),
+    });
+    a.handle_action(Action::Add);
+    ctrl_v(&mut a);
+    assert!(matches!(a.popup, Some(Popup::Notice(_))));
+    assert!(sent(&mut rx).is_empty());
+}
+
+#[tokio::test]
+async fn nothing_usable_is_a_short_message_and_the_dialog_stays() {
+    for text in ["", "just some words", "ftp://x.example.com/f"] {
+        let (mut a, mut rx) = paste_app(crate::platform::mock::MockClipboard::with_text(text));
+        a.handle_action(Action::Add);
+        ctrl_v(&mut a);
+        assert!(
+            matches!(
+                a.popup,
+                Some(Popup::Input {
+                    purpose: InputPurpose::Link,
+                    ..
+                })
+            ),
+            "{text:?}"
+        );
+        assert_eq!(
+            a.status.as_deref(),
+            Some(crate::t!("paste.nothing").as_str())
+        );
+        assert!(sent(&mut rx).is_empty());
+    }
+}
+
+#[tokio::test]
+async fn an_unreachable_clipboard_keeps_the_manual_input_open() {
+    let (mut a, mut rx) = paste_app(crate::platform::mock::MockClipboard::unavailable());
+    a.handle_action(Action::Add);
+    ctrl_v(&mut a);
+    assert!(a
+        .status
+        .as_deref()
+        .unwrap()
+        .contains("no graphical session"));
+    for c in "vless://x@y:1#z".chars() {
+        press(&mut a, KeyCode::Char(c));
+    }
+    press(&mut a, KeyCode::Enter);
+    assert_eq!(sent(&mut rx), vec![Cmd::AddLink("vless://x@y:1#z".into())]);
+}
+
+#[tokio::test]
+async fn ctrl_v_works_on_the_cyrillic_layout_and_only_in_the_add_dialog() {
+    let clip = crate::platform::mock::MockClipboard::with_text(LINK_A);
+    let (mut a, _rx) = paste_app(clip);
+    // Outside the dialog it does nothing.
+    a.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL));
+    assert!(a.popup.is_none());
+    a.handle_action(Action::Add);
+    // The V key of the Russian layout types U+043C.
+    a.handle_key(KeyEvent::new(
+        KeyCode::Char('\u{43c}'),
+        KeyModifiers::CONTROL,
+    ));
+    assert!(matches!(a.popup, Some(Popup::Confirm { .. })));
+}
+
+#[tokio::test]
+async fn the_paste_confirmation_hides_the_subscription_host_in_privacy_mode() {
+    let clip = crate::platform::mock::MockClipboard::with_text(&format!(
+        "https://secret-sub.example.org/t/abc {LINK_A}"
+    ));
+    let (mut a, _rx) = paste_app(clip);
+    a.config.ui.privacy_mode = true;
+    a.handle_action(Action::Add);
+    ctrl_v(&mut a);
+    let shown = a.mask(&confirm_text(&a));
+    for secret in ["secret-sub", "example.org", "one.example.com", "abc"] {
+        assert!(!shown.contains(secret), "{secret} in {shown}");
+    }
+}

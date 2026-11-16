@@ -48,6 +48,8 @@ pub enum Action {
     FocusPrev,
     /// F12; does something only in a debug build (`build_info::DEBUG_PANIC_KEY`).
     DebugPanic,
+    /// Ctrl+V in the add dialog: take the links or the subscription from the clipboard.
+    Paste,
     /// Ctrl+L: clear and redraw the whole screen (after the terminal garbled it).
     Redraw,
 }
@@ -413,6 +415,16 @@ pub const BINDINGS: &[Binding] = &[
         bar: "Esc",
         prio: 1,
         scopes: scope::RULES | scope::SETTINGS | scope::LOGS | scope::HELP | scope::SUB,
+    },
+    Binding {
+        label: "Ctrl+V",
+        action: Action::Paste,
+        keys: &[(KeyCode::Char('v'), C)],
+        hidden: false,
+        bar: "Ctrl+V",
+        prio: 2,
+        // Works in the add dialog only; its key bar names the key (see `ui::hints`).
+        scopes: 0,
     },
     Binding {
         label: "Ctrl+L",

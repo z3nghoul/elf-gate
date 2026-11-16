@@ -244,3 +244,45 @@ impl Firewall for MockFirewall {
         Ok(())
     }
 }
+
+/// A fake clipboard: `Ok(text)` is what a read returns, `Err(reason)` an unreachable clipboard.
+pub struct MockClipboard {
+    pub content: Mutex<Result<String, String>>,
+    pub written: Mutex<Vec<String>>,
+}
+
+impl MockClipboard {
+    pub fn with_text(text: &str) -> Self {
+        Self {
+            content: Mutex::new(Ok(text.into())),
+            written: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn unavailable() -> Self {
+        Self {
+            content: Mutex::new(Err("no graphical session".into())),
+            written: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl super::Clipboard for MockClipboard {
+    fn read(&self) -> Result<String, PlatformError> {
+        self.content
+            .lock()
+            .unwrap()
+            .clone()
+            .map_err(PlatformError::Failed)
+    }
+
+    fn write(&self, text: &str) -> Result<(), PlatformError> {
+        self.content
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map_err(|e| PlatformError::Failed(e.clone()))?;
+        self.written.lock().unwrap().push(text.into());
+        Ok(())
+    }
+}

@@ -223,6 +223,81 @@ pub trait TunHost: Send + Sync {
     fn needs_supervisor(&self) -> bool;
 }
 
+/// The system clipboard as text. Reading and writing can take a moment (an external tool or
+/// PowerShell runs), so callers use them only on a key press, never in a loop.
+pub trait Clipboard: Send + Sync {
+    /// The text on the clipboard; an empty clipboard or one with something other than text is
+    /// `Ok("")`. `Err` means the clipboard cannot be reached at all (the text says why).
+    fn read(&self) -> Result<String, PlatformError>;
+    fn write(&self, text: &str) -> Result<(), PlatformError>;
+}
+
+/// How long a clipboard tool may run, and the most text read from it.
+const CLIPBOARD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+const CLIPBOARD_MAX: u64 = 1 << 20;
+
+/// What a clipboard tool did.
+pub(crate) enum ToolRun {
+    /// It exited with success; its output (empty when not captured).
+    Done(Vec<u8>),
+    /// It ran and failed (an empty clipboard makes most of them fail).
+    Failed,
+}
+
+/// Runs a clipboard tool: gives it `input`, waits at most [`CLIPBOARD_TIMEOUT`] and kills it
+/// after that. With `capture` its output is read (at most [`CLIPBOARD_MAX`] bytes), without it
+/// the output goes nowhere: a tool that stays in the background to own the clipboard (`xclip`,
+/// `wl-copy`) would otherwise keep the pipe open and be waited for forever.
+pub(crate) fn run_clipboard_tool(
+    mut cmd: std::process::Command,
+    input: Option<&[u8]>,
+    capture: bool,
+) -> std::io::Result<ToolRun> {
+    use std::io::{Read, Write};
+    use std::process::Stdio;
+    cmd.stdin(if input.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    })
+    .stdout(if capture {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    })
+    .stderr(Stdio::null());
+    let mut child = cmd.spawn()?;
+    if let (Some(data), Some(mut stdin)) = (input, child.stdin.take()) {
+        // A tool that exited early closes the pipe: its exit status tells the rest.
+        let _ = stdin.write_all(data);
+    }
+    let reader = child.stdout.take().map(|out| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = out.take(CLIPBOARD_MAX).read_to_end(&mut buf);
+            buf
+        })
+    });
+    let deadline = std::time::Instant::now() + CLIPBOARD_TIMEOUT;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::ErrorKind::TimedOut.into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    let out = reader.and_then(|h| h.join().ok()).unwrap_or_default();
+    Ok(if status.success() {
+        ToolRun::Done(out)
+    } else {
+        ToolRun::Failed
+    })
+}
+
 /// Opens a TCP connection through one network interface only (around the tunnel).
 /// `Unsupported` where the platform backend cannot do it (the caller then does not measure).
 pub async fn connect_via(
@@ -385,6 +460,10 @@ pub fn logon_task() -> Option<Box<dyn LogonTask>> {
 /// The firewall rule set; `None` where there is no firewall to configure (Linux).
 pub fn firewall() -> Option<Box<dyn Firewall>> {
     imp::firewall::open()
+}
+
+pub fn clipboard() -> Box<dyn Clipboard> {
+    Box::new(imp::clipboard::Clip)
 }
 
 pub fn tun_host() -> Box<dyn TunHost> {

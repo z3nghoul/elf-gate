@@ -40,6 +40,8 @@ PageDown.desc = "page up / down"
 PageDown.short = "page"
 PingAll.desc = "ping all servers"
 PingAll.short = "ping"
+Paste.desc = "paste links or a subscription from the clipboard (in the add window)"
+Paste.short = "paste"
 Privacy.desc = "privacy mode (hide addresses, keys and links on the screen)"
 Privacy.short = "priv."
 Quit.desc = "close the interface (the VPN keeps running in the background)"
@@ -263,6 +265,7 @@ legend_grey = "the server is not supported or was refused by Xray; the reason is
 legend_grey_key = "grey, n/a"
 
 [hint]
+paste = "paste from clipboard"
 clear_close = "clear/close"
 filter = "filter"
 page = "page"
@@ -388,6 +391,15 @@ sub_json = "the JSON subscription was not recognised (an array of Xray configs o
 transport_unsupported = "transport type={value} is not supported"
 unknown_scheme = "unknown scheme: {scheme}://"
 unsupported_scheme = "the {scheme}:// protocol is not supported yet"
+
+[paste]
+all_dup = "Everything from the clipboard is already added."
+nothing = "The clipboard holds no server links or subscription."
+servers = "Servers found in the clipboard: {servers}."
+skipped = "Already added, skipped: {count}."
+subscription = "Subscription: {host}. It is updated right away."
+subscription_hidden = "A subscription (address hidden). It is updated right away."
+unavailable = "No access to the clipboard ({reason}). Type or paste the link here by hand."
 
 [ping]
 age = "{base}, {ago} ago"

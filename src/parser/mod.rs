@@ -1,3 +1,4 @@
+pub mod paste;
 pub mod subscription;
 pub mod vless;
 

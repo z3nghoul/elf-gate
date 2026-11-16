@@ -1,5 +1,6 @@
 pub mod autostart;
 pub mod child;
+pub mod clipboard;
 pub mod device;
 pub mod firewall;
 pub mod ipc;

@@ -7,7 +7,7 @@ use crate::event::{now_hms, Event, Level, LinkEvent, LogLine};
 use crate::model::rule::{builtin_presets, validate, RoutingMode, Rule, RuleKind};
 use crate::model::server::{Security, Server, ServerRole, Transport, FINGERPRINTS};
 use crate::model::subscription::Subscription;
-use crate::platform::{self, TunHost};
+use crate::platform::{self, Clipboard, TunHost};
 use crate::proto::{Alert, Ask, Cmd, RuleRef, Traffic, Update, View};
 use crate::storage::Config;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -59,6 +59,8 @@ pub enum ConfirmKind {
     DeleteGroup(String),
     /// A question from the background process.
     Ask(Ask),
+    /// Add what the clipboard held: the texts to send as `AddLink`, one by one.
+    Paste(Vec<String>),
 }
 
 /// What a text input popup is for.
@@ -214,6 +216,7 @@ pub struct AppState {
     cursor_to_end: bool,
     got_view: bool,
     tun_host: Arc<dyn TunHost>,
+    clipboard: Arc<dyn Clipboard>,
     cmd_tx: UnboundedSender<Cmd>,
 }
 
@@ -265,6 +268,7 @@ impl AppState {
             cursor_to_end: false,
             got_view: false,
             tun_host: Arc::from(platform::tun_host()),
+            clipboard: Arc::from(platform::clipboard()),
             cmd_tx,
         }
     }
@@ -272,6 +276,12 @@ impl AppState {
     #[cfg(test)]
     pub fn with_tun_host(mut self, host: Arc<dyn TunHost>) -> Self {
         self.tun_host = host;
+        self
+    }
+
+    #[cfg(test)]
+    pub fn with_clipboard(mut self, clipboard: Arc<dyn Clipboard>) -> Self {
+        self.clipboard = clipboard;
         self
     }
 
@@ -645,6 +655,18 @@ impl AppState {
             }
             Popup::Input {
                 title,
+                buf,
+                purpose,
+            } if purpose == InputPurpose::Link && map_key(key) == Some(Action::Paste) => {
+                self.popup = Some(Popup::Input {
+                    title,
+                    buf,
+                    purpose,
+                });
+                self.handle_action(Action::Paste);
+            }
+            Popup::Input {
+                title,
                 mut buf,
                 purpose,
             } => match key.code {
@@ -895,6 +917,18 @@ impl AppState {
             FocusNext => self.cycle_focus(true),
             FocusPrev => self.cycle_focus(false),
             Redraw => self.redraw_requested = true,
+            // Only the add dialog takes it: nothing to paste into elsewhere.
+            Paste => {
+                if matches!(
+                    self.popup,
+                    Some(Popup::Input {
+                        purpose: InputPurpose::Link,
+                        ..
+                    })
+                ) {
+                    self.paste_from_clipboard();
+                }
+            }
             DebugPanic => {
                 if crate::build_info::DEBUG_PANIC_KEY {
                     panic!("debug panic requested with F12");
@@ -1205,6 +1239,11 @@ impl AppState {
                 self.should_quit = true;
             }
             ConfirmKind::Ask(ask) => self.send(Cmd::Answer { ask, yes: true }),
+            ConfirmKind::Paste(texts) => {
+                for text in texts {
+                    self.send(Cmd::AddLink(text));
+                }
+            }
             ConfirmKind::DeleteServer(id) | ConfirmKind::HideServer(id) => {
                 self.send(Cmd::DeleteServer(id))
             }
@@ -1391,6 +1430,69 @@ impl AppState {
             return;
         }
         self.send(Cmd::AddLink(text));
+    }
+
+    /// Ctrl+V in the add dialog: shows what the clipboard holds and asks before adding it.
+    /// Without the clipboard, or with nothing usable on it, a message says so and the dialog
+    /// stays open for typing by hand.
+    fn paste_from_clipboard(&mut self) {
+        let text = match self.clipboard.read() {
+            Ok(text) => text,
+            Err(e) => {
+                self.set_status(crate::t!("paste.unavailable", reason = e));
+                return;
+            }
+        };
+        let found = crate::parser::paste::classify(&text);
+        if found.is_empty() {
+            self.set_status(crate::t!("paste.nothing"));
+            return;
+        }
+        let known_server = |l: &String| self.config.servers.iter().any(|e| &e.link == l);
+        let known_sub = |u: &String| self.config.subscriptions.iter().any(|s| &s.url == u);
+        let skipped = found.servers.iter().filter(|l| known_server(l)).count()
+            + found.subscriptions.iter().filter(|u| known_sub(u)).count();
+        let servers: Vec<String> = found
+            .servers
+            .iter()
+            .filter(|l| !known_server(l))
+            .cloned()
+            .collect();
+        let subs: Vec<String> = found
+            .subscriptions
+            .iter()
+            .filter(|u| !known_sub(u))
+            .cloned()
+            .collect();
+        if servers.is_empty() && subs.is_empty() {
+            self.popup = Some(Popup::Notice(crate::t!("paste.all_dup")));
+            return;
+        }
+        let mut lines = Vec::new();
+        if !servers.is_empty() {
+            lines.push(crate::t!(
+                "paste.servers",
+                servers = crate::tn!("plural.servers", servers.len())
+            ));
+        }
+        for url in &subs {
+            let host = url::Url::parse(url)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_string))
+                .unwrap_or_default();
+            lines.push(if self.privacy() {
+                crate::t!("paste.subscription_hidden")
+            } else {
+                crate::t!("paste.subscription", host = host)
+            });
+        }
+        if skipped > 0 {
+            lines.push(crate::t!("paste.skipped", count = skipped));
+        }
+        self.popup = Some(Popup::Confirm {
+            text: lines.join("\n"),
+            kind: ConfirmKind::Paste(servers.into_iter().chain(subs).collect()),
+        });
     }
 
     // ---------- the rules screen ----------

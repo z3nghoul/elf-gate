@@ -79,12 +79,23 @@ fn modal_hints(app: &AppState) -> Option<Vec<Hint>> {
                 plain("PgUp/PgDn", &crate::t!("hint.page"), 4),
                 plain(&crate::t!("hint.text"), &crate::t!("hint.filter"), 3),
             ],
-            Popup::Input { .. } => vec![
-                plain("Enter", &crate::t!("hint.confirm"), 1),
-                plain("Esc", &crate::t!("hint.cancel"), 1),
-                plain("Backspace", &crate::t!("hint.erase"), 3),
-            ],
+            Popup::Input { purpose, .. } => {
+                let mut v = vec![
+                    plain("Enter", &crate::t!("hint.confirm"), 1),
+                    plain("Esc", &crate::t!("hint.cancel"), 1),
+                ];
+                // A separate element with its action: a mouse click can be hung on it later.
+                if *purpose == crate::app::InputPurpose::Link {
+                    v.push(hint(Action::Paste, crate::t!("hint.paste")));
+                }
+                v.push(plain("Backspace", &crate::t!("hint.erase"), 3));
+                v
+            }
             Popup::Confirm { kind, .. } => match kind {
+                ConfirmKind::Paste(_) => vec![
+                    plain("Enter", &crate::t!("hint.apply"), 1),
+                    plain("Esc", &crate::t!("hint.cancel"), 1),
+                ],
                 ConfirmKind::Ask(_) => vec![
                     plain("y/Enter", &crate::t!("hint.yes"), 1),
                     plain("n/Esc", &crate::t!("hint.no"), 1),
@@ -343,7 +354,7 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
             | Action::Help
             | Action::Update
             | Action::Redraw => None,
-            Action::DebugPanic => None,
+            Action::DebugPanic | Action::Paste => None,
         };
         if let Some(text) = text {
             out.push(Hint {

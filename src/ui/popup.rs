@@ -133,16 +133,36 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             ),
             selected: None,
             fill: false,
-            bottom: keys_line(crate::t!("popup.input_hint"), inner_w, th),
+            bottom: keys_line(
+                if *purpose == crate::app::InputPurpose::Link {
+                    format!(
+                        "{}; Ctrl+V - {}",
+                        crate::t!("popup.input_hint"),
+                        crate::t!("hint.paste")
+                    )
+                } else {
+                    crate::t!("popup.input_hint")
+                },
+                inner_w,
+                th,
+            ),
         },
-        Popup::Confirm { text, .. } => Dialog {
+        Popup::Confirm { text, kind } => Dialog {
             title: crate::t!("popup.confirm_title"),
             border: th.border(true),
             top: Vec::new(),
             body: text_lines(&app.mask(text), inner_w, th.text()),
             selected: None,
             fill: false,
-            bottom: keys_line(crate::t!("popup.confirm_hint"), inner_w, th),
+            bottom: keys_line(
+                if matches!(kind, crate::app::ConfirmKind::Paste(_)) {
+                    crate::t!("popup.input_hint")
+                } else {
+                    crate::t!("popup.confirm_hint")
+                },
+                inner_w,
+                th,
+            ),
         },
         Popup::Notice(msg) => Dialog {
             title: crate::t!("popup.notice_title"),
