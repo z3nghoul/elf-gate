@@ -139,7 +139,7 @@ impl Engine {
         }
         let tx = self.tx.clone();
         let device = self.device();
-        tokio::spawn(async move {
+        self.spawn(async move {
             let result = download(&sc.url, &sc.user_agent, &device).await;
             let _ = tx.send(BgEvent::SubFetched {
                 name: sc.name,
@@ -286,7 +286,7 @@ impl Engine {
         let tx = self.tx.clone();
         let user_agent = fetch::DEFAULT_USER_AGENT.to_string();
         let device = self.device();
-        tokio::spawn(async move {
+        self.spawn(async move {
             let result = download(&url, &user_agent, &device).await;
             let _ = tx.send(BgEvent::SubAdded {
                 url,

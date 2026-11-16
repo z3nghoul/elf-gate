@@ -127,9 +127,28 @@ fn from_code(c: u8) -> Lang {
     }
 }
 
-/// The language texts are produced in now.
+tokio::task_local! {
+    /// The language of a task started by the engine (see `scoped`).
+    static TASK_LANG: Lang;
+}
+
+/// Runs `fut` with `lang` as its language wherever the runtime puts it. A task started by the
+/// engine may run on a worker thread that was never bound to a language (`bind_thread`), and
+/// the texts it makes (errors, statuses) must still follow the config of the engine.
+pub fn scoped<F: std::future::Future>(
+    lang: Lang,
+    fut: F,
+) -> impl std::future::Future<Output = F::Output> {
+    TASK_LANG.scope(lang, fut)
+}
+
+/// The language texts are produced in now: the thread's own choice (`bind_thread`, `with_lang`),
+/// else the task's (`scoped`), else the process language (`set`).
 pub fn current() -> Lang {
     if let Some(l) = OVERRIDE.with(Cell::get) {
+        return l;
+    }
+    if let Ok(l) = TASK_LANG.try_with(|l| *l) {
         return l;
     }
     from_code(GLOBAL.load(Ordering::Relaxed))

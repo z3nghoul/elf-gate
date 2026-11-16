@@ -84,7 +84,7 @@ impl Engine {
             });
             return;
         }
-        tokio::spawn(async move {
+        self.spawn(async move {
             let series =
                 crate::net::health::latency_series(port, crate::net::health::HEALTH_TIMEOUT).await;
             let _ = tx.send(BgEvent::ActiveLatency {
@@ -175,7 +175,7 @@ impl Engine {
             let run_dir = self.run_dir.clone();
             let binary = binary.clone();
             let bound = bound.clone();
-            tokio::spawn(async move {
+            self.spawn(async move {
                 let kind = if binary.is_some() {
                     PingKind::Tunnel
                 } else {
@@ -263,7 +263,7 @@ impl Engine {
         let checker = self.checker.clone();
         let id = server.id;
         let searched_with = self.stored_search_version(id);
-        tokio::spawn(async move {
+        self.spawn(async move {
             let version = checker.version_of(&binary).await;
             // Already searched with this Xray: nothing new to learn.
             if version.is_some() && version == searched_with {

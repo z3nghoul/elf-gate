@@ -336,6 +336,15 @@ impl Engine {
         self
     }
 
+    /// `tokio::spawn` for work whose texts reach the user: the task keeps the engine's language.
+    pub(crate) fn spawn<F>(&self, fut: F) -> tokio::task::JoinHandle<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        tokio::spawn(crate::i18n::scoped(self.config.ui.language, fut))
+    }
+
     /// PID of the running core (tests use it to simulate a crash).
     #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn core_pid(&self) -> Option<u32> {
@@ -900,7 +909,7 @@ impl Engine {
             return;
         };
         let (tx, port) = (self.tx.clone(), self.config.core.api_port);
-        self.stats_task = Some(tokio::spawn(async move {
+        self.stats_task = Some(self.spawn(async move {
             let mut every = tokio::time::interval(Duration::from_secs(1));
             every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
@@ -1124,7 +1133,7 @@ impl Engine {
         let core_cfg = self.config.core.clone();
         let run_dir = self.run_dir.clone();
         let checker = self.checker.clone();
-        tokio::spawn(async move {
+        self.spawn(async move {
             let mut tasks = tokio::task::JoinSet::new();
             for server in servers {
                 let (tx, core_cfg, run_dir, checker) = (

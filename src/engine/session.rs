@@ -258,7 +258,7 @@ impl Engine {
         if let Some(b) = &backup {
             self.logt(Level::Info, || crate::t!("eng.backup_log", name = b.name));
         }
-        tokio::spawn(async move {
+        self.spawn(async move {
             if let Some(old) = old {
                 old.stop().await;
                 if let Some(store) = &store {
@@ -340,7 +340,7 @@ impl Engine {
         self.busy = true;
         let tx = self.tx.clone();
         let store = self.state_store.clone();
-        tokio::spawn(async move {
+        self.spawn(async move {
             core.stop().await;
             if let Some(store) = &store {
                 tun::mark_down(store);
@@ -400,7 +400,7 @@ impl Engine {
             };
             (self.tun_host.clone(), self.config.tun.name.clone(), dns)
         });
-        tokio::spawn(async move {
+        self.spawn(async move {
             let in_tun = tun.is_some();
             if let Some((host, name, dns)) = tun {
                 // The adapter appears a moment after the core starts.
@@ -856,6 +856,43 @@ mod tests {
         a.health = HealthState::Unknown;
         a.on_health(id, Err(HealthError::BadSocks));
         assert_eq!(a.health, HealthState::Unknown);
+    }
+
+    /// Texts made by a task on a worker thread follow the engine's language (here Ukrainian:
+    /// neither the process default nor the Russian of most tests).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn texts_made_in_tasks_follow_the_engine_language() {
+        use crate::i18n::Lang;
+        let closed = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let (tx, mut rx) = unbounded_channel();
+        let mut config = crate::test_support::config_ru();
+        config.ui.language = Lang::Uk;
+        let mut a = Engine::build(tx, config, None, false);
+        a.add_link(format!("vless://u@127.0.0.1:{closed}?security=none#Dead"));
+        let id = a.subs[0].servers[0].id;
+        a.connect(id);
+        let error = loop {
+            match tokio::time::timeout(Duration::from_secs(20), rx.recv())
+                .await
+                .expect("no event")
+                .expect("channel closed")
+            {
+                BgEvent::CoreFailed { error, .. } => break error,
+                _ => {}
+            }
+        };
+        let (uk, en) = (
+            crate::i18n::with_lang(Lang::Uk, || crate::t!("eng.server_tcp_down", error = "")),
+            crate::i18n::with_lang(Lang::En, || crate::t!("eng.server_tcp_down", error = "")),
+        );
+        assert_ne!(uk, en);
+        assert!(
+            error.starts_with(uk.trim_end_matches([' ', ':'])),
+            "{error}"
+        );
     }
 
     #[tokio::test]
