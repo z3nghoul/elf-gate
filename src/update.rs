@@ -161,7 +161,10 @@ pub fn parse_releases(json: &str) -> Result<Vec<Release>, String> {
         .filter(|r| !r.draft)
         .filter_map(|r| {
             let version = Version::parse(&r.tag_name)?;
-            let url = if r.html_url.starts_with("https://github.com/z3nghoul/elf-gate/") {
+            let url = if r
+                .html_url
+                .starts_with("https://github.com/z3nghoul/elf-gate/")
+            {
                 clean(&r.html_url)
             } else {
                 RELEASES_PAGE.to_string()
@@ -230,7 +233,10 @@ pub async fn fetch(socks_port: Option<u16>) -> Result<Vec<Release>, String> {
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
     }
-    let bytes = resp.bytes().await.map_err(|e| e.without_url().to_string())?;
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| e.without_url().to_string())?;
     if bytes.len() > MAX_BODY {
         return Err("answer too big".into());
     }

@@ -100,6 +100,8 @@ pub enum BgEvent {
         id: u64,
         reason: String,
     },
+    /// The releases list arrived (or the request failed): the check for a new version.
+    UpdateChecked(Result<Vec<crate::update::Release>, String>),
     /// A subscription answered (or failed) during an update.
     SubFetched {
         name: String,

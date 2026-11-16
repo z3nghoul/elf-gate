@@ -418,6 +418,8 @@ pub struct State {
     pub tun: Option<TunState>,
     /// Unix time of the last successful check for a new version.
     pub last_update_check: Option<i64>,
+    /// The newest releases from that check: the notice survives a restart without a new request.
+    pub releases: Vec<crate::update::Release>,
 }
 
 #[derive(Debug, Clone)]

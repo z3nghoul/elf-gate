@@ -42,6 +42,7 @@ pub(crate) fn view_with(links: &[&str]) -> View {
         process_unresolved: 0,
         tray: false,
         autostart: false,
+        update: None,
         mock: false,
         pid: 1,
     }

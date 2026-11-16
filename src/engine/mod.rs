@@ -27,6 +27,7 @@ mod rules;
 mod server_opts;
 mod session;
 mod subs;
+mod updates;
 
 pub use crate::model::rule::TrafficMode as Mode;
 
@@ -158,6 +159,16 @@ pub struct Engine {
     repeats: HashMap<String, (Instant, u32, String)>,
     last_auto_check: Option<Instant>,
     last_auto_ping: Option<Instant>,
+    /// The check for a new version runs (set by the background process only: tests and the
+    /// demo never go to the network).
+    update_checks: bool,
+    /// Releases known from the last check.
+    releases: Vec<crate::update::Release>,
+    update_busy: bool,
+    /// The program has looked at the schedule once (the first look is the startup one).
+    update_ran: bool,
+    update_looked: Option<Instant>,
+    update_failed: Option<Instant>,
     /// When a subscription's update last failed (not retried for ten minutes).
     failed_at: HashMap<String, Instant>,
     autostart_on: bool,
@@ -256,6 +267,7 @@ impl Engine {
             process_unresolved: 0,
             tray: false,
             autostart: false,
+            update: None,
             mock,
             pid: std::process::id(),
         };
@@ -291,6 +303,12 @@ impl Engine {
             repeats: HashMap::new(),
             last_auto_check: None,
             last_auto_ping: None,
+            update_checks: false,
+            releases: Vec::new(),
+            update_busy: false,
+            update_ran: false,
+            update_looked: None,
+            update_failed: None,
             failed_at: HashMap::new(),
             autostart_on: false,
             caps_warned: false,
@@ -357,6 +375,12 @@ impl Engine {
 
     pub fn with_tray(mut self, present: bool) -> Self {
         self.tray = present;
+        self
+    }
+
+    /// Turns the check for a new version on (the background process does; see `update_checks`).
+    pub fn with_update_checks(mut self) -> Self {
+        self.update_checks = true;
         self
     }
 
@@ -581,6 +605,7 @@ impl Engine {
             process_unresolved: self.process_unresolved,
             tray: self.tray,
             autostart: self.autostart_on,
+            update: self.current_update(),
             mock: self.mock,
             pid: std::process::id(),
         }
@@ -717,6 +742,7 @@ impl Engine {
         self.flush_process_noise();
         self.auto_update_tick();
         self.auto_ping_tick();
+        self.update_tick();
         if self.mock && matches!(self.conn, Conn::Connected(_)) {
             self.traffic.proxy_up += self.rng.next() % 2_000;
             self.traffic.proxy_down += self.rng.next() % 20_000;
@@ -816,6 +842,7 @@ impl Engine {
                 found,
                 skipped,
             } => self.on_fp_searched(id, xray_version, found, skipped),
+            BgEvent::UpdateChecked(result) => self.on_update_checked(result),
             BgEvent::SubFetched { name, result } => self.on_sub_fetched(name, result),
             BgEvent::SubAdded {
                 url,
@@ -847,6 +874,7 @@ impl Engine {
             Cmd::SetRouting(mode) => self.rules_set_routing(mode),
             Cmd::Answer { ask, yes } => self.answer(ask, yes),
             Cmd::Set(setting) => self.apply_setting(setting),
+            Cmd::SkipUpdate(version) => self.skip_update(version),
             Cmd::ConnectLastInTun => self.start_tun_from_cli(),
             Cmd::RelaunchElevated => self.restart_elevated(),
             Cmd::Shutdown => self.should_exit = true,
@@ -1379,6 +1407,12 @@ impl Engine {
             ManageFirewall(v) => self.config.tun.manage_firewall = v,
             AutoConnect(v) => self.config.ui.auto_connect = v,
             PrivacyMode(v) => self.config.ui.privacy_mode = v,
+            CheckUpdates(v) => {
+                self.config.updates.check = v;
+                // Switched on: look at the schedule at the next tick, not in a minute.
+                self.update_looked = None;
+            }
+            UpdateChannel(c) => self.config.updates.channel = c,
             Language(lang) => {
                 self.config.ui.language = lang;
                 crate::i18n::set(lang);

@@ -60,6 +60,8 @@ pub enum Setting {
     ManageFirewall(bool),
     AutoConnect(bool),
     Autostart(bool),
+    CheckUpdates(bool),
+    UpdateChannel(crate::storage::UpdateChannel),
     Theme(String),
     Language(crate::i18n::Lang),
     PrivacyMode(bool),
@@ -112,6 +114,8 @@ pub enum Cmd {
         yes: bool,
     },
     Set(Setting),
+    /// "Do not remind me about this version" (the update notice).
+    SkipUpdate(String),
     /// `elf-gate --tun`: switch to TUN and connect to the last server.
     ConnectLastInTun,
     /// Windows: restart the background process with administrator rights.
@@ -176,6 +180,9 @@ pub struct View {
     pub tray: bool,
     /// Autostart is switched on in the OS.
     pub autostart: bool,
+    /// A newer release than this one (by the channel and the skipped version in the settings).
+    #[serde(default)]
+    pub update: Option<crate::update::Release>,
     /// Demo data (debug builds).
     pub mock: bool,
     pub pid: u32,
@@ -276,6 +283,7 @@ mod tests {
             process_unresolved: 0,
             tray: false,
             autostart: false,
+            update: None,
             mock: false,
             pid: 1,
         };

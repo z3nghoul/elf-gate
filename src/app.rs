@@ -249,6 +249,7 @@ impl AppState {
             process_unresolved: 0,
             tray: false,
             autostart: false,
+            update: None,
             mock: true,
             pid: 0,
         };

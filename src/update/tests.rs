@@ -21,7 +21,16 @@ fn versions_parse_and_print_without_the_prefix() {
     assert_eq!(v("v1.0.3").to_string(), "1.0.3");
     assert_eq!(v("1.1.0-rc.1").to_string(), "1.1.0-rc.1");
     assert_eq!(v("1.0.3+build5").to_string(), "1.0.3");
-    for bad in ["", "1.0", "1.0.3.4", "a.b.c", "1.0.3-", "1.0.3-a..b", "nightly", "1.0.-3"] {
+    for bad in [
+        "",
+        "1.0",
+        "1.0.3.4",
+        "a.b.c",
+        "1.0.3-",
+        "1.0.3-a..b",
+        "nightly",
+        "1.0.-3",
+    ] {
         assert!(Version::parse(bad).is_none(), "{bad:?} is not a version");
     }
 }
@@ -109,8 +118,15 @@ fn only_a_newer_version_is_offered() {
 
 #[test]
 fn the_newest_wins_whatever_the_order_of_the_list() {
-    let all = [rel("1.0.4", false), rel("1.0.10", false), rel("1.0.9", false)];
-    assert_eq!(newest(&all, "1.0.0", Stable, None).unwrap().version, "1.0.10");
+    let all = [
+        rel("1.0.4", false),
+        rel("1.0.10", false),
+        rel("1.0.9", false),
+    ];
+    assert_eq!(
+        newest(&all, "1.0.0", Stable, None).unwrap().version,
+        "1.0.10"
+    );
 }
 
 #[test]
@@ -118,7 +134,9 @@ fn a_skipped_version_is_not_offered_but_a_newer_one_is() {
     let all = [rel("1.0.5", false), rel("1.0.4", false)];
     // The newest is skipped: the older (still newer than current) is offered.
     assert_eq!(
-        newest(&all, "1.0.3", Stable, Some("1.0.5")).unwrap().version,
+        newest(&all, "1.0.3", Stable, Some("1.0.5"))
+            .unwrap()
+            .version,
         "1.0.4"
     );
     // Only version is skipped: nothing.
@@ -127,7 +145,9 @@ fn a_skipped_version_is_not_offered_but_a_newer_one_is() {
     // A newer release than the skipped one brings the reminder back.
     let newer = [rel("1.0.5", false), rel("1.0.4", false)];
     assert_eq!(
-        newest(&newer, "1.0.3", Stable, Some("1.0.4")).unwrap().version,
+        newest(&newer, "1.0.3", Stable, Some("1.0.4"))
+            .unwrap()
+            .version,
         "1.0.5"
     );
 }
