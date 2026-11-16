@@ -344,6 +344,7 @@ impl Engine {
         self.traffic = Traffic::default();
         self.process_unresolved = 0;
         self.health = HealthState::Unknown;
+        self.hub.clear_failure();
         self.conn = Conn::Connecting(id);
         self.conn_mode = mode;
         let old = self.core.take();
@@ -527,12 +528,12 @@ impl Engine {
             self.show_problem(&Problem::NeedsPrivileges);
         } else if local_block && crate::platform::IS_WINDOWS {
             // The button: one elevated run that sets the firewall right, then it ends.
-            self.alert(Alert::Ask {
+            self.failure_alert(Alert::Ask {
                 text: crate::t!("eng.firewall_ask", error = error),
                 ask: Ask::ConfigureFirewall,
             });
         } else {
-            self.error_alert(error);
+            self.failure_alert(Alert::Error(error));
         }
     }
 
@@ -633,14 +634,16 @@ impl Engine {
             Level::Warning,
             format!("TUN: {}", text.lines().next().unwrap_or_default()),
         );
-        self.alert(match problem {
-            Problem::NeedsPrivileges if crate::platform::IS_WINDOWS => Alert::Ask {
-                text,
-                ask: Ask::RelaunchElevated,
-            },
-            p if p.is_blocking() => Alert::Error(text),
-            _ => Alert::Notice(text),
-        });
+        match problem {
+            Problem::NeedsPrivileges if crate::platform::IS_WINDOWS => {
+                self.failure_alert(Alert::Ask {
+                    text,
+                    ask: Ask::RelaunchElevated,
+                })
+            }
+            p if p.is_blocking() => self.failure_alert(Alert::Error(text)),
+            _ => self.alert(Alert::Notice(text)),
+        }
     }
 
     /// `"<group>/<name>"` of a server, as stored in `[ui].last_server`.
@@ -1355,6 +1358,42 @@ mod tests {
         assert_eq!(a.mode, Mode::Tun);
         // The core is missing in this fixture: the start stops at the problem popup.
         assert!(matches!(a.alerts().last(), Some(Alert::Error(_))));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn the_hub_keeps_the_last_failure_for_a_later_interface_until_it_is_answered() {
+        let dir = TempDir::new("failure-kept");
+        let (mut a, _id) = tun_app(MockTunHost::healthy(), false, &dir);
+        a.config.ui.auto_connect = true;
+        a.config.mode.traffic = Mode::Tun;
+        a.config.ui.last_server = Some("manual/Real".into());
+        a.config.ui.tun_intro_done = true;
+        assert!(a.hub().subscribe().failure.is_none());
+
+        // Nobody is subscribed while the start fails (autostart): the broadcast is lost.
+        a.auto_connect();
+        let kept = a.hub().subscribe().failure;
+        assert!(matches!(kept, Some(Alert::Error(_))), "{kept:?}");
+        assert_eq!(
+            a.hub().subscribe().failure,
+            kept,
+            "reading does not consume it"
+        );
+
+        a.answer(Ask::RelaunchElevated, false);
+        assert!(a.hub().subscribe().failure.is_none(), "answered: gone");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_new_connection_attempt_clears_the_kept_failure() {
+        let dir = TempDir::new("failure-cleared");
+        let (mut a, id) = tun_app(MockTunHost::healthy(), false, &dir);
+        a.hub().fail(Alert::Error("old".into()));
+        a.mode = Mode::Proxy;
+        a.connect(id);
+        assert!(a.hub().subscribe().failure.is_none());
         let _ = std::fs::remove_dir_all(dir);
     }
 

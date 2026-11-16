@@ -40,6 +40,9 @@ pub struct Hub {
     logs: Mutex<VecDeque<LogLine>>,
     view_tx: watch::Sender<Arc<View>>,
     events_tx: broadcast::Sender<Update>,
+    /// The last connection failure (the privileges question or the error), for an interface
+    /// that connects later: the one that was there at the time may not have existed (autostart).
+    failure: Mutex<Option<Alert>>,
 }
 
 /// A client's subscription to the hub.
@@ -47,6 +50,8 @@ pub struct Feed {
     pub backlog: Vec<LogLine>,
     pub view: watch::Receiver<Arc<View>>,
     pub events: broadcast::Receiver<Update>,
+    /// The connection failure nobody has answered yet.
+    pub failure: Option<Alert>,
 }
 
 impl Hub {
@@ -57,6 +62,7 @@ impl Hub {
             logs: Mutex::new(VecDeque::with_capacity(LOG_CAPACITY)),
             view_tx,
             events_tx,
+            failure: Mutex::new(None),
         })
     }
 
@@ -67,7 +73,19 @@ impl Hub {
             backlog: logs.iter().cloned().collect(),
             view: self.view_tx.subscribe(),
             events: self.events_tx.subscribe(),
+            failure: crate::sync::lock(&self.failure).clone(),
         }
+    }
+
+    /// Keeps `alert` for interfaces that connect later, and shows it to the current ones.
+    fn fail(&self, alert: Alert) {
+        *crate::sync::lock(&self.failure) = Some(alert.clone());
+        self.emit(Update::Alert(alert));
+    }
+
+    /// The question was answered or a new attempt began: the old failure is history.
+    fn clear_failure(&self) {
+        *crate::sync::lock(&self.failure) = None;
     }
 
     /// Interfaces currently watching the view (the tray is not one of them).
@@ -499,6 +517,13 @@ impl Engine {
         self.emit(Update::Alert(alert));
     }
 
+    /// An alert about a failed connection: also kept in the hub (see [`Hub::fail`]).
+    fn failure_alert(&mut self, alert: Alert) {
+        #[cfg(test)]
+        self.sent.push(Update::Alert(alert.clone()));
+        self.hub.fail(alert);
+    }
+
     fn error_alert(&mut self, text: impl Into<String>) {
         self.alert(Alert::Error(text.into()));
     }
@@ -830,6 +855,7 @@ impl Engine {
     }
 
     fn answer(&mut self, ask: Ask, yes: bool) {
+        self.hub.clear_failure();
         match (ask, yes) {
             (Ask::PresetOffer(id), true) => {
                 self.accept_discord_preset();

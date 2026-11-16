@@ -20,11 +20,14 @@ pub async fn serve_client(stream: BoxStream, hub: std::sync::Arc<Hub>, cmds: Unb
         version: crate::build_info::VERSION.into(),
     };
     let first = Update::View(Box::new((**feed.view.borrow()).clone()));
-    for u in [
+    let greeting = [
         hello,
         first,
         Update::Backlog(std::mem::take(&mut feed.backlog)),
-    ] {
+    ]
+    .into_iter()
+    .chain(feed.failure.take().map(Update::Alert));
+    for u in greeting {
         if write.write_all(encode(&u).as_bytes()).await.is_err() {
             return;
         }
