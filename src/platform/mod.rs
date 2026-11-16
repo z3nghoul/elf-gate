@@ -131,6 +131,41 @@ pub trait Privileges: Send + Sync {
     fn relaunch_elevated(&self, args: &[String]) -> Result<(), PlatformError>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FwDirection {
+    In,
+    Out,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FwAction {
+    Allow,
+    Block,
+}
+
+/// One firewall rule that is tied to a program, as far as elf-gate cares.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FwRule {
+    pub name: String,
+    /// Full path of the program the rule is for (empty: the rule is not about one program).
+    pub program: String,
+    pub direction: FwDirection,
+    pub action: FwAction,
+    pub enabled: bool,
+}
+
+/// The Windows Defender Firewall rule set (the COM API; the output of `netsh` is localised).
+/// A rule is found again by its `name`, `direction` and `program`.
+pub trait Firewall: Send + Sync {
+    fn rules(&self) -> Result<Vec<FwRule>, String>;
+    /// Adds an enabled rule for all profiles that allows every protocol and port of `program`.
+    fn add_allow(&self, name: &str, program: &Path, direction: FwDirection) -> Result<(), String>;
+    /// Points an existing rule at another program path.
+    fn set_program(&self, rule: &FwRule, program: &Path) -> Result<(), String>;
+    /// Removes every rule called `name` (the API can remove by name only).
+    fn remove_by_name(&self, name: &str) -> Result<(), String>;
+}
+
 /// The strictest `rp_filter` that applies to the default route's interface (Linux).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RpFilter {
@@ -301,6 +336,11 @@ pub fn run_supervisor(args: &[String]) -> i32 {
 
 pub fn autostart() -> Box<dyn Autostart> {
     Box::new(imp::autostart::Entry::detect())
+}
+
+/// The firewall rule set; `None` where there is no firewall to configure (Linux).
+pub fn firewall() -> Option<Box<dyn Firewall>> {
+    imp::firewall::open()
 }
 
 pub fn tun_host() -> Box<dyn TunHost> {

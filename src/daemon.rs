@@ -81,6 +81,17 @@ pub async fn run(args: &[String]) -> i32 {
         previous(info);
     }));
 
+    // `--firewall`: started elevated from the "configure the firewall" choice, one run, no daemon.
+    if args.iter().any(|a| a == "--firewall") {
+        return match Storage::default_location().load() {
+            Ok(config) => crate::firewall::run_once(&config),
+            Err(e) => {
+                tracing::error!("{e}");
+                1
+            }
+        };
+    }
+
     let mut listener = match platform::ipc_bind() {
         Ok(l) => l,
         Err(IpcBindError::AlreadyRunning) => return 0,
@@ -115,6 +126,7 @@ pub async fn run(args: &[String]) -> i32 {
 
     let (bg_tx, mut bg_rx) = mpsc::unbounded_channel::<BgEvent>();
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<Cmd>();
+    crate::firewall::spawn_auto_sync(&config, &bg_tx);
     let mut engine = Engine::with_config(bg_tx.clone(), config, Some(storage))
         .with_run_dir(storage::state_dir().join("run"))
         .with_proxy(ProxyHandle::spawn(proxy, bg_tx))

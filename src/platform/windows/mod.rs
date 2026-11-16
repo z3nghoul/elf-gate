@@ -2,6 +2,7 @@ pub mod adapter;
 pub mod autostart;
 pub mod child;
 pub mod device;
+pub mod firewall;
 pub mod ipc;
 pub mod net;
 pub mod privileges;

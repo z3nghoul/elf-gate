@@ -1,6 +1,9 @@
 //! Test doubles for the platform traits.
 
-use super::{PlatformError, ProxyAddr, ProxySnapshot, RpFilter, SystemProxy, TunHost};
+use super::{
+    Firewall, FwAction, FwDirection, FwRule, PlatformError, ProxyAddr, ProxySnapshot, RpFilter,
+    SystemProxy, TunHost,
+};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -179,5 +182,65 @@ impl TunHost for MockTunHost {
     }
     fn needs_supervisor(&self) -> bool {
         self.supervisor
+    }
+}
+
+/// A fake rule set; `calls` records every change in order.
+#[derive(Default)]
+pub struct MockFirewall {
+    pub rules: Mutex<Vec<FwRule>>,
+    pub calls: Mutex<Vec<String>>,
+}
+
+impl MockFirewall {
+    pub fn with_rules(rules: Vec<FwRule>) -> Self {
+        Self {
+            rules: Mutex::new(rules),
+            calls: Mutex::default(),
+        }
+    }
+    pub fn rules(&self) -> Vec<FwRule> {
+        self.rules.lock().unwrap().clone()
+    }
+    pub fn calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+impl Firewall for MockFirewall {
+    fn rules(&self) -> Result<Vec<FwRule>, String> {
+        Ok(self.rules())
+    }
+    fn add_allow(&self, name: &str, program: &Path, direction: FwDirection) -> Result<(), String> {
+        self.calls.lock().unwrap().push(format!("add {name}"));
+        self.rules.lock().unwrap().push(FwRule {
+            name: name.into(),
+            program: program.display().to_string(),
+            direction,
+            action: FwAction::Allow,
+            enabled: true,
+        });
+        Ok(())
+    }
+    fn set_program(&self, rule: &FwRule, program: &Path) -> Result<(), String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("set {}", rule.name));
+        for r in self
+            .rules
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .filter(|r| **r == *rule)
+        {
+            r.program = program.display().to_string();
+        }
+        Ok(())
+    }
+    fn remove_by_name(&self, name: &str) -> Result<(), String> {
+        self.calls.lock().unwrap().push(format!("remove {name}"));
+        self.rules.lock().unwrap().retain(|r| r.name != name);
+        Ok(())
     }
 }

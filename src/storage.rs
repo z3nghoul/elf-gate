@@ -137,6 +137,8 @@ pub struct TunConfig {
     pub tunnel_dns: String,
     /// Upstream resolvers for names that resolve locally; empty = use the system's.
     pub local_dns: Vec<String>,
+    /// Windows: with administrator rights, keep allow rules for our programs in the firewall.
+    pub manage_firewall: bool,
 }
 
 impl Default for TunConfig {
@@ -157,6 +159,7 @@ impl TunConfig {
             name: "elfgate0".into(),
             tunnel_dns: "1.1.1.1".into(),
             local_dns: Vec::new(),
+            manage_firewall: true,
         }
     }
 }
