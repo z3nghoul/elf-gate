@@ -218,3 +218,11 @@ already exists` (0xC0000035 / 0xB7). Теперь ядро останавлив�
   завершается; в журнале строки `firewall: ...`. После этого подключение проходит.
 - [ ] «Нет»: ничего не запускается. Отказ в UAC: в журнале `firewall setup not started`, программа работает как прежде.
 - [ ] После кнопки в диспетчере задач нет остаточного `elf-gated.exe` от этого запуска (основной демон один).
+
+## Release-workflow
+
+- [ ] Скачать `elf-gate-windows-x86_64.zip` из черновика релиза, сверить хэш с `SHA256SUMS`
+  (`Get-FileHash -Algorithm SHA256`).
+- [ ] В распакованной папке нет файлов вида `ТЕСТ-README.txt`, `ЧЕК-ЛИСТ.txt`, `ВЕРСИЯ.txt`; есть `elf-gate.exe`,
+  `elf-gated.exe`, `xray.exe`, `wintun.dll`, `geoip.dat`, `geosite.dat`, `elf-gate-tun.bat`, три лицензии.
+- [ ] `elf-gate.exe --version` печатает версию из тега и 7 символов хэша коммита тега.
