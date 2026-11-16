@@ -199,7 +199,7 @@ impl Engine {
                     &self.config.rules,
                     &self.config.presets.enabled,
                     &crate::model::rule::builtin_presets(),
-                    cfg!(windows),
+                    crate::platform::IS_WINDOWS,
                 );
                 let core = preflight.setup.as_ref().map(|s| s.core.clone());
                 let caps = core.and_then(|c| self.tun_host.core_capabilities(&c));
@@ -395,7 +395,7 @@ impl Engine {
                             .await
                             .map(|r| r.is_ok())
                             .unwrap_or(false);
-                    if done || !cfg!(windows) {
+                    if done || !crate::platform::IS_WINDOWS {
                         break;
                     }
                     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -466,7 +466,7 @@ impl Engine {
             format!("TUN: {}", text.lines().next().unwrap_or_default()),
         );
         self.alert(match problem {
-            Problem::NeedsPrivileges if cfg!(windows) => Alert::Ask {
+            Problem::NeedsPrivileges if crate::platform::IS_WINDOWS => Alert::Ask {
                 text,
                 ask: Ask::RelaunchElevated,
             },
@@ -540,10 +540,6 @@ impl Engine {
 
     /// `--tun`: switch to TUN and connect to the server used last.
     pub fn start_tun_from_cli(&mut self) {
-        if !crate::build_info::TUN_AVAILABLE {
-            self.status(crate::t!("eng.tun_unavailable"));
-            return;
-        }
         self.mode = Mode::Tun;
         self.config.mode.traffic = Mode::Tun;
         self.connect_last_server();
@@ -694,7 +690,7 @@ mod tests {
             (
                 MockTunHost::healthy(),
                 false,
-                if cfg!(windows) {
+                if crate::platform::IS_WINDOWS {
                     "xray.exe"
                 } else {
                     "sudo setcap cap_net_admin,cap_sys_ptrace,cap_dac_read_search+ep"
@@ -750,7 +746,7 @@ mod tests {
         let (mut a, id) = tun_app(host, true, &dir);
         a.config.ui.tun_intro_done = true;
         a.connect(id);
-        if cfg!(windows) {
+        if crate::platform::IS_WINDOWS {
             assert!(matches!(
                 a.alerts().last(),
                 Some(Alert::Ask {

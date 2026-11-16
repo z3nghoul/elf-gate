@@ -1,7 +1,7 @@
 //! Is traffic really getting through the VPN? An HTTP request to a `generate_204` endpoint
 //! through the local socks inbound, with a timeout. The config routes this one host through
 //! the proxy outbound whatever the user's rules say, so the answer is about the VPN, not about
-//! the direct path. Stage 6 reuses this for automatic failover.
+//! the direct path. Automatic failover reuses this.
 
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

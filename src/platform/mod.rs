@@ -1,23 +1,26 @@
 //! Everything OS-specific lives here, behind traits. `#[cfg]` is allowed only in this module.
-//! Stage 1: empty implementations; real ones arrive in stages 3-5.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 mod linux;
 #[cfg(windows)]
 mod windows;
+
+#[cfg(not(any(target_os = "linux", windows)))]
+compile_error!("elf-gate supports Linux and Windows only");
+
+/// The one place the rest of the code asks "is this Windows?" (instead of `cfg!(windows)`).
+pub const IS_WINDOWS: bool = cfg!(windows);
 
 #[cfg(test)]
 pub mod mock;
 
 #[derive(Debug, Error)]
 pub enum PlatformError {
-    #[error("not implemented yet")]
-    NotImplemented,
     #[error("not supported: {0}")]
     Unsupported(&'static str),
     #[error("{0}")]
@@ -231,7 +234,7 @@ pub trait ShutdownSignals: Send + Sync {
     fn install(&self, on_shutdown: Box<dyn Fn() + Send + Sync>) -> Result<(), PlatformError>;
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use linux as imp;
 #[cfg(windows)]
 use windows as imp;
@@ -266,7 +269,7 @@ pub fn process_restrictions() -> String {
 
 /// Entry of the hidden `--supervise` mode (Linux only); the return value is the exit code.
 pub fn run_supervisor(args: &[String]) -> i32 {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     {
         linux::supervise::run(args)
     }

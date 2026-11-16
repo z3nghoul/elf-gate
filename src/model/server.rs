@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Role in the "primary + backup" scheme (stage 6).
+/// Role in the "primary + backup" scheme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ServerRole {

@@ -227,7 +227,7 @@ impl AppState {
         self
     }
 
-    /// Demo data for the screens (tests and `ELF_GATE_DEMO` debug runs).
+    /// Demo data for the screen tests.
     #[cfg(test)]
     pub fn with_demo(cmd_tx: UnboundedSender<Cmd>) -> Self {
         let mut app = Self::new(cmd_tx);

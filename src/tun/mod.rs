@@ -139,7 +139,7 @@ pub fn explain(problem: &Problem, config: &Config) -> String {
     let normal_core = resolve_binary(&config.core.xray_path).ok();
     let cmds = || install_commands(normal_core.as_deref(), LINUX_CORE_DIR).join("\n  ");
     match problem {
-        Problem::CoreMissing(p) if cfg!(windows) => {
+        Problem::CoreMissing(p) if crate::platform::IS_WINDOWS => {
             crate::t!("tun.core_missing_win", path = p.display())
         }
         Problem::CoreMissing(p) => crate::t!("tun.core_missing", path = p.display(), cmds = cmds()),
@@ -154,7 +154,7 @@ pub fn explain(problem: &Problem, config: &Config) -> String {
             reason = reason,
             cmds = cmds()
         ),
-        Problem::NeedsPrivileges if cfg!(windows) => crate::t!("tun.needs_admin"),
+        Problem::NeedsPrivileges if crate::platform::IS_WINDOWS => crate::t!("tun.needs_admin"),
         Problem::NeedsPrivileges => {
             crate::t!("tun.needs_caps", caps = PROCESS_CAPS, dir = LINUX_CORE_DIR)
         }
@@ -219,12 +219,12 @@ pub fn build_plan(
         &config.rules,
         &config.presets.enabled,
         &builtin_presets(),
-        cfg!(windows),
+        crate::platform::IS_WINDOWS,
     );
     let tun = (traffic == TrafficMode::Tun).then(|| TunPlan {
         name: config.tun.name.clone(),
         ipv6: host.ipv6_enabled(),
-        windows: cfg!(windows),
+        windows: crate::platform::IS_WINDOWS,
         tunnel_dns: config.tun.tunnel_dns.clone(),
         local_dns: if config.tun.local_dns.is_empty() {
             host.system_dns()
@@ -514,7 +514,7 @@ mod tests {
         let pf = preflight(&MockTunHost::healthy(), &cfg);
         assert!(matches!(pf.problems[0], Problem::CoreMissing(_)));
         let text = explain(&pf.problems[0], &cfg);
-        if cfg!(windows) {
+        if crate::platform::IS_WINDOWS {
             // Windows has no root-owned copy: the core just has to sit next to elf-gate.exe.
             assert!(
                 text.contains("xray.exe") && text.contains("рядом с elf-gate.exe"),

@@ -77,8 +77,8 @@ pub fn parse_resolv_conf(text: &str) -> Vec<String> {
     v4
 }
 
-/// Default route interface from `/proc/net/route` (the lowest metric among 0.0.0.0/0).
-/// The same, but never `exclude` (the tunnel's own default route has the lowest metric while it is up).
+/// Default route interface from `/proc/net/route` (the lowest metric among 0.0.0.0/0), never
+/// `exclude` (the tunnel's own default route has the lowest metric while it is up).
 pub fn physical_default_interface(route_table: &str, exclude: &str) -> Option<String> {
     route_table
         .lines()
@@ -93,16 +93,7 @@ pub fn physical_default_interface(route_table: &str, exclude: &str) -> Option<St
 }
 
 pub fn default_interface(route_table: &str) -> Option<String> {
-    route_table
-        .lines()
-        .skip(1)
-        .filter_map(|l| {
-            let f: Vec<&str> = l.split_whitespace().collect();
-            (f.len() >= 8 && f[1] == "00000000" && f[7] == "00000000")
-                .then(|| (f[6].parse::<u32>().unwrap_or(u32::MAX), f[0].to_string()))
-        })
-        .min()
-        .map(|(_, iface)| iface)
+    physical_default_interface(route_table, "")
 }
 
 impl TunHost for Host {

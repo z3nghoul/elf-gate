@@ -39,7 +39,7 @@ pub enum RuleRef {
     Rule(usize),
 }
 
-/// A setting the settings screen may change (stage 8).
+/// A setting the settings screen may change.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Setting {
     XrayPath(String),
@@ -136,7 +136,7 @@ pub enum Alert {
     Ask { text: String, ask: Ask },
 }
 
-/// Traffic of the current session (stage 8): bytes and speed, `proxy` and `direct` apart.
+/// Traffic of the current session: bytes and speed, `proxy` and `direct` apart.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Traffic {
     pub proxy_up: u64,

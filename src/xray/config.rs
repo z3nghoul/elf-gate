@@ -373,19 +373,8 @@ fn dns_section(plan: &Plan, t: &TunPlan, listed: &[String]) -> (Value, Vec<Value
     )
 }
 
-/// Server + settings -> Xray configuration (plain local proxy, no user rules).
-pub fn build(server: &Server, core: &CoreConfig) -> Result<Value, ConfigError> {
-    build_with(server, core, &Plan::proxy_default())
-}
-
-/// Server + settings + routing plan -> Xray configuration.
-pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Value, ConfigError> {
-    if let Some(reason) = &server.unsupported {
-        return Err(ConfigError::Unsupported(
-            server.name.clone(),
-            reason.clone(),
-        ));
-    }
+/// The local listeners: socks, http, the TUN inbound when planned, and the statistics API.
+fn inbounds(core: &CoreConfig, plan: &Plan) -> Vec<Value> {
     let sniffing = json!({
         "enabled": true,
         "destOverride": ["http", "tls", "quic"],
@@ -411,15 +400,31 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
     if let Some(t) = &plan.tun {
         inbounds.push(tun_inbound(t, &sniffing));
     }
+    if core.api_port != 0 {
+        inbounds.push(json!({
+            "tag": "api",
+            "listen": "127.0.0.1",
+            "port": core.api_port,
+            "protocol": "dokodemo-door",
+            "settings": { "address": "127.0.0.1" },
+        }));
+    }
+    inbounds
+}
 
-    // A complete provider config: its outbounds (the whole chain) are carried over as they are.
-    let full = server.full.as_ref().map(|f| f.renamed(&plan.pin));
+/// The outbounds: the proxy (or the provider's whole chain), the optional backup, direct, block
+/// and the fragmenting helper when a server needs it.
+fn outbounds(
+    server: &Server,
+    plan: &Plan,
+    full: Option<&crate::model::fullconfig::Renamed>,
+) -> Result<Vec<Value>, ConfigError> {
     let primary_tag = if plan.failover.is_some() {
         PRIMARY_TAG
     } else {
         "proxy"
     };
-    let mut outbounds = match &full {
+    let mut outbounds = match full {
         Some(parts) => {
             let mut o = parts.outbounds.clone();
             o.push(json!({ "tag": "direct", "protocol": "freedom" }));
@@ -432,7 +437,6 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
             json!({ "tag": "block", "protocol": "blackhole" }),
         ],
     };
-    let full_balanced = full.as_ref().is_some_and(|p| p.balanced);
     if let Some(f) = plan.failover.as_ref().filter(|_| full.is_none()) {
         if let Some(reason) = &f.backup.unsupported {
             return Err(ConfigError::Unsupported(
@@ -450,15 +454,13 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
     if full.is_none() && (fragments(server) || backup_fragments) {
         outbounds.push(fragment_outbound());
     }
+    Ok(outbounds)
+}
 
+/// Routing rules from the plan: the connection check, loop protection for the tunnel, and the
+/// user's rules for the chosen routing mode.
+fn user_rules(plan: &Plan) -> Vec<Value> {
     let mut rules: Vec<Value> = Vec::new();
-    let mut dns = None;
-    if let Some((t, listed)) = plan.dns_routing() {
-        let (section, dns_rules) = dns_section(plan, t, listed);
-        dns = Some(section);
-        outbounds.push(json!({ "tag": "dns-out", "protocol": "dns" }));
-        rules.extend(dns_rules);
-    }
     // The connection check must test the VPN itself, whatever the user's rules say.
     rules.push(json!({
         "type": "field",
@@ -514,6 +516,37 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
     if plan.routing == RoutingMode::Include {
         rules.push(json!({ "type": "field", "network": "tcp,udp", "outboundTag": "direct" }));
     }
+    rules
+}
+
+/// Server + settings -> Xray configuration (plain local proxy, no user rules).
+pub fn build(server: &Server, core: &CoreConfig) -> Result<Value, ConfigError> {
+    build_with(server, core, &Plan::proxy_default())
+}
+
+/// Server + settings + routing plan -> Xray configuration.
+pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Value, ConfigError> {
+    if let Some(reason) = &server.unsupported {
+        return Err(ConfigError::Unsupported(
+            server.name.clone(),
+            reason.clone(),
+        ));
+    }
+    let inbounds = inbounds(core, plan);
+
+    // A complete provider config: its outbounds (the whole chain) are carried over as they are.
+    let full = server.full.as_ref().map(|f| f.renamed(&plan.pin));
+    let mut outbounds = outbounds(server, plan, full.as_ref())?;
+    let full_balanced = full.as_ref().is_some_and(|p| p.balanced);
+    let mut rules: Vec<Value> = Vec::new();
+    let mut dns = None;
+    if let Some((t, listed)) = plan.dns_routing() {
+        let (section, dns_rules) = dns_section(plan, t, listed);
+        dns = Some(section);
+        outbounds.push(json!({ "tag": "dns-out", "protocol": "dns" }));
+        rules.extend(dns_rules);
+    }
+    rules.extend(user_rules(plan));
 
     let mut balancers = Vec::new();
     if let Some(parts) = full.as_ref().filter(|p| p.balanced) {
@@ -548,13 +581,6 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
     // Traffic statistics for the interface (`xray api statsquery`); 0 turns them off
     // (temporary probe cores have no use for them and must not take the port).
     if core.api_port != 0 {
-        inbounds.push(json!({
-            "tag": "api",
-            "listen": "127.0.0.1",
-            "port": core.api_port,
-            "protocol": "dokodemo-door",
-            "settings": { "address": "127.0.0.1" },
-        }));
         rules.insert(
             0,
             json!({ "type": "field", "inboundTag": ["api"], "outboundTag": "api" }),

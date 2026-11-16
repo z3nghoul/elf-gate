@@ -608,7 +608,7 @@ impl Engine {
             &self.config.rules,
             &self.config.presets.enabled,
             &builtin_presets(),
-            cfg!(windows),
+            crate::platform::IS_WINDOWS,
         );
         let mut bypass = self.config.proxy.bypass.clone();
         for extra in bypass_additions(self.config.mode.routing, &rules) {
@@ -868,10 +868,6 @@ impl Engine {
             Mode::Proxy => Mode::Tun,
             Mode::Tun => Mode::Proxy,
         };
-        if next == Mode::Tun && !crate::build_info::TUN_AVAILABLE {
-            self.status(crate::t!("eng.tun_unavailable"));
-            return;
-        }
         self.mode = next;
         self.config.mode.traffic = next;
         self.save_config();
@@ -1250,7 +1246,7 @@ impl Engine {
         }
     }
 
-    // ---------- settings (stage 8) ----------
+    // ---------- settings ----------
 
     fn apply_setting(&mut self, setting: crate::proto::Setting) {
         use crate::proto::Setting::*;

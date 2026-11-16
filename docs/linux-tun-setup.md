@@ -3,7 +3,7 @@
 Для TUN Xray должен создавать сетевой интерфейс и менять маршруты. Это требует `CAP_NET_ADMIN`.
 **elf-gate сам никогда не вызывает `sudo`**: команды ниже выполняете вы.
 
-## Основной путь: копия Xray с `cap_net_admin`
+## Основной путь: копия Xray с правами `cap_net_admin`
 
 Нужна копия `xray`, принадлежащая root и недоступная вам на запись. Копию в домашней папке использовать
 нельзя: любой процесс пользователя мог бы подменить файл, который запускается с повышенными правами.
@@ -12,8 +12,13 @@
 sudo install -d -m 0755 -o root -g root /usr/local/lib/elf-gate
 sudo install -m 0755 -o root -g root /путь/к/xray /usr/local/lib/elf-gate/xray
 sudo install -m 0644 -o root -g root /путь/к/geoip.dat /путь/к/geosite.dat /usr/local/lib/elf-gate/
-sudo setcap cap_net_admin+ep /usr/local/lib/elf-gate/xray
+sudo setcap cap_net_admin,cap_sys_ptrace,cap_dac_read_search+ep /usr/local/lib/elf-gate/xray
 ```
+
+Так же ставит права `elf-gate-tun.sh` по умолчанию. `cap_sys_ptrace` и `cap_dac_read_search` нужны, чтобы Xray видел,
+какой программе принадлежит соединение (правила по процессам для chromium, electron, discord из flatpak). Без них TUN
+работает, но такие правила не срабатывают; для минимального набора оставьте только `cap_net_admin`
+(`ELF_GATE_FULL_CAPS=0 ./elf-gate-tun.sh`).
 
 Те же команды elf-gate показывает в окне, если копии нет или она небезопасна. Путь можно изменить в
 `config.toml`: `[tun] xray_path = "..."`. elf-gate проверяет, что файл и все его родительские папки принадлежат

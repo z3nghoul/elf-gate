@@ -1,5 +1,4 @@
-//! Stage 1 only: fake data and fake background tasks. Removed once real
-//! parsing, fetching and the Xray process exist (stages 2-6).
+//! Fake data for the demo mode (debug builds) and for the screen tests.
 
 use crate::event::{now_hms, BgEvent, BgTx, Level, LogLine};
 use crate::model::server::{Ping, Security, Server, TlsParams, Transport, TransportParams};

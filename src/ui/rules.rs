@@ -65,7 +65,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                     .expect("builtin preset");
                 let on = app.config.presets.enabled.contains(id);
                 let active = p.active_in(routing);
-                let has_processes = !p.processes(cfg!(windows)).is_empty();
+                let has_processes = !p.processes(crate::platform::IS_WINDOWS).is_empty();
                 let mut note = String::new();
                 if !active {
                     note = format!("  {}", crate::t!("rules.inactive_in", mode = mode_name));
@@ -132,7 +132,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             .iter()
             .find(|p| &p.id == id)
             .map(|p| {
-                let names = p.processes(cfg!(windows)).join(", ");
+                let names = p.processes(crate::platform::IS_WINDOWS).join(", ");
                 let mut text = if names.is_empty() {
                     String::new()
                 } else {

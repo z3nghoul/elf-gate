@@ -1,6 +1,6 @@
 //! Which `geosite:` and `geoip:` sets exist in the `.dat` files next to the core. Xray refuses
 //! to start when a rule names a missing set, so rules for missing sets are dropped with a
-//! warning and the rest keep working (SPEC, stage 7).
+//! warning and the rest keep working (see SPEC).
 
 use crate::model::rule::EffectiveRules;
 use std::collections::HashSet;

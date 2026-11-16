@@ -38,7 +38,12 @@ impl DeviceInfo {
     pub fn current(hwid: &str) -> Self {
         Self {
             hwid: hwid.to_string(),
-            os: if cfg!(windows) { "Windows" } else { "Linux" }.into(),
+            os: if crate::platform::IS_WINDOWS {
+                "Windows"
+            } else {
+                "Linux"
+            }
+            .into(),
             os_version: platform::os_version(),
             model: "elf-gate".into(),
         }

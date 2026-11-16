@@ -10,9 +10,6 @@ pub fn demo_data() -> bool {
     SHOW_MOCK_DATA && std::env::var_os("ELF_GATE_DEMO").is_some()
 }
 
-/// The real TUN mode exists (stage 5.2).
-pub const TUN_AVAILABLE: bool = true;
-
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Commit the binary was built from; CI sets `ELF_GATE_COMMIT`.
