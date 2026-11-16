@@ -22,9 +22,9 @@ expression: "styled_frame(&text, &buf)"
 │  DNS через туннель                               1.1.1.1                                         │
 └──────────────────────────────────────────────────────────────────────────────────────── ↓ ещё 18 ┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│значок в трее: нет (не поддерживается окружением или не запущен)                                  │
-│Порты и пути применяются при следующем подключении.                                               │
-└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+│Язык интерфейса. Меняется сразу, на работу VPN не влияет.                                         │
+│                                                                                                  │
+└ значок в трее: нет (не поддерживается окружением или не запущен) ────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
 │● Отключено | PROXY | ↑0 B/s ↓0 B/s | VPN 0 B↑ 0 B↓ | напрямую 0 B↑ 0 B↓                          │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -53,7 +53,7 @@ ACCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCBBBBBBBBCCCCCCCCCCCCCCCCCCCCC
 ACCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCBBBBBBBCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCA
 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCA
+AGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCA
 ACCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCA
 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
@@ -70,3 +70,4 @@ C fg=Reset bg=Reset mod=NONE
 D fg=DarkGray bg=Reset mod=BOLD
 E fg=Reset bg=Reset mod=BOLD | REVERSED
 F fg=Magenta bg=Reset mod=BOLD | REVERSED
+G fg=Blue bg=Reset mod=NONE

@@ -9,6 +9,11 @@ use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
 pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
+    let [area, foot] = ratatui::layout::Layout::vertical([
+        ratatui::layout::Constraint::Min(3),
+        ratatui::layout::Constraint::Length(crate::ui::explain::HEIGHT),
+    ])
+    .areas(area);
     let fields = app.sub_fields();
     let label_w = fields
         .iter()
@@ -72,4 +77,9 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         &app.sub_scroll,
         th,
     );
+    let text = fields
+        .get(app.sub_cursor)
+        .map(|x| x.row.explain())
+        .unwrap_or_default();
+    crate::ui::explain::render(f, foot, &text, None, th);
 }

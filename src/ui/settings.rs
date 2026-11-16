@@ -5,7 +5,6 @@ use crate::ui::theme::Theme;
 use crate::ui::RenderCtx;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
@@ -32,8 +31,11 @@ pub fn layout(rows: &[(SettingId, String, String)]) -> Vec<Item> {
 
 pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &RenderCtx) {
     debug_assert_eq!(app.screen, Screen::Settings);
-    let [list_area, foot] =
-        Layout::vertical([Constraint::Min(3), Constraint::Length(4)]).areas(area);
+    let [list_area, foot] = Layout::vertical([
+        Constraint::Min(3),
+        Constraint::Length(crate::ui::explain::HEIGHT),
+    ])
+    .areas(area);
     let rows = app.settings_rows_for(ctx.windows);
     let inner_w = list_area.width.saturating_sub(4) as usize;
     // The label column fits the longest label, but leaves room for a value.
@@ -101,25 +103,6 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &Rende
     } else {
         crate::t!("settings.tray_absent")
     };
-    let on_transparent = matches!(
-        rows.get(cursor).map(|r| &r.0),
-        Some(crate::app::SettingId::TransparentBg)
-    );
-    let note = if on_transparent {
-        Line::from(Span::styled(
-            crate::t!("setting.transparent_bg_hint"),
-            th.info(),
-        ))
-    } else {
-        Line::from(Span::styled(tray, th.muted()))
-    };
-    f.render_widget(
-        Paragraph::new(vec![
-            note,
-            Line::from(Span::styled(crate::t!("settings.footer"), th.text())),
-        ])
-        .wrap(ratatui::widgets::Wrap { trim: false })
-        .block(th.block(false)),
-        foot,
-    );
+    let text = rows.get(cursor).map(|r| r.0.explain()).unwrap_or_default();
+    crate::ui::explain::render(f, foot, &text, Some(tray), th);
 }

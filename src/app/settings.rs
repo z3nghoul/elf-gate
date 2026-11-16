@@ -37,6 +37,74 @@ pub enum SettingId {
     SubDefaultHwid,
 }
 
+impl SettingId {
+    /// Every setting (also those hidden on this platform).
+    pub const ALL: [SettingId; 28] = [
+        SettingId::Language,
+        SettingId::Theme,
+        SettingId::TransparentBg,
+        SettingId::Privacy,
+        SettingId::AutoConnect,
+        SettingId::Autostart,
+        SettingId::SetSystemProxy,
+        SettingId::ManageFirewall,
+        SettingId::TunXrayPath,
+        SettingId::TunName,
+        SettingId::TunnelDns,
+        SettingId::ProxyWithTun,
+        SettingId::SubDefaultUa,
+        SettingId::SubDefaultHours,
+        SettingId::SubDefaultHwid,
+        SettingId::PingMode,
+        SettingId::PingUrl,
+        SettingId::PingTimeout,
+        SettingId::PingAuto,
+        SettingId::XrayPath,
+        SettingId::LogLevel,
+        SettingId::VerboseLog,
+        SettingId::CheckUpdates,
+        SettingId::UpdateChannel,
+        SettingId::SocksPort,
+        SettingId::HttpPort,
+        SettingId::ApiPort,
+        SettingId::Hwid,
+    ];
+
+    /// What the setting does, in plain words, for the line under the table.
+    pub fn explain(&self) -> String {
+        crate::t!(match self {
+            SettingId::Language => "explain.language",
+            SettingId::Theme => "explain.theme",
+            SettingId::TransparentBg => "explain.transparent_bg",
+            SettingId::Privacy => "explain.privacy",
+            SettingId::AutoConnect => "explain.auto_connect",
+            SettingId::Autostart => "explain.autostart",
+            SettingId::SetSystemProxy => "explain.system_proxy",
+            SettingId::ManageFirewall => "explain.firewall",
+            SettingId::TunXrayPath => "explain.tun_xray_path",
+            SettingId::TunName => "explain.tun_name",
+            SettingId::TunnelDns => "explain.tunnel_dns",
+            SettingId::ProxyWithTun => "explain.proxy_with_tun",
+            SettingId::SubDefaultUa => "explain.sub_default_ua",
+            SettingId::SubDefaultHours => "explain.sub_default_hours",
+            SettingId::SubDefaultHwid => "explain.sub_default_hwid",
+            SettingId::PingMode => "explain.ping_mode",
+            SettingId::PingUrl => "explain.ping_url",
+            SettingId::PingTimeout => "explain.ping_timeout",
+            SettingId::PingAuto => "explain.ping_auto",
+            SettingId::XrayPath => "explain.xray_path",
+            SettingId::LogLevel => "explain.log_level",
+            SettingId::VerboseLog => "explain.verbose_log",
+            SettingId::CheckUpdates => "explain.check_updates",
+            SettingId::UpdateChannel => "explain.update_channel",
+            SettingId::SocksPort => "explain.socks_port",
+            SettingId::HttpPort => "explain.http_port",
+            SettingId::ApiPort => "explain.api_port",
+            SettingId::Hwid => "explain.hwid",
+        })
+    }
+}
+
 /// The groups of the settings screen, in the order they are shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {

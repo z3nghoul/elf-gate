@@ -9,6 +9,7 @@ macro_rules! snap {
 }
 
 mod details;
+mod explain;
 mod help;
 #[cfg(test)]
 mod hint_tests;

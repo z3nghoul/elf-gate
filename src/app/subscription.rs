@@ -18,6 +18,33 @@ pub enum SubRow {
     Delete,
 }
 
+impl SubRow {
+    pub const ALL: [SubRow; 8] = [
+        SubRow::Name,
+        SubRow::Url,
+        SubRow::UserAgent,
+        SubRow::Hours,
+        SubRow::Hwid,
+        SubRow::Hidden,
+        SubRow::Update,
+        SubRow::Delete,
+    ];
+
+    /// What the row is, in plain words, for the line under the list.
+    pub fn explain(self) -> String {
+        crate::t!(match self {
+            SubRow::Name => "explain.sub_name",
+            SubRow::Url => "explain.sub_url",
+            SubRow::UserAgent => "explain.sub_user_agent",
+            SubRow::Hours => "explain.sub_hours",
+            SubRow::Hwid => "explain.sub_hwid",
+            SubRow::Hidden => "explain.sub_hidden",
+            SubRow::Update => "explain.sub_update",
+            SubRow::Delete => "explain.sub_delete",
+        })
+    }
+}
+
 /// Where a shown value comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
