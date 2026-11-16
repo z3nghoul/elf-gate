@@ -115,6 +115,42 @@ pub fn pad(text: &str, cols: usize) -> String {
     out
 }
 
+/// The text broken into lines of at most `cols` columns: at blanks, and inside a word that is
+/// longer than a line. Line breaks of the text are kept.
+pub fn wrap(text: &str, cols: usize) -> Vec<String> {
+    let cols = cols.max(1);
+    let mut out = Vec::new();
+    for raw in text.split('\n') {
+        let mut line = String::new();
+        let mut used = 0usize;
+        for word in raw.split(' ') {
+            let w = word.width();
+            if used > 0 && used + 1 + w <= cols {
+                line.push(' ');
+                line.push_str(word);
+                used += 1 + w;
+                continue;
+            }
+            if used > 0 {
+                out.push(std::mem::take(&mut line));
+                used = 0;
+            }
+            // A word longer than a line is broken by grapheme.
+            for g in word.graphemes(true) {
+                let gw = g.width();
+                if used + gw > cols {
+                    out.push(std::mem::take(&mut line));
+                    used = 0;
+                }
+                line.push_str(g);
+                used += gw;
+            }
+        }
+        out.push(line);
+    }
+    out
+}
+
 /// [`cut`] and [`pad`]: exactly `cols` columns.
 pub fn fit(text: &str, cols: usize) -> String {
     pad(&cut(text, cols), cols)

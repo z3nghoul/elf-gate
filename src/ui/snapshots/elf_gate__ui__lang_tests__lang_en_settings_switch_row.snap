@@ -21,7 +21,7 @@ expression: frame
 │  System proxy together with TUN        on                                                                            │
 │  TUN interface name                    elfgate0                                                                      │
 │  DNS through the tunnel                1.1.1.1                                                                       │
-└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────── ↓ 18 more ┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │tray icon: none (not supported by this desktop or not running)                                                        │
 │Ports and paths apply at the next connection.                                                                         │
@@ -30,5 +30,5 @@ expression: frame
 │● Disconnected | PROXY                                                                                                │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│j/k select  Tab section  Enter toggle  Ctrl+P priv.  Esc back  ? help  q/Q exit                                       │
+│j/k select  PgUp/PgDn page  g/G start/end  Tab section  Enter toggle  Ctrl+P priv.  Esc back  ? help  q/Q exit        │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

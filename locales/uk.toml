@@ -261,6 +261,9 @@ legend_grey = "сервер не підтримується або відхил�
 legend_grey_key = "сірий, n/a"
 
 [hint]
+clear_close = "скинути/закрити"
+filter = "фільтр"
+page = "сторінка"
 open_sub = "відкрити"
 run = "виконати"
 show_hidden = "показати"
@@ -413,6 +416,9 @@ processes_title = "Запущені програми (назва файлу, я�
 rule_exists = "Таке правило вже є"
 rule_rejected = "Правило не додано: {error}"
 select_hint = "j/k - вибір, Enter - застосувати, Esc - скасувати"
+processes_hint = "Введення - фільтр, Enter - додати, Esc - скинути фільтр, потім закрити"
+processes_filter = "Фільтр"
+processes_none = "немає збігів"
 update_hint = "s - більше не нагадувати про цю версію, будь-яка інша клавіша - закрити"
 update_no_notes = "У релізу немає опису."
 update_page = "Сторінка релізу: {url}"
@@ -517,6 +523,10 @@ title = "Підписка"
 update = "Оновити зараз"
 url = "URL"
 user_agent = "User-Agent"
+
+[scroll]
+down = "↓ ще {n}"
+up = "↑ ще {n}"
 
 [section]
 appearance = "Зовнішній вигляд"

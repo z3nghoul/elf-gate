@@ -376,10 +376,10 @@ async fn process_picker_lists_running_programs() {
     a.screen = Screen::Rules;
     a.handle_action(Action::Add);
     press(&mut a, KeyCode::Enter); // "выбрать из запущенных"
-    let Some(Popup::Select { options, .. }) = &a.popup else {
+    let Some(Popup::Processes { items, .. }) = &a.popup else {
         panic!("{:?}", a.popup)
     };
-    let first = options[0].clone();
+    let first = items[0].0.clone();
     press(&mut a, KeyCode::Enter);
     assert_eq!(
         sent(&mut rx),
@@ -850,4 +850,159 @@ fn an_override_touches_one_subscription_and_a_new_default_the_rest() {
     assert_eq!(old.subscriptions[0].auto_update_hours, None);
     let ser = toml::to_string(&old.subscriptions[0]).unwrap();
     assert!(!ser.contains("auto_update_hours"), "{ser}");
+}
+
+/// An app on the rules screen whose "pick a process" window is open over `names`.
+fn process_picker(names: Vec<String>) -> (AppState, UnboundedReceiver<Cmd>) {
+    let (tx, rx) = unbounded_channel();
+    let host = MockTunHost {
+        processes: names,
+        ..MockTunHost::healthy()
+    };
+    let mut a = AppState::new(tx).with_tun_host(Arc::new(host));
+    a.apply_view(view_with(&[REALITY]));
+    a.link = LinkState::Up;
+    a.screen = Screen::Rules;
+    a.handle_action(Action::Add);
+    press(&mut a, KeyCode::Enter);
+    (a, rx)
+}
+
+fn fake_processes() -> Vec<String> {
+    // 200 processes: 150 names, some of them twice, in no order.
+    (0..200)
+        .map(|i| format!("proc{:03}", (i * 7) % 150))
+        .collect()
+}
+
+#[tokio::test]
+async fn the_last_process_of_200_can_be_chosen_and_names_are_sorted_and_collapsed() {
+    let (mut a, mut rx) = process_picker(fake_processes());
+    let Some(Popup::Processes { items, .. }) = &a.popup else {
+        panic!()
+    };
+    assert_eq!(items.len(), 150, "equal names are one row");
+    assert!(items.windows(2).all(|w| w[0].0 <= w[1].0), "sorted by name");
+    assert!(
+        items.iter().any(|i| i.1 > 1),
+        "with the number of processes"
+    );
+    let last = items.last().unwrap().0.clone();
+    // Draw once so the window knows its height, then End and a draw: the last row is visible.
+    let out = crate::ui::tests_support::draw(80, 24, &mut a);
+    assert!(out.contains("proc000"), "{out}");
+    press(&mut a, KeyCode::End);
+    let out = crate::ui::tests_support::draw(80, 24, &mut a);
+    assert!(out.contains(&last) && out.contains("> "), "{out}");
+    assert!(out.contains("Esc"), "the keys stay visible: {out}");
+    press(&mut a, KeyCode::Enter);
+    assert_eq!(
+        sent(&mut rx),
+        vec![Cmd::AddRule {
+            kind: RuleKind::Process,
+            value: last
+        }]
+    );
+}
+
+#[tokio::test]
+async fn page_down_walks_the_process_list_to_the_end() {
+    let (mut a, _rx) = process_picker(fake_processes());
+    for _ in 0..40 {
+        crate::ui::tests_support::draw(80, 24, &mut a);
+        press(&mut a, KeyCode::PageDown);
+    }
+    let Some(Popup::Processes {
+        items, selected, ..
+    }) = &a.popup
+    else {
+        panic!()
+    };
+    assert_eq!(*selected, items.len() - 1);
+}
+
+#[tokio::test]
+async fn the_filter_narrows_the_list_and_escape_clears_it_before_closing() {
+    let (mut a, mut rx) = process_picker(fake_processes());
+    for c in "PROC14".chars() {
+        press(&mut a, KeyCode::Char(c)); // case does not matter
+    }
+    let Some(Popup::Processes {
+        items,
+        filter,
+        selected,
+    }) = &a.popup
+    else {
+        panic!()
+    };
+    let shown = crate::app::process_matches(items, filter);
+    assert_eq!((filter.as_str(), *selected), ("PROC14", 0));
+    assert_eq!(shown.len(), 10, "proc140..proc149");
+    press(&mut a, KeyCode::Backspace);
+    let Some(Popup::Processes { filter, .. }) = &a.popup else {
+        panic!()
+    };
+    assert_eq!(filter, "PROC1");
+    press(&mut a, KeyCode::Esc); // clears the filter, the window stays
+    let Some(Popup::Processes { filter, .. }) = &a.popup else {
+        panic!("closed too early")
+    };
+    assert!(filter.is_empty());
+    press(&mut a, KeyCode::Esc); // closes
+    assert!(a.popup.is_none());
+    assert!(sent(&mut rx).is_empty());
+}
+
+#[tokio::test]
+async fn long_lists_scroll_with_the_selection_on_every_screen() {
+    // The settings table: End reaches the last row on 80x24, whose rows are not all in view.
+    let (mut a, _rx) = app_with(&[REALITY]);
+    a.screen = Screen::Settings;
+    let out = crate::ui::tests_support::draw(80, 24, &mut a);
+    assert!(out.contains("Язык") && out.contains("ещё"), "{out}");
+    let last = a.settings_rows().last().unwrap().1.clone();
+    assert!(
+        !out.contains(&last),
+        "the last row is below the edge at first"
+    );
+    a.handle_action(Action::Bottom);
+    let out = crate::ui::tests_support::draw(80, 24, &mut a);
+    assert!(out.contains(&last), "{out}");
+    a.handle_action(Action::Top);
+    let out = crate::ui::tests_support::draw(80, 24, &mut a);
+    assert!(
+        out.contains("Внешний вид"),
+        "the section header comes back: {out}"
+    );
+    // A selection moved past the edge by j moves the window.
+    for _ in 0..25 {
+        a.handle_action(Action::Down);
+        crate::ui::tests_support::draw(80, 24, &mut a);
+    }
+    let sel = a.settings_rows()[a.settings_cursor].1.clone();
+    let out = crate::ui::tests_support::draw(80, 24, &mut a);
+    assert!(out.contains(&sel), "{out}");
+}
+
+#[tokio::test]
+async fn help_on_80x24_is_whole_when_scrolled() {
+    let (mut a, _rx) = app_with(&[REALITY]);
+    a.screen = Screen::Help;
+    let first = crate::ui::tests_support::draw(80, 24, &mut a);
+    assert!(
+        first.contains("ещё") && first.contains("q / Ctrl+C"),
+        "{first}"
+    );
+    a.handle_action(Action::Bottom);
+    let end = crate::ui::tests_support::draw(80, 24, &mut a);
+    assert!(end.contains("серый, n/a"), "{end}");
+    assert!(!end.contains("q / Ctrl+C"), "{end}");
+    // PgDn moves by a page and never past the end.
+    a.handle_action(Action::Top);
+    for _ in 0..10 {
+        crate::ui::tests_support::draw(80, 24, &mut a);
+        a.handle_action(Action::PageDown);
+    }
+    let again = crate::ui::tests_support::draw(80, 24, &mut a);
+    assert_eq!(again, end);
 }

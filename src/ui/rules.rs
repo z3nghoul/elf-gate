@@ -1,9 +1,10 @@
 use crate::app::{AppState, RuleItem, Screen};
 use crate::model::rule::{builtin_presets, RoutingMode, TrafficMode};
+use crate::ui::scroll::{self, Content};
 use crate::ui::theme::Theme;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 fn mark(on: bool) -> &'static str {
@@ -55,7 +56,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &super
     );
 
     let items = app.rule_items();
-    let rows: Vec<ListItem> = items
+    let rows: Vec<Line> = items
         .iter()
         .map(|item| match item {
             RuleItem::Preset(id) => {
@@ -73,7 +74,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &super
                     note = format!("  {}", crate::t!("rules.processes_tun_only"));
                 }
                 let style = if on && active { th.text() } else { th.muted() };
-                ListItem::new(Line::from(vec![
+                Line::from(vec![
                     Span::styled(format!("{} ", mark(on)), th.good()),
                     Span::styled(
                         format!(
@@ -84,7 +85,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &super
                         style,
                     ),
                     Span::styled(note, th.warn()),
-                ]))
+                ])
             }
             RuleItem::Rule(i) => {
                 let r = &app.config.rules[*i];
@@ -94,7 +95,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &super
                 } else {
                     th.muted()
                 };
-                ListItem::new(Line::from(vec![
+                Line::from(vec![
                     Span::styled(format!("{} ", mark(r.enabled)), th.good()),
                     Span::styled(
                         format!("{:<8} {}", r.kind.label(), app.rule_value(r)),
@@ -108,22 +109,25 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &super
                         },
                         th.warn(),
                     ),
-                ]))
+                ])
             }
         })
         .collect();
-    let mut state = ListState::default();
-    state.select(Some(app.rules_cursor.min(rows.len().saturating_sub(1))));
-    f.render_stateful_widget(
-        List::new(rows)
-            .block(th.block(false).title(Span::styled(
-                format!(" {} ", crate::t!("panel.rules_list")),
-                th.title(),
-            )))
-            .highlight_symbol("> ")
-            .highlight_style(th.selected()),
+    let selected = app.rules_cursor.min(rows.len().saturating_sub(1));
+    scroll::render(
+        f,
         list_area,
-        &mut state,
+        th.block(false).title(Span::styled(
+            format!(" {} ", crate::t!("panel.rules_list")),
+            th.title(),
+        )),
+        Content {
+            lines: rows,
+            selected: Some(selected),
+            context_from: None,
+        },
+        &app.rules_scroll,
+        th,
     );
 
     // A line of context for the selected item.

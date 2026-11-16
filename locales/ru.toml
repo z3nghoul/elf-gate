@@ -261,6 +261,9 @@ legend_grey = "сервер не поддерживается или отвер�
 legend_grey_key = "серый, n/a"
 
 [hint]
+clear_close = "сброс/закрыть"
+filter = "фильтр"
+page = "страница"
 open_sub = "открыть"
 run = "выполнить"
 show_hidden = "показать"
@@ -413,6 +416,9 @@ processes_title = "Запущенные программы (имя файла, �
 rule_exists = "Такое правило уже есть"
 rule_rejected = "Правило не добавлено: {error}"
 select_hint = "j/k - выбор, Enter - применить, Esc - отмена"
+processes_hint = "Ввод - фильтр, Enter - добавить, Esc - сбросить фильтр, затем закрыть"
+processes_filter = "Фильтр"
+processes_none = "нет совпадений"
 update_hint = "s - больше не напоминать об этой версии, любая другая клавиша - закрыть"
 update_no_notes = "У релиза нет описания."
 update_page = "Страница релиза: {url}"
@@ -517,6 +523,10 @@ title = "Подписка"
 update = "Обновить сейчас"
 url = "URL"
 user_agent = "User-Agent"
+
+[scroll]
+down = "↓ ещё {n}"
+up = "↑ ещё {n}"
 
 [section]
 appearance = "Внешний вид"

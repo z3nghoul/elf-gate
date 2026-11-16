@@ -127,7 +127,12 @@ pub const BINDINGS: &[Binding] = &[
         hidden: false,
         bar: "j/k",
         prio: 5,
-        scopes: scope::MAIN | scope::RULES | scope::SETTINGS | scope::LOGS | scope::SUB,
+        scopes: scope::MAIN
+            | scope::RULES
+            | scope::SETTINGS
+            | scope::LOGS
+            | scope::SUB
+            | scope::HELP,
     },
     Binding {
         label: "",
@@ -145,7 +150,7 @@ pub const BINDINGS: &[Binding] = &[
         hidden: false,
         bar: "PgUp/PgDn",
         prio: 8,
-        scopes: scope::LOGS,
+        scopes: scope::LOGS | scope::RULES | scope::SETTINGS | scope::SUB | scope::HELP,
     },
     Binding {
         label: "",
@@ -163,7 +168,7 @@ pub const BINDINGS: &[Binding] = &[
         hidden: false,
         bar: "g/G",
         prio: 8,
-        scopes: scope::LOGS,
+        scopes: scope::LOGS | scope::RULES | scope::SETTINGS | scope::SUB | scope::HELP,
     },
     Binding {
         label: "",

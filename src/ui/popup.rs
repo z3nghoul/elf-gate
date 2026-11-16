@@ -1,8 +1,11 @@
-use crate::app::{AppState, Popup};
+use crate::app::{process_matches, AppState, Popup};
+use crate::ui::scroll::{self, Scroll};
+use crate::ui::text::wrap;
 use crate::ui::theme::Theme;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph, Wrap};
+use ratatui::widgets::Clear;
 use ratatui::Frame;
 
 fn centered(area: Rect, w: u16, h: u16) -> Rect {
@@ -15,157 +18,237 @@ fn centered(area: Rect, w: u16, h: u16) -> Rect {
     r
 }
 
+/// What is inside the window's border: fixed lines on top (the filter), the body, and fixed
+/// lines at the bottom (the keys). When the room is short, the body gives way: the top lines
+/// and the keys are always drawn.
+struct Dialog {
+    title: String,
+    border: Style,
+    top: Vec<Line<'static>>,
+    body: Vec<Line<'static>>,
+    /// A selected body line makes the body a scrolling list (the selected line stays visible).
+    selected: Option<usize>,
+    /// The body takes all the height there is (a long list).
+    fill: bool,
+    bottom: Vec<Line<'static>>,
+}
+
+fn text_lines(text: &str, width: usize, style: Style) -> Vec<Line<'static>> {
+    wrap(text, width)
+        .into_iter()
+        .map(|l| Line::from(Span::styled(l, style)))
+        .collect()
+}
+
+/// A blank line and the keys.
+fn keys_line(text: String, width: usize, th: &Theme) -> Vec<Line<'static>> {
+    let mut v = vec![Line::default()];
+    v.extend(text_lines(&text, width, th.muted()));
+    v
+}
+
+/// `area` is the screen without the key bar: the window stays inside it.
 pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     let Some(popup) = &app.popup else { return };
-    let w = area.width.saturating_sub(6).clamp(30, 96);
-    if let Popup::Update(release) = popup {
-        render_update(f, area, w, release, th);
-        return;
-    }
-    let (title, lines, border) = match popup {
+    let w = area.width.saturating_sub(6).clamp(30, 96).min(area.width);
+    let inner_w = w.saturating_sub(2).max(1) as usize;
+    let dialog = match popup {
+        Popup::Update(release) => update_dialog(release, inner_w, th),
         Popup::Select {
             title,
             options,
             selected,
             ..
-        } => {
-            let mut lines: Vec<Line> = options
+        } => Dialog {
+            title: app.mask(title),
+            border: th.border(true),
+            top: Vec::new(),
+            body: options
                 .iter()
-                .map(|o| app.mask(o))
-                .enumerate()
-                .map(|(i, o)| {
-                    if i == *selected {
-                        Line::from(Span::styled(format!("> {o}"), th.selected()))
+                .map(|o| Line::from(Span::styled(app.mask(o), th.text())))
+                .collect(),
+            selected: Some(*selected),
+            fill: false,
+            bottom: keys_line(crate::t!("popup.select_hint"), inner_w, th),
+        },
+        Popup::Processes {
+            items,
+            filter,
+            selected,
+        } => {
+            let shown = process_matches(items, filter);
+            let mut body: Vec<Line> = shown
+                .iter()
+                .map(|&i| {
+                    let (name, n) = &items[i];
+                    let label = if *n > 1 {
+                        format!("{name} ({n})")
                     } else {
-                        Line::from(Span::styled(format!("  {o}"), th.text()))
-                    }
+                        name.clone()
+                    };
+                    Line::from(Span::styled(app.mask(&label), th.text()))
                 })
                 .collect();
-            lines.push(Line::default());
-            lines.push(Line::from(Span::styled(
-                crate::t!("popup.select_hint"),
-                th.muted(),
-            )));
-            (app.mask(title), lines, th.border(true))
+            let none = body.is_empty();
+            if none {
+                body.push(Line::from(Span::styled(
+                    crate::t!("popup.processes_none"),
+                    th.muted(),
+                )));
+            }
+            Dialog {
+                title: crate::t!("popup.processes_title"),
+                border: th.border(true),
+                top: vec![Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", crate::t!("popup.processes_filter")),
+                        th.muted(),
+                    ),
+                    Span::styled(format!("{filter}_"), th.text()),
+                ])],
+                body,
+                selected: (!none).then_some((*selected).min(shown.len() - 1)),
+                fill: true,
+                bottom: keys_line(crate::t!("popup.processes_hint"), inner_w, th),
+            }
         }
         Popup::Input {
             title,
             buf,
             purpose,
-        } => (
-            app.mask(title),
-            vec![
-                Line::from(Span::styled(
-                    // A link or a subscription URL is typed like a password in privacy mode:
-                    // the length shows, the content does not (pasting still works).
-                    if app.privacy() && *purpose == crate::app::InputPurpose::Link {
-                        format!("{}_", "•".repeat(buf.chars().count()))
-                    } else {
-                        format!("{buf}_")
-                    },
-                    th.text(),
-                )),
-                Line::default(),
-                Line::from(Span::styled(crate::t!("popup.input_hint"), th.muted())),
-            ],
-            th.border(true),
-        ),
-        Popup::Confirm { text, .. } => (
-            crate::t!("popup.confirm_title"),
-            vec![
-                Line::from(Span::styled(app.mask(text), th.text())),
-                Line::default(),
-                Line::from(Span::styled(crate::t!("popup.confirm_hint"), th.muted())),
-            ],
-            th.border(true),
-        ),
-        // Drawn apart above.
-        Popup::Update(_) => return,
-        Popup::Notice(msg) => {
-            let mut lines: Vec<Line> = msg
-                .lines()
-                .map(|l| Line::from(Span::styled(app.mask(l), th.warn())))
-                .collect();
-            lines.push(Line::default());
-            lines.push(Line::from(Span::styled(
-                crate::t!("popup.any_key"),
-                th.muted(),
-            )));
-            (crate::t!("popup.notice_title"), lines, th.warn())
-        }
-        Popup::Error(msg) => {
-            let mut lines: Vec<Line> = msg
-                .lines()
-                .map(|l| Line::from(Span::styled(app.mask(l), th.bad())))
-                .collect();
-            lines.push(Line::default());
-            lines.push(Line::from(Span::styled(
-                crate::t!("popup.any_key"),
-                th.muted(),
-            )));
-            (crate::t!("popup.error_title"), lines, th.bad())
-        }
+        } => Dialog {
+            title: app.mask(title),
+            border: th.border(true),
+            top: Vec::new(),
+            // A link or a subscription URL is typed like a password in privacy mode: the length
+            // shows, the content does not (pasting still works).
+            body: text_lines(
+                &if app.privacy() && *purpose == crate::app::InputPurpose::Link {
+                    format!("{}_", "•".repeat(buf.chars().count()))
+                } else {
+                    format!("{buf}_")
+                },
+                inner_w,
+                th.text(),
+            ),
+            selected: None,
+            fill: false,
+            bottom: keys_line(crate::t!("popup.input_hint"), inner_w, th),
+        },
+        Popup::Confirm { text, .. } => Dialog {
+            title: crate::t!("popup.confirm_title"),
+            border: th.border(true),
+            top: Vec::new(),
+            body: text_lines(&app.mask(text), inner_w, th.text()),
+            selected: None,
+            fill: false,
+            bottom: keys_line(crate::t!("popup.confirm_hint"), inner_w, th),
+        },
+        Popup::Notice(msg) => Dialog {
+            title: crate::t!("popup.notice_title"),
+            border: th.warn(),
+            top: Vec::new(),
+            body: text_lines(&app.mask(msg), inner_w, th.warn()),
+            selected: None,
+            fill: false,
+            bottom: keys_line(crate::t!("popup.any_key"), inner_w, th),
+        },
+        Popup::Error(msg) => Dialog {
+            title: crate::t!("popup.error_title"),
+            border: th.bad(),
+            top: Vec::new(),
+            body: text_lines(&app.mask(msg), inner_w, th.bad()),
+            selected: None,
+            fill: false,
+            bottom: keys_line(crate::t!("popup.any_key"), inner_w, th),
+        },
     };
-    // Count wrapped lines, not just newlines: install commands are long.
-    let inner = w.saturating_sub(2).max(1);
-    let wrapped: u16 = lines
-        .iter()
-        .map(|l| (l.width() as u16).div_ceil(inner).max(1))
-        .sum();
-    let h = (wrapped + 2).clamp(7, area.height.saturating_sub(2));
+    draw(f, area, w, dialog, &app.popup_scroll, th);
+}
+
+fn draw(f: &mut Frame, area: Rect, w: u16, d: Dialog, scroll: &Scroll, th: &Theme) {
+    let top_h = d.top.len();
+    let bottom_h = d.bottom.len();
+    // Two rows of margin when the screen is tall enough; on a small one the whole height.
+    let max_h = if area.height >= 9 {
+        area.height - 2
+    } else {
+        area.height
+    };
+    let want = if d.fill {
+        max_h as usize
+    } else {
+        top_h + d.body.len() + bottom_h + 2
+    };
+    let h = (want as u16).clamp(7.min(max_h), max_h);
     let rect = centered(area, w, h);
     f.render_widget(Clear, rect);
+    let inner_h = h.saturating_sub(2) as usize;
+    // The keys keep their rows; the top lines come next; the body gets what is left.
+    let bottom_rows = bottom_h.min(inner_h);
+    let top_rows = top_h.min(inner_h - bottom_rows);
+    let body_rows = inner_h - bottom_rows - top_rows;
+    let mut block = th
+        .block(true)
+        .border_style(d.border)
+        .title(Span::styled(format!(" {} ", d.title), th.title()));
+    scroll.claim(&d.title);
+    let total = d.body.len();
+    let keep = d.selected.map(|s| (s, s));
+    let range = scroll.window(total, body_rows, keep);
+    if let Some(text) = scroll::more(&range, total) {
+        block = block.title_bottom(
+            Line::from(Span::styled(format!(" {text} "), th.muted())).right_aligned(),
+        );
+    }
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let [top_area, body_area, bottom_area] = Layout::vertical([
+        Constraint::Length(top_rows as u16),
+        Constraint::Length(body_rows as u16),
+        Constraint::Length(bottom_rows as u16),
+    ])
+    .areas(inner);
     f.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: false }).block(
-            th.block(false)
-                .title(Span::styled(format!(" {title} "), th.title()))
-                .border_style(border),
-        ),
-        rect,
+        ratatui::widgets::Paragraph::new(d.top.into_iter().take(top_rows).collect::<Vec<_>>()),
+        top_area,
+    );
+    scroll::draw_lines(f, body_area, d.body, &range, d.selected, th);
+    // The last lines of the keys are the ones that matter when there is no room for all.
+    let skip = bottom_h - bottom_rows;
+    f.render_widget(
+        ratatui::widgets::Paragraph::new(d.bottom.into_iter().skip(skip).collect::<Vec<_>>()),
+        bottom_area,
     );
 }
 
-/// The new version: the notes may be long, so they get the room that is left and are cut at the
-/// bottom, while the link and the hint keep their own rows.
-fn render_update(f: &mut Frame, area: Rect, w: u16, release: &crate::update::Release, th: &Theme) {
-    let rect = centered(area, w, area.height.saturating_sub(2).min(24));
-    let block = th
-        .block(false)
-        .title(Span::styled(
-            format!(
-                " {} ",
-                crate::t!("popup.update_title", version = release.version)
-            ),
-            th.title(),
-        ))
-        .border_style(th.border(true));
-    let inner = block.inner(rect);
-    f.render_widget(Clear, rect);
-    f.render_widget(block, rect);
-    let [notes, foot] = Layout::vertical([Constraint::Min(1), Constraint::Length(5)]).areas(inner);
-    let text = if release.notes.is_empty() {
-        Line::from(Span::styled(crate::t!("popup.update_no_notes"), th.muted())).into()
+/// The new version: the notes may be long, so they scroll in the room that is left, while the
+/// link and the hint keep their own rows.
+fn update_dialog(release: &crate::update::Release, width: usize, th: &Theme) -> Dialog {
+    let body = if release.notes.is_empty() {
+        text_lines(&crate::t!("popup.update_no_notes"), width, th.muted())
     } else {
-        ratatui::text::Text::from(
-            release
-                .notes
-                .lines()
-                .map(|l| Line::from(Span::styled(l.to_string(), th.text())))
-                .collect::<Vec<_>>(),
-        )
+        text_lines(&release.notes, width, th.text())
     };
-    f.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), notes);
-    f.render_widget(
-        Paragraph::new(vec![
-            Line::default(),
-            Line::from(Span::styled(
-                crate::t!("popup.update_page", url = release.url),
-                th.title(),
-            )),
-            Line::default(),
-            Line::from(Span::styled(crate::t!("popup.update_hint"), th.muted())),
-        ])
-        .wrap(Wrap { trim: false }),
-        foot,
-    );
+    let mut bottom = vec![Line::default()];
+    bottom.extend(text_lines(
+        &crate::t!("popup.update_page", url = release.url),
+        width,
+        th.title(),
+    ));
+    bottom.push(Line::default());
+    bottom.extend(text_lines(
+        &crate::t!("popup.update_hint"),
+        width,
+        th.muted(),
+    ));
+    Dialog {
+        title: crate::t!("popup.update_title", version = release.version),
+        border: th.border(true),
+        top: Vec::new(),
+        body,
+        selected: None,
+        fill: true,
+        bottom,
+    }
 }

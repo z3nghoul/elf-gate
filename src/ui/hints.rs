@@ -72,6 +72,13 @@ fn modal_hints(app: &AppState) -> Option<Vec<Hint>> {
                 plain("Enter", &crate::t!("hint.apply"), 1),
                 plain("Esc", &crate::t!("hint.cancel"), 1),
             ],
+            Popup::Processes { .. } => vec![
+                plain("↑↓", &crate::t!("hint.select"), 2),
+                plain("Enter", &crate::t!("hint.apply"), 1),
+                plain("Esc", &crate::t!("hint.clear_close"), 1),
+                plain("PgUp/PgDn", &crate::t!("hint.page"), 4),
+                plain(&crate::t!("hint.text"), &crate::t!("hint.filter"), 3),
+            ],
             Popup::Input { .. } => vec![
                 plain("Enter", &crate::t!("hint.confirm"), 1),
                 plain("Esc", &crate::t!("hint.cancel"), 1),
@@ -88,6 +95,7 @@ fn modal_hints(app: &AppState) -> Option<Vec<Hint>> {
                 ],
             },
             Popup::Update(_) => vec![
+                plain("↑↓", &crate::t!("hint.scroll"), 3),
                 plain("s", &crate::t!("hint.skip_update"), 1),
                 plain(&crate::t!("hint.any_key"), &crate::t!("hint.close"), 1),
             ],
@@ -161,12 +169,14 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
             continue;
         }
         let text: Option<String> = match a {
-            Action::Down => Some(if logs_focus {
+            Action::Down => Some(if logs_focus || app.screen == Screen::Help {
                 crate::t!("hint.scroll")
             } else {
                 crate::t!("hint.select")
             }),
-            Action::PageDown | Action::Bottom => logs_focus.then(|| b.short()),
+            Action::PageDown | Action::Bottom => (logs_focus
+                || !matches!(app.screen, Screen::Main | Screen::LogsFull))
+            .then(|| b.short()),
             Action::FocusNext => Some(if app.screen == Screen::Settings {
                 crate::t!("hint.section")
             } else {

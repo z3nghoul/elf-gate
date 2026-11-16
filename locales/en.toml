@@ -261,6 +261,9 @@ legend_grey = "the server is not supported or was refused by Xray; the reason is
 legend_grey_key = "grey, n/a"
 
 [hint]
+clear_close = "clear/close"
+filter = "filter"
+page = "page"
 open_sub = "open"
 run = "run"
 show_hidden = "show"
@@ -413,6 +416,9 @@ processes_title = "Running programs (file name as the core sees it)"
 rule_exists = "This rule already exists"
 rule_rejected = "Rule not added: {error}"
 select_hint = "j/k - choose, Enter - apply, Esc - cancel"
+processes_hint = "Type to filter, Enter - add, Esc - clear the filter, then close"
+processes_filter = "Filter"
+processes_none = "no matches"
 update_hint = "s - do not remind about this version, any other key - close"
 update_no_notes = "The release has no description."
 update_page = "Release page: {url}"
@@ -517,6 +523,10 @@ title = "Subscription"
 update = "Update now"
 url = "URL"
 user_agent = "User-Agent"
+
+[scroll]
+down = "↓ {n} more"
+up = "↑ {n} more"
 
 [section]
 appearance = "Appearance"

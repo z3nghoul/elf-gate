@@ -86,8 +86,6 @@ pub enum SelectKind {
     NewRuleKind,
     /// `u`: update all, or open one subscription (index 0 is "all", then `config.subscriptions`).
     Subscriptions,
-    /// Pick a running program for a process rule.
-    RuleProcess,
 }
 
 #[derive(Debug, Clone)]
@@ -107,11 +105,28 @@ pub enum Popup {
         text: String,
         kind: ConfirmKind,
     },
+    /// Pick a running program for a process rule: names sorted, equal names in one row with the
+    /// number of processes; typing filters the list.
+    Processes {
+        /// `(name, how many processes have it)`.
+        items: Vec<(String, usize)>,
+        filter: String,
+        /// Index in the filtered list.
+        selected: usize,
+    },
     Error(String),
     /// Information the user should read but that is not a failure.
     Notice(String),
     /// The new version: its notes and link; `s` stops the reminders about it.
     Update(crate::update::Release),
+}
+
+/// Indexes of the processes whose name contains the filter (case ignored).
+pub fn process_matches(items: &[(String, usize)], filter: &str) -> Vec<usize> {
+    let needle = filter.to_lowercase();
+    (0..items.len())
+        .filter(|&i| items[i].0.to_lowercase().contains(&needle))
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,6 +198,12 @@ pub struct AppState {
     /// The subscription of [`Screen::Subscription`] and the row on it.
     pub sub_name: String,
     pub sub_cursor: usize,
+    /// Where the scrolling screens and the pop-up list are (see `ui::scroll`).
+    pub help_scroll: crate::ui::scroll::Scroll,
+    pub settings_scroll: crate::ui::scroll::Scroll,
+    pub sub_scroll: crate::ui::scroll::Scroll,
+    pub rules_scroll: crate::ui::scroll::Scroll,
+    pub popup_scroll: crate::ui::scroll::Scroll,
     pub link: LinkState,
     /// Servers are listed by ping instead of in their own order.
     pub sorted_by_ping: bool,
@@ -232,6 +253,11 @@ impl AppState {
             settings_cursor: 0,
             sub_name: String::new(),
             sub_cursor: 0,
+            help_scroll: Default::default(),
+            settings_scroll: Default::default(),
+            sub_scroll: Default::default(),
+            rules_scroll: Default::default(),
+            popup_scroll: Default::default(),
             link: LinkState::Connecting,
             sorted_by_ping: false,
             show_hidden: std::collections::HashSet::new(),
@@ -535,7 +561,7 @@ impl AppState {
         }
     }
 
-    fn handle_key(&mut self, key: KeyEvent) {
+    pub(crate) fn handle_key(&mut self, key: KeyEvent) {
         if self.popup.is_some() {
             self.handle_popup_key(key);
             return;
@@ -594,8 +620,7 @@ impl AppState {
                         return;
                     }
                     KeyCode::Enter => {
-                        let option = options.get(selected).cloned().unwrap_or_default();
-                        self.apply_selection(kind, selected, option);
+                        self.apply_selection(kind, selected);
                         self.show_next_alert();
                         return;
                     }
@@ -603,6 +628,12 @@ impl AppState {
                         selected = (selected + 1).min(options.len() - 1)
                     }
                     KeyCode::Up | KeyCode::Char('k') => selected = selected.saturating_sub(1),
+                    KeyCode::PageDown => {
+                        selected = (selected + self.popup_scroll.page()).min(options.len() - 1)
+                    }
+                    KeyCode::PageUp => selected = selected.saturating_sub(self.popup_scroll.page()),
+                    KeyCode::Home | KeyCode::Char('g') => selected = 0,
+                    KeyCode::End | KeyCode::Char('G') => selected = options.len() - 1,
                     _ => {}
                 }
                 self.popup = Some(Popup::Select {
@@ -665,8 +696,72 @@ impl AppState {
                     self.popup = Some(Popup::Confirm { text, kind });
                 }
             }
+            Popup::Processes {
+                items,
+                mut filter,
+                mut selected,
+            } => {
+                let shown = process_matches(&items, &filter);
+                let last = shown.len().saturating_sub(1);
+                let page = self.popup_scroll.page();
+                match key.code {
+                    // First the filter, then the window.
+                    KeyCode::Esc if !filter.is_empty() => {
+                        filter.clear();
+                        selected = 0;
+                    }
+                    KeyCode::Esc => {
+                        self.show_next_alert();
+                        return;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(&i) = shown.get(selected) {
+                            let name = items[i].0.clone();
+                            self.rules_process_chosen(0, name);
+                            self.show_next_alert();
+                            return;
+                        }
+                    }
+                    KeyCode::Down => selected = (selected + 1).min(last),
+                    KeyCode::Up => selected = selected.saturating_sub(1),
+                    KeyCode::PageDown => selected = (selected + page).min(last),
+                    KeyCode::PageUp => selected = selected.saturating_sub(page),
+                    KeyCode::Home => selected = 0,
+                    KeyCode::End => selected = last,
+                    KeyCode::Backspace => {
+                        filter.pop();
+                        selected = 0;
+                    }
+                    KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        filter.push(c);
+                        selected = 0;
+                    }
+                    _ => {}
+                }
+                self.popup = Some(Popup::Processes {
+                    items,
+                    filter,
+                    selected,
+                });
+            }
             Popup::Error(_) | Popup::Notice(_) => self.show_next_alert(),
             Popup::Update(release) => {
+                // The notes can be longer than the window: these keys scroll them.
+                let page = self.popup_scroll.page() as isize;
+                let step = match key.code {
+                    KeyCode::Down => Some(1),
+                    KeyCode::Up => Some(-1),
+                    KeyCode::PageDown => Some(page),
+                    KeyCode::PageUp => Some(-page),
+                    KeyCode::Home => Some(isize::MIN / 2),
+                    KeyCode::End => Some(isize::MAX / 2),
+                    _ => None,
+                };
+                if let Some(step) = step {
+                    self.popup_scroll.by(step);
+                    self.popup = Some(Popup::Update(release));
+                    return;
+                }
                 // The S key of the physical keyboard, whatever the layout.
                 let skip = matches!(
                     key.code,
@@ -925,6 +1020,8 @@ impl AppState {
             self.settings_move(delta);
         } else if self.screen == Screen::Subscription {
             self.sub_move(delta);
+        } else if self.screen == Screen::Help {
+            self.help_scroll.by(delta);
         } else if self.logs_active() {
             self.scroll_logs(delta < 0, 1);
         } else if self.servers_active() {
@@ -934,6 +1031,14 @@ impl AppState {
 
     fn page(&mut self, up: bool) {
         let n = self.log_view_h.max(1);
+        let signed = |n: usize| if up { -(n as isize) } else { n as isize };
+        match self.screen {
+            Screen::Rules => return self.rules_move(signed(self.rules_scroll.page())),
+            Screen::Settings => return self.settings_move(signed(self.settings_scroll.page())),
+            Screen::Subscription => return self.sub_move(signed(self.sub_scroll.page())),
+            Screen::Help => return self.help_scroll.by(signed(self.help_scroll.page())),
+            _ => {}
+        }
         if self.logs_active() {
             self.scroll_logs(up, n);
         } else if self.servers_active() {
@@ -942,6 +1047,21 @@ impl AppState {
     }
 
     fn jump(&mut self, top: bool) {
+        let step = if top { isize::MIN / 2 } else { isize::MAX / 2 };
+        match self.screen {
+            Screen::Rules => return self.rules_move(step),
+            Screen::Settings => return self.settings_move(step),
+            Screen::Subscription => return self.sub_move(step),
+            Screen::Help => {
+                if top {
+                    self.help_scroll.to_top()
+                } else {
+                    self.help_scroll.to_bottom()
+                }
+                return;
+            }
+            _ => {}
+        }
         if self.logs_active() {
             if top {
                 self.scroll_logs(true, usize::MAX / 2);
@@ -1203,7 +1323,7 @@ impl AppState {
         self.send(Cmd::SetFragment { id, on });
     }
 
-    fn apply_selection(&mut self, kind: SelectKind, index: usize, option: String) {
+    fn apply_selection(&mut self, kind: SelectKind, index: usize) {
         match kind {
             SelectKind::Fingerprint(id) => {
                 let fp = index
@@ -1229,7 +1349,6 @@ impl AppState {
                     }
                 }
             },
-            SelectKind::RuleProcess => self.rules_process_chosen(index, option),
         }
     }
 
@@ -1348,11 +1467,18 @@ impl AppState {
                 if names.is_empty() {
                     self.popup = Some(Popup::Notice(crate::t!("popup.no_processes")));
                 } else {
-                    self.popup = Some(Popup::Select {
-                        title: crate::t!("popup.processes_title"),
-                        options: names,
+                    let mut items: Vec<(String, usize)> = Vec::new();
+                    for name in names {
+                        match items.iter_mut().find(|i| i.0 == name) {
+                            Some(i) => i.1 += 1,
+                            None => items.push((name, 1)),
+                        }
+                    }
+                    items.sort_by_cached_key(|i| (i.0.to_lowercase(), i.0.clone()));
+                    self.popup = Some(Popup::Processes {
+                        items,
+                        filter: String::new(),
                         selected: 0,
-                        kind: SelectKind::RuleProcess,
                     });
                 }
                 return;

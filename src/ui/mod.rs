@@ -20,6 +20,9 @@ mod popup;
 #[cfg(test)]
 mod privacy_tests;
 mod rules;
+pub mod scroll;
+#[cfg(test)]
+mod scroll_tests;
 mod servers;
 mod settings;
 mod statusbar;
@@ -32,7 +35,7 @@ mod theme_tests;
 mod update_tests;
 
 use crate::app::{AppState, Screen};
-use ratatui::layout::{Alignment, Constraint, Layout};
+use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 use theme::Theme;
@@ -119,7 +122,7 @@ pub fn render(f: &mut Frame, app: &mut AppState, ctx: &RenderCtx) {
         Screen::Rules => rules::render(f, body, app, &th, ctx),
         Screen::Settings => settings::render(f, body, app, &th, ctx),
         Screen::Subscription => subscription::render(f, body, app, &th),
-        Screen::Help => help::render(f, body, &th),
+        Screen::Help => help::render(f, body, &th, &app.help_scroll),
     }
     let framed = |f: &mut Frame, rect| {
         let block = th.block(false);
@@ -129,7 +132,12 @@ pub fn render(f: &mut Frame, app: &mut AppState, ctx: &RenderCtx) {
     };
     let inner = framed(f, status);
     statusbar::render(f, inner, app, &th);
-    popup::render(f, area, app, &th);
+    // The dialogs stay above the key bar.
+    let popup_area = Rect {
+        height: keys.y.saturating_sub(area.y),
+        ..area
+    };
+    popup::render(f, popup_area, app, &th);
     // Last, in its own rows: no panel and no dialog is drawn over it.
     let inner = framed(f, keys);
     hints::render(f, inner, app, &th);

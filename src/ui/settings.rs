@@ -1,10 +1,11 @@
 use crate::app::settings::section_of;
 use crate::app::{AppState, Screen, SettingId};
+use crate::ui::scroll::{self, Content};
 use crate::ui::theme::Theme;
 use crate::ui::RenderCtx;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, ListState, Paragraph};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
@@ -45,22 +46,27 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &Rende
         + 2;
     let cursor = app.settings_cursor.min(rows.len().saturating_sub(1));
     let mut selected_item = 0;
-    let items: Vec<ListItem> = layout(&rows)
+    let mut context_from = None;
+    let mut last_header = None;
+    let lines: Vec<Line> = layout(&rows)
         .iter()
         .enumerate()
         .map(|(n, item)| match item {
             Item::Header(sec) => {
+                last_header = Some(n);
                 let title = format!("─ {} ", sec.title());
                 let fill = "─".repeat(inner_w.saturating_sub(title.width()));
-                ListItem::new(Line::from(Span::styled(
+                Line::from(Span::styled(
                     format!("{title}{fill}"),
                     th.border(false)
                         .add_modifier(ratatui::style::Modifier::BOLD),
-                )))
+                ))
             }
             Item::Row(i) => {
                 if *i == cursor {
                     selected_item = n;
+                    // The first row of a section brings its header into view.
+                    context_from = last_header.filter(|h| *h + 1 == n);
                 }
                 let (id, label, value) = &rows[*i];
                 let value = if app.privacy() && *id == SettingId::Hwid {
@@ -68,25 +74,27 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &Rende
                 } else {
                     app.mask(value)
                 };
-                ListItem::new(Line::from(vec![
+                Line::from(vec![
                     Span::styled(crate::ui::text::fit(label, label_w), th.text()),
                     Span::styled(value, th.title()),
-                ]))
+                ])
             }
         })
         .collect();
-    let mut state = ListState::default();
-    state.select(Some(selected_item));
-    f.render_stateful_widget(
-        List::new(items)
-            .block(th.block(false).title(Span::styled(
-                format!(" {} ", crate::t!("panel.settings")),
-                th.title(),
-            )))
-            .highlight_symbol("> ")
-            .highlight_style(th.selected()),
+    scroll::render(
+        f,
         list_area,
-        &mut state,
+        th.block(false).title(Span::styled(
+            format!(" {} ", crate::t!("panel.settings")),
+            th.title(),
+        )),
+        Content {
+            lines,
+            selected: Some(selected_item),
+            context_from,
+        },
+        &app.settings_scroll,
+        th,
     );
     let tray = if app.tray {
         crate::t!("settings.tray_present")
