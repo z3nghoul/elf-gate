@@ -3,7 +3,7 @@
 use crate::model::server::{Ping, Server};
 use crate::storage::{CoreConfig, PingConfig};
 use crate::xray::config::{self, Plan};
-use crate::xray::process::{Core, StartOptions};
+use crate::xray::process::{Core, CoreError, StartOptions};
 use std::net::TcpListener;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -129,29 +129,37 @@ pub async fn url_probe(
     run_dir: &Path,
 ) -> Result<Duration, String> {
     let _permit = CORE_PERMITS.acquire().await.ok();
-    let (socks, http) = free_ports().ok_or_else(|| crate::t!("net.no_ports"))?;
-    let probe_core = CoreConfig {
-        socks_port: socks,
-        http_port: http,
-        log_level: "none".into(),
-        api_port: 0,
-        ..core.clone()
+    let mut retried = false;
+    let (socks, started) = loop {
+        let (socks, http) = free_ports().ok_or_else(|| crate::t!("net.no_ports"))?;
+        let probe_core = CoreConfig {
+            socks_port: socks,
+            http_port: http,
+            log_level: "none".into(),
+            api_port: 0,
+            ..core.clone()
+        };
+        let cfg = config::build_with(server, &probe_core, &Plan::proxy_default())
+            .map_err(|e| e.to_string())?;
+        let name = format!(
+            "probe-{}-{}.json",
+            std::process::id(),
+            PROBE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+        let (log_tx, _log_rx) = mpsc::unbounded_channel();
+        let opts = StartOptions {
+            binary: Some(binary.to_path_buf()),
+            config_name: Some(name.clone()),
+            ..StartOptions::default()
+        };
+        let started = Core::start_with(&probe_core, &cfg, run_dir, log_tx, &opts).await;
+        let _ = std::fs::remove_file(run_dir.join(&name));
+        match started {
+            // A port taken between `free_ports` and the start: ask for new ones, once.
+            Err(CoreError::PortBusy { .. }) if !retried => retried = true,
+            other => break (socks, other),
+        }
     };
-    let cfg = config::build_with(server, &probe_core, &Plan::proxy_default())
-        .map_err(|e| e.to_string())?;
-    let name = format!(
-        "probe-{}-{}.json",
-        std::process::id(),
-        PROBE_COUNTER.fetch_add(1, Ordering::Relaxed)
-    );
-    let (log_tx, _log_rx) = mpsc::unbounded_channel();
-    let opts = StartOptions {
-        binary: Some(binary.to_path_buf()),
-        config_name: Some(name.clone()),
-        ..StartOptions::default()
-    };
-    let started = Core::start_with(&probe_core, &cfg, run_dir, log_tx, &opts).await;
-    let _ = std::fs::remove_file(run_dir.join(&name));
     let core = started.map_err(|e| e.to_string())?;
     let result = request_through(socks, url, limit).await;
     core.stop().await;
