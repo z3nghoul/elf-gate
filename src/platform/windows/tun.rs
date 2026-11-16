@@ -49,10 +49,14 @@ unsafe fn sockaddr_to_ip(
 
 fn adapters() -> Vec<Adapter> {
     let mut size = 16 * 1024u32;
-    let mut buf: Vec<u8>;
+    // u64 elements: IP_ADAPTER_ADDRESSES_LH needs 8-byte alignment, a Vec<u8> gives only 1.
+    let mut buf: Vec<u64>;
+    // The adapter list can grow between calls, so the documented advice is a few attempts.
+    let mut attempts = 0;
     loop {
-        buf = vec![0u8; size as usize];
-        // SAFETY: `buf` is at least `size` bytes; the call fills it with a linked list of
+        attempts += 1;
+        buf = vec![0u64; size as usize / 8 + 1];
+        // SAFETY: `buf` holds at least `size` bytes; the call fills it with a linked list of
         // IP_ADAPTER_ADDRESSES and updates `size` when more room is needed.
         let rc = unsafe {
             GetAdaptersAddresses(
@@ -63,7 +67,7 @@ fn adapters() -> Vec<Adapter> {
                 &mut size,
             )
         };
-        if rc == ERROR_BUFFER_OVERFLOW.0 {
+        if rc == ERROR_BUFFER_OVERFLOW.0 && attempts < 3 {
             continue;
         }
         if rc != 0 {

@@ -64,3 +64,87 @@ impl ChildGuard for Guard {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::ChildGuard;
+    use std::time::{Duration, Instant};
+
+    fn alive(pid: u32) -> bool {
+        // A zombie is dead for our purposes.
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|s| {
+                s.rsplit_once(')')
+                    .map(|(_, r)| r.trim_start().starts_with(['R', 'S', 'D']))
+            })
+            .unwrap_or(false)
+    }
+
+    /// Starts `sleep` from a thread of its own, runs `then` there, and returns the pid.
+    fn spawn_from_thread(then: impl FnOnce() + Send + 'static) -> u32 {
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let pid = rt.block_on(async {
+                let mut cmd = tokio::process::Command::new("sleep");
+                cmd.arg("30").kill_on_drop(false);
+                Guard.prepare(&mut cmd);
+                cmd.spawn().unwrap().id().unwrap()
+            });
+            then();
+            pid
+        })
+        .join()
+        .unwrap()
+    }
+
+    /// Pins the constraint described in `prepare`: the core dies with the THREAD that started
+    /// it. Code that starts the core from a short-lived thread (for example `spawn_blocking`)
+    /// would lose it. If this test ever fails, PDEATHSIG semantics changed: revisit `prepare`.
+    #[test]
+    fn child_dies_with_the_thread_that_started_it() {
+        let pid = spawn_from_thread(|| ());
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while alive(pid) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!alive(pid), "child {pid} outlived its spawning thread");
+    }
+
+    #[test]
+    fn child_lives_while_its_thread_lives() {
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let (ptx, prx) = std::sync::mpsc::channel::<u32>();
+        let t = std::thread::spawn(move || {
+            let pid = spawn_from_thread_inline();
+            ptx.send(pid).unwrap();
+            rx.recv().unwrap();
+            pid
+        });
+        let pid = prx.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(alive(pid));
+        tx.send(()).unwrap();
+        t.join().unwrap();
+        let _ = kill(Pid::from_raw(pid as i32), Signal::SIGKILL);
+    }
+
+    fn spawn_from_thread_inline() -> u32 {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let pid = rt.block_on(async {
+            let mut cmd = tokio::process::Command::new("sleep");
+            cmd.arg("30");
+            Guard.prepare(&mut cmd);
+            cmd.spawn().unwrap().id().unwrap()
+        });
+        std::mem::forget(rt);
+        pid
+    }
+}

@@ -190,7 +190,18 @@ pub fn looks_like_missing_privileges(error_text: &str) -> bool {
     t.contains("operation not permitted")
         || t.contains("access is denied")
         || t.contains("required privilege")
+        || LOCALIZED_PRIVILEGE_ERRORS.iter().any(|m| t.contains(m))
 }
+
+/// Windows Go prints system errors in the system language (lower case, as matched).
+/// Samples to be confirmed on a Russian and a Ukrainian Windows (docs/windows-checklist.md).
+const LOCALIZED_PRIVILEGE_ERRORS: [&str; 5] = [
+    "\u{43e}\u{442}\u{43a}\u{430}\u{437}\u{430}\u{43d}\u{43e} \u{432} \u{434}\u{43e}\u{441}\u{442}\u{443}\u{43f}\u{435}",
+    "\u{43d}\u{435} \u{43e}\u{431}\u{43b}\u{430}\u{434}\u{430}\u{435}\u{442} \u{442}\u{440}\u{435}\u{431}\u{443}\u{435}\u{43c}\u{44b}\u{43c}",
+    "\u{432}\u{456}\u{434}\u{43c}\u{43e}\u{432}\u{43b}\u{435}\u{43d}\u{43e} \u{432} \u{434}\u{43e}\u{441}\u{442}\u{443}\u{43f}\u{456}",
+    "\u{434}\u{43e}\u{441}\u{442}\u{443}\u{43f} \u{437}\u{430}\u{431}\u{43e}\u{440}\u{43e}\u{43d}\u{435}\u{43d}\u{43e}",
+    "\u{43d}\u{435} \u{43c}\u{430}\u{454} \u{43d}\u{435}\u{43e}\u{431}\u{445}\u{456}\u{434}\u{43d}\u{438}\u{445}",
+];
 
 // ------------------------------------------------------------------- the plan
 
@@ -592,6 +603,15 @@ mod tests {
     fn privilege_errors_are_recognised() {
         assert!(looks_like_missing_privileges("Failed to start: app/proxyman/inbound: failed to start proxy > operation not permitted"));
         assert!(looks_like_missing_privileges("Access is denied."));
+        assert!(looks_like_missing_privileges(
+            "CreateFile wintun: Отказано в доступе."
+        ));
+        assert!(looks_like_missing_privileges(
+            "wintun: Клиент не обладает требуемым правом."
+        ));
+        assert!(looks_like_missing_privileges(
+            "wintun: Відмовлено в доступі."
+        ));
         assert!(!looks_like_missing_privileges("address already in use"));
     }
 

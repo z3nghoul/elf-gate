@@ -48,6 +48,17 @@ pub fn asset_env_disabled() -> bool {
     NO_ASSET_ENV.load(Ordering::Relaxed)
 }
 
+/// Windows Go prints system errors in the system language (lower case, as matched).
+/// Samples to be confirmed on a Russian and a Ukrainian Windows (docs/windows-checklist.md).
+pub const LOCALIZED_ENVIRONMENT_ERRORS: [&str; 6] = [
+    "\u{43e}\u{442}\u{43a}\u{430}\u{437}\u{430}\u{43d}\u{43e} \u{432} \u{434}\u{43e}\u{441}\u{442}\u{443}\u{43f}\u{435}",
+    "\u{43d}\u{435} \u{443}\u{434}\u{430}\u{435}\u{442}\u{441}\u{44f} \u{43d}\u{430}\u{439}\u{442}\u{438} \u{443}\u{43a}\u{430}\u{437}\u{430}\u{43d}\u{43d}\u{44b}\u{439}",
+    "\u{432}\u{456}\u{434}\u{43c}\u{43e}\u{432}\u{43b}\u{435}\u{43d}\u{43e} \u{432} \u{434}\u{43e}\u{441}\u{442}\u{443}\u{43f}\u{456}",
+    "\u{43d}\u{435} \u{432}\u{434}\u{430}\u{454}\u{442}\u{44c}\u{441}\u{44f} \u{437}\u{43d}\u{430}\u{439}\u{442}\u{438} \u{432}\u{43a}\u{430}\u{437}\u{430}\u{43d}\u{438}\u{439}",
+    "\u{434}\u{43e}\u{441}\u{442}\u{443}\u{43f} \u{437}\u{430}\u{431}\u{43e}\u{440}\u{43e}\u{43d}\u{435}\u{43d}\u{43e}",
+    "\u{43d}\u{435} \u{432}\u{434}\u{430}\u{43b}\u{43e}\u{441}\u{44f} \u{437}\u{43d}\u{430}\u{439}\u{442}\u{438} \u{432}\u{43a}\u{430}\u{437}\u{430}\u{43d}\u{438}\u{439}",
+];
+
 /// A refusal caused by the environment (a file the core cannot see), not by the config: it says
 /// nothing about the server and must not be cached.
 pub fn is_environmental(reason: &str) -> bool {
@@ -55,6 +66,7 @@ pub fn is_environmental(reason: &str) -> bool {
     r.contains("stat ")
         || r.contains("no such file")
         || r.contains("permission denied")
+        || LOCALIZED_ENVIRONMENT_ERRORS.iter().any(|m| r.contains(m))
         || r.contains("geoip.dat")
         || r.contains("geosite.dat")
 }
@@ -310,6 +322,14 @@ echo "Configuration OK."; exit 0"#,
             assert!(text.contains(needle), "{needle} missing in: {text}");
         }
         assert!(is_environmental(&text));
+        for text in [
+            "open C:\\xray\\geoip.dat: Отказано в доступе.",
+            "CreateFile x.json: Не удается найти указанный файл.",
+            "open x.json: Відмовлено в доступі.",
+            "open x.json: Не вдається знайти вказаний файл.",
+        ] {
+            assert!(is_environmental(text), "{text}");
+        }
         assert!(!asset_env_disabled());
         let _ = std::fs::remove_dir_all(dir);
     }
