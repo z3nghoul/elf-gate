@@ -875,13 +875,12 @@ mod tests {
         let id = a.subs[0].servers[0].id;
         a.connect(id);
         let error = loop {
-            match tokio::time::timeout(Duration::from_secs(20), rx.recv())
+            let event = tokio::time::timeout(Duration::from_secs(20), rx.recv())
                 .await
                 .expect("no event")
-                .expect("channel closed")
-            {
-                BgEvent::CoreFailed { error, .. } => break error,
-                _ => {}
+                .expect("channel closed");
+            if let BgEvent::CoreFailed { error, .. } = event {
+                break error;
             }
         };
         let (uk, en) = (
