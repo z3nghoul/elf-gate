@@ -524,6 +524,7 @@ no_device = "Немає /dev/net/tun. Завантажте модуль: sudo mo
 path_to = "/шлях/до"
 path_to_xray = "/шлях/до/xray"
 rp_filter = "Попередження: на інтерфейсі {iface} увімкнено суворий rp_filter (1). Трафік «напряму» через TUN може зависати.\nПеревірте і, за потреби, виконайте самі:\n  sudo sysctl -w net.ipv4.conf.all.rp_filter=2 net.ipv4.conf.{iface}.rp_filter=2\nelf-gate ці налаштування не змінює."
+blocked_locally = "Windows заборонила elf-gate підключитися до {addr} - перевірте брандмауер, антивірус та інші VPN-програми (ExitLag тощо)"
 stale_killed = "зупинено Xray від попереднього запуску, інтерфейс {iface} прибрано"
 stale_killed_left = "зупинено Xray від попереднього запуску, але інтерфейс {iface} ще видно (має зникнути сам)"
 stale_left = "інтерфейс {iface} залишився від попереднього запуску, а процес уже не знайдено: видаліть його вручну (ip link del {iface})"

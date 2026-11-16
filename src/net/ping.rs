@@ -46,6 +46,17 @@ fn millis(d: Duration) -> u32 {
     d.as_millis().min(u128::from(u32::MAX)) as u32
 }
 
+/// What a failed connect says about the server. Both "cannot bind to the interface" and "this
+/// machine refused the connection" (10013: firewall, antivirus, another VPN) say nothing about
+/// it: "unknown", never a verdict.
+fn failure_of(e: &std::io::Error, bound: bool) -> Ping {
+    if crate::tun::is_local_block(e) || (bound && e.kind() == std::io::ErrorKind::Unsupported) {
+        Ping::Unknown
+    } else {
+        Ping::Error
+    }
+}
+
 async fn connect_once(
     host: &str,
     port: u16,
@@ -67,16 +78,7 @@ async fn connect_once(
     };
     match tokio::time::timeout(limit, connect).await {
         Ok(Ok(_)) => Ok(started.elapsed()),
-        // Cannot bind to the interface: say "unknown", never a number that is not a measurement.
-        Ok(Err(e))
-            if matches!(
-                e.kind(),
-                std::io::ErrorKind::Unsupported | std::io::ErrorKind::PermissionDenied
-            ) && interface.is_some() =>
-        {
-            Err(Ping::Unknown)
-        }
-        Ok(Err(_)) => Err(Ping::Error),
+        Ok(Err(e)) => Err(failure_of(&e, interface.is_some())),
         Err(_) => Err(Ping::Timeout),
     }
 }
@@ -272,6 +274,19 @@ pub async fn search_fingerprint(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_local_block_is_unknown_never_an_error_verdict() {
+        use super::{failure_of, Ping};
+        let blocked = std::io::Error::from_raw_os_error(10013);
+        assert_eq!(failure_of(&blocked, false), Ping::Unknown);
+        assert_eq!(failure_of(&blocked, true), Ping::Unknown);
+        let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        assert_eq!(failure_of(&refused, false), Ping::Error);
+        let unsupported = std::io::Error::from(std::io::ErrorKind::Unsupported);
+        assert_eq!(failure_of(&unsupported, true), Ping::Unknown);
+        assert_eq!(failure_of(&unsupported, false), Ping::Error);
+    }
+
     use super::*;
     use tokio::net::TcpListener as TokioListener;
 

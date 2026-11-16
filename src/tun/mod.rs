@@ -6,7 +6,7 @@ use crate::platform::{RpFilter, TunHost};
 use crate::storage::{Config, StateStore, TunState};
 use crate::xray::config::{Plan, TunPlan};
 use crate::xray::process::resolve_binary;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::net::TcpStream;
@@ -348,17 +348,27 @@ pub async fn resolve_map(hosts: &[String]) -> std::collections::HashMap<String, 
     out
 }
 
+/// WSAEACCES (10013) and EACCES: this machine refused the connection (a firewall, an antivirus,
+/// another VPN's network filter); the server itself was never asked, so it says nothing about it.
+pub fn is_local_block(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(10013)
+}
+
+/// The words for a refused connect: a local block (never the server's fault) or a plain failure.
+fn connect_failure(ip: IpAddr, port: u16, e: &std::io::Error) -> String {
+    if is_local_block(e) {
+        crate::t!("tun.blocked_locally", addr = SocketAddr::new(ip, port))
+    } else {
+        crate::t!("tun.unreachable", ip = ip, port = port, error = e)
+    }
+}
+
 /// Is the server reachable over TCP at all? Must run before the tunnel is up: afterwards
 /// this machine's own connections would go through the tunnel.
 pub async fn tcp_reachable(ip: IpAddr, port: u16, limit: Duration) -> Result<(), String> {
     match timeout(limit, TcpStream::connect((ip, port))).await {
         Ok(Ok(_)) => Ok(()),
-        Ok(Err(e)) => Err(crate::t!(
-            "tun.unreachable",
-            ip = ip,
-            port = port,
-            error = e
-        )),
+        Ok(Err(e)) => Err(connect_failure(ip, port, &e)),
         Err(_) => Err(crate::t!(
             "tun.unreachable_timeout",
             ip = ip,
@@ -751,6 +761,23 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("недоступен"), "{err}");
+    }
+
+    #[test]
+    fn error_10013_is_a_local_block_not_an_unreachable_server() {
+        let ip: IpAddr = "203.0.113.5".parse().unwrap();
+        let blocked = std::io::Error::from_raw_os_error(10013);
+        let local = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        for e in [&blocked, &local] {
+            assert!(is_local_block(e));
+            let text = connect_failure(ip, 443, e);
+            assert!(text.contains("203.0.113.5:443"), "{text}");
+            assert!(text.contains("брандмауэр"), "{text}");
+            assert!(!text.contains("недоступен"), "{text}");
+        }
+        let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        assert!(!is_local_block(&refused));
+        assert!(connect_failure(ip, 443, &refused).contains("недоступен"));
     }
 
     #[test]

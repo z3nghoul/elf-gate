@@ -524,6 +524,7 @@ no_device = "There is no /dev/net/tun. Load the module: sudo modprobe tun (or en
 path_to = "/path/to"
 path_to_xray = "/path/to/xray"
 rp_filter = "Warning: strict rp_filter (1) is on for the interface {iface}. \"Direct\" traffic through TUN may hang.\nCheck and, if needed, run this yourself:\n  sudo sysctl -w net.ipv4.conf.all.rp_filter=2 net.ipv4.conf.{iface}.rp_filter=2\nelf-gate does not change these settings."
+blocked_locally = "Windows blocked elf-gate from connecting to {addr} - check the firewall, antivirus and other VPN programs (ExitLag etc.)"
 stale_killed = "the Xray from the previous run was stopped, interface {iface} removed"
 stale_killed_left = "the Xray from the previous run was stopped, but interface {iface} is still visible (it should disappear by itself)"
 stale_left = "interface {iface} was left from the previous run and its process is no longer found: remove it by hand (ip link del {iface})"
