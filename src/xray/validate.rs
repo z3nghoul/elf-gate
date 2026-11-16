@@ -149,10 +149,10 @@ pub async fn check_config(binary: &Path, cfg: &serde_json::Value, run_dir: &Path
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
     let write = || -> std::io::Result<()> {
-        std::fs::create_dir_all(run_dir)?;
-        std::fs::write(
+        crate::storage::create_private_dir(run_dir)?;
+        crate::storage::write_private(
             &file,
-            serde_json::to_vec_pretty(cfg).map_err(std::io::Error::other)?,
+            &serde_json::to_vec_pretty(cfg).map_err(std::io::Error::other)?,
         )
     };
     if let Err(e) = write() {

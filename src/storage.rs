@@ -1,7 +1,7 @@
 use crate::model::rule::{RoutingMode, Rule, TrafficMode};
 use crate::model::server::ServerRole;
 use crate::model::subscription::SubscriptionInfo;
-use crate::platform::ProxySnapshot;
+use crate::platform::{Privileges, ProxySnapshot};
 use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -485,7 +485,10 @@ impl Storage {
 /// Gives files that root created under `sudo` back to the invoking user (best effort),
 /// walking up to, but not including, their home directory.
 pub fn fix_owner(path: &Path) {
-    let privileges = crate::platform::privileges();
+    fix_owner_with(&*crate::platform::privileges(), path);
+}
+
+fn fix_owner_with(privileges: &dyn Privileges, path: &Path) {
     let Some(user) = privileges.invoking_user() else {
         return;
     };
@@ -494,32 +497,84 @@ pub fn fix_owner(path: &Path) {
         if !p.starts_with(&user.home) || p == user.home {
             break;
         }
-        let _ = privileges.chown_to_invoking_user(p);
+        // A link is never handed over: it could point at a file outside the user's tree.
+        if !is_symlink(p) {
+            let _ = privileges.chown_to_invoking_user(p);
+        }
         current = p.parent();
     }
 }
 
 /// Same for everything below `dir` (logs are created lazily by the logger).
 pub fn fix_owner_tree(dir: &Path) {
-    fix_owner(dir);
+    fix_owner_tree_with(&*crate::platform::privileges(), dir);
+}
+
+fn fix_owner_tree_with(privileges: &dyn Privileges, dir: &Path) {
+    fix_owner_with(privileges, dir);
     for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
         let p = entry.path();
-        if p.is_dir() {
-            fix_owner_tree(&p);
-        } else {
-            fix_owner(&p);
+        match fs::symlink_metadata(&p) {
+            Ok(m) if m.file_type().is_symlink() => {}
+            Ok(m) if m.is_dir() => fix_owner_tree_with(privileges, &p),
+            Ok(_) => fix_owner_with(privileges, &p),
+            Err(_) => {}
         }
+    }
+}
+
+fn is_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
+}
+
+/// Creates `dir` (and missing parents) readable by the owner only: the files inside hold links
+/// with UUIDs and subscription tokens. An already existing `dir` is tightened too.
+pub fn create_private_dir(dir: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)?;
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(dir)
+    }
+}
+
+/// Writes `bytes` to `path` so that only the owner can read them (an existing file is
+/// tightened as well). On Windows the user profile already provides this.
+pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        file.write_all(bytes)
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, bytes)
     }
 }
 
 fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        create_private_dir(parent)?;
     }
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
-    fs::write(&tmp, text)?;
+    write_private(&tmp, text.as_bytes())?;
     fs::rename(&tmp, path)?;
     fix_owner(path);
     Ok(())
@@ -533,6 +588,82 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("elf-gate-test-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         dir
+    }
+
+    struct RecordingPrivileges {
+        home: PathBuf,
+        chowned: std::sync::Mutex<Vec<PathBuf>>,
+    }
+
+    impl Privileges for RecordingPrivileges {
+        fn is_elevated(&self) -> bool {
+            true
+        }
+        fn invoking_user(&self) -> Option<crate::platform::InvokingUser> {
+            Some(crate::platform::InvokingUser {
+                name: "user".into(),
+                home: self.home.clone(),
+                uid: 1000,
+                gid: 1000,
+            })
+        }
+        fn chown_to_invoking_user(
+            &self,
+            path: &Path,
+        ) -> Result<(), crate::platform::PlatformError> {
+            self.chowned.lock().unwrap().push(path.to_path_buf());
+            Ok(())
+        }
+        fn relaunch_elevated(&self, _: &[String]) -> Result<(), crate::platform::PlatformError> {
+            Ok(())
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_fix_skips_symlinks() {
+        let home = temp_dir("symlink-home");
+        let state = home.join("state");
+        let outside = home.join("outside");
+        fs::create_dir_all(state.join("logs")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(state.join("logs/real.log"), "x").unwrap();
+        fs::write(outside.join("secret"), "x").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret"), state.join("logs/file-link")).unwrap();
+        std::os::unix::fs::symlink(&outside, state.join("dir-link")).unwrap();
+
+        let privileges = RecordingPrivileges {
+            home: home.clone(),
+            chowned: Default::default(),
+        };
+        fix_owner_tree_with(&privileges, &state);
+        let chowned = privileges.chowned.lock().unwrap().clone();
+        assert!(chowned.contains(&state.join("logs/real.log")));
+        assert!(chowned.iter().all(|p| !p.starts_with(&outside)));
+        assert!(!chowned.contains(&state.join("logs/file-link")));
+        assert!(!chowned.contains(&state.join("dir-link")));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saved_files_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("private");
+        fs::create_dir_all(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        // An older, world-readable file is tightened on the next save.
+        let st = Storage::new(&dir);
+        fs::write(dir.join("config.toml"), "").unwrap();
+        fs::set_permissions(dir.join("config.toml"), fs::Permissions::from_mode(0o644)).unwrap();
+        st.save(&Config::default()).unwrap();
+        st.save_subscriptions(&SubscriptionCache::default())
+            .unwrap();
+        let mode = |p: PathBuf| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(dir.clone()), 0o700);
+        assert_eq!(mode(dir.join("config.toml")), 0o600);
+        assert_eq!(mode(st.cache_path()), 0o600);
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

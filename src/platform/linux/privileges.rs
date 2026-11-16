@@ -1,5 +1,6 @@
 use crate::platform::{InvokingUser, PlatformError, Privileges};
-use nix::unistd::{chown, geteuid, Gid, Uid, User};
+use nix::fcntl::AtFlags;
+use nix::unistd::{fchownat, geteuid, Gid, Uid, User};
 use std::path::Path;
 
 pub struct Elevation;
@@ -29,10 +30,13 @@ impl Privileges for Elevation {
         let Some(user) = self.invoking_user() else {
             return Ok(());
         };
-        chown(
+        // Never follow a link: the target may lie outside the user's own files.
+        fchownat(
+            nix::fcntl::AT_FDCWD,
             path,
             Some(Uid::from_raw(user.uid)),
             Some(Gid::from_raw(user.gid)),
+            AtFlags::AT_SYMLINK_NOFOLLOW,
         )
         .map_err(|e| PlatformError::Failed(format!("chown {}: {e}", path.display())))
     }

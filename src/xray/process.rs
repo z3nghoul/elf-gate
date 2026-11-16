@@ -307,9 +307,9 @@ impl Core {
 
         let config_path = run_dir.join(opts.config_name.as_deref().unwrap_or("xray.json"));
         let write = || -> io::Result<()> {
-            std::fs::create_dir_all(run_dir)?;
+            crate::storage::create_private_dir(run_dir)?;
             let text = serde_json::to_vec_pretty(config).map_err(io::Error::other)?;
-            std::fs::write(&config_path, text)
+            crate::storage::write_private(&config_path, &text)
         };
         write().map_err(|source| CoreError::WriteConfig {
             path: config_path.clone(),
