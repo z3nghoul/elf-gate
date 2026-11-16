@@ -386,13 +386,7 @@ mod tests {
     use super::*;
     use crate::platform::mock::MockTunHost;
     use crate::storage::{Config, StateStore};
-
-    fn temp_dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("elf-gate-tun-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
+    use crate::test_support::TempDir;
 
     /// A config whose TUN core points at a real (empty) file.
     fn config_with_core(dir: &Path) -> Config {
@@ -407,7 +401,7 @@ mod tests {
 
     #[test]
     fn missing_geodata_next_to_the_core_blocks_with_install_commands() {
-        let dir = temp_dir("geodata");
+        let dir = TempDir::new("geodata");
         let cfg = config_with_core(&dir);
         std::fs::remove_file(dir.join("geoip.dat")).unwrap();
         let p = preflight(&MockTunHost::healthy(), &cfg);
@@ -451,7 +445,7 @@ mod tests {
 
     #[test]
     fn healthy_host_gives_a_setup() {
-        let dir = temp_dir("ok");
+        let dir = TempDir::new("ok");
         let cfg = config_with_core(&dir);
         let pf = preflight(&MockTunHost::healthy(), &cfg);
         assert!(pf.problems.is_empty(), "{:?}", pf.problems);
@@ -463,7 +457,7 @@ mod tests {
 
     #[test]
     fn each_blocking_problem_is_reported_and_blocks_the_setup() {
-        let dir = temp_dir("problems");
+        let dir = TempDir::new("problems");
         let cfg = config_with_core(&dir);
         type Check = fn(&Problem) -> bool;
         let cases: Vec<(MockTunHost, Check)> = vec![
@@ -542,7 +536,7 @@ mod tests {
 
     #[test]
     fn strict_rp_filter_warns_but_does_not_block() {
-        let dir = temp_dir("rp");
+        let dir = TempDir::new("rp");
         let cfg = config_with_core(&dir);
         let host = MockTunHost {
             rp: Some(RpFilter {
@@ -581,7 +575,7 @@ mod tests {
 
     #[test]
     fn capability_supervisor_is_requested_when_the_host_needs_it() {
-        let dir = temp_dir("sup");
+        let dir = TempDir::new("sup");
         let cfg = config_with_core(&dir);
         let host = MockTunHost {
             supervisor: true,
@@ -679,8 +673,8 @@ mod tests {
 
     #[test]
     fn cleanup_kills_a_stale_core_and_clears_the_state() {
-        let dir = temp_dir("stale");
-        let store = StateStore::new(&dir);
+        let dir = TempDir::new("stale");
+        let store = StateStore::new(dir.path());
         mark_up(&store, 4242, "elfgate0");
         let host = MockTunHost::healthy();
         let note = cleanup_stale(&host, &store).unwrap();
@@ -696,8 +690,8 @@ mod tests {
 
     #[test]
     fn cleanup_reports_a_left_interface_without_a_process() {
-        let dir = temp_dir("stale-iface");
-        let store = StateStore::new(&dir);
+        let dir = TempDir::new("stale-iface");
+        let store = StateStore::new(dir.path());
         mark_up(&store, 1, "elfgate0");
         let host = MockTunHost {
             kill_result: false,

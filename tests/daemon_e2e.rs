@@ -2,6 +2,8 @@
 //! no desktop, so the system proxy is never touched), driven over the local link.
 #![cfg(unix)]
 
+mod common;
+
 use elf_gate::proto::{decode, encode, Cmd, Conn, Update, View};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -30,20 +32,22 @@ impl Env {
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join("config.toml"), text).unwrap();
     }
-    fn daemon(&self) -> Child {
-        Command::new(env!("CARGO_BIN_EXE_elf-gated"))
-            .env_clear()
-            .env("PATH", std::env::var("PATH").unwrap_or_default())
-            .env("HOME", &self.dir)
-            .env("XDG_CONFIG_HOME", self.dir.join("config"))
-            .env("XDG_STATE_HOME", self.dir.join("state"))
-            .env("XDG_RUNTIME_DIR", self.dir.join("run"))
-            .env("ELF_GATE_SOCKET", self.socket())
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap()
+    fn daemon(&self) -> Guard {
+        Guard(
+            Command::new(env!("CARGO_BIN_EXE_elf-gated"))
+                .env_clear()
+                .env("PATH", std::env::var("PATH").unwrap_or_default())
+                .env("HOME", &self.dir)
+                .env("XDG_CONFIG_HOME", self.dir.join("config"))
+                .env("XDG_STATE_HOME", self.dir.join("state"))
+                .env("XDG_RUNTIME_DIR", self.dir.join("run"))
+                .env("ELF_GATE_SOCKET", self.socket())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        )
     }
 }
 
@@ -54,6 +58,15 @@ impl Drop for Env {
 }
 
 struct Guard(Child);
+
+impl Guard {
+    /// Kills the process now (the test checks what happens next); `drop` then does nothing.
+    fn kill(&mut self) {
+        self.0.kill().unwrap();
+        self.0.wait().unwrap();
+    }
+}
+
 impl Drop for Guard {
     fn drop(&mut self) {
         let _ = self.0.kill();
@@ -117,7 +130,7 @@ async fn hello_view_single_instance_and_private_socket() {
     use std::os::unix::fs::PermissionsExt;
     let env = Env::new("single");
     env.config("");
-    let _d = Guard(env.daemon());
+    let _d = env.daemon();
     let stream = wait_socket(&env.socket()).await;
     let mode = std::fs::metadata(env.socket())
         .unwrap()
@@ -164,7 +177,7 @@ async fn hello_view_single_instance_and_private_socket() {
     let mut second = env.daemon();
     let status = tokio::time::timeout(
         Duration::from_secs(20),
-        tokio::task::spawn_blocking(move || second.wait().unwrap()),
+        tokio::task::spawn_blocking(move || second.0.wait().unwrap()),
     )
     .await
     .expect("the second background process must exit at once")
@@ -177,28 +190,33 @@ async fn hello_view_single_instance_and_private_socket() {
     .await;
 }
 
-fn xray() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("XRAY_PATH") {
-        return Some(PathBuf::from(p));
-    }
-    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("bin/xray");
-    p.is_file().then_some(p)
-}
-
-fn pgrep_count(pattern: &str) -> usize {
-    let out = Command::new("pgrep")
-        .args(["-fc", pattern])
-        .output()
-        .unwrap();
-    String::from_utf8_lossy(&out.stdout)
-        .trim()
-        .parse()
-        .unwrap_or(0)
+/// Number of running processes whose command line contains `pattern` (what `pgrep -fc` counts,
+/// read from /proc so procps is not needed).
+fn process_count(pattern: &str) -> usize {
+    std::fs::read_dir("/proc")
+        .unwrap()
+        .flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .bytes()
+                .all(|b| b.is_ascii_digit())
+        })
+        .filter_map(|e| std::fs::read(e.path().join("cmdline")).ok())
+        .filter(|raw| {
+            let args: Vec<_> = raw
+                .split(|b| *b == 0)
+                .filter(|a| !a.is_empty())
+                .map(String::from_utf8_lossy)
+                .collect();
+            args.join(" ").contains(pattern)
+        })
+        .count()
 }
 
 #[tokio::test]
 async fn vpn_outlives_the_interface_and_dies_with_the_daemon() {
-    let Some(xray) = xray() else {
+    let Some(xray) = common::xray_bin() else {
         eprintln!("SKIPPED: no Xray binary");
         return;
     };
@@ -260,11 +278,14 @@ async fn vpn_outlives_the_interface_and_dies_with_the_daemon() {
 
     // The interface goes away: the VPN stays.
     drop(c);
-    tokio::time::sleep(Duration::from_millis(800)).await;
-    assert!(
-        std::net::TcpStream::connect(("127.0.0.1", socks)).is_ok(),
-        "core must survive"
-    );
+    let watch_until = Instant::now() + Duration::from_millis(1500);
+    while Instant::now() < watch_until {
+        assert!(
+            std::net::TcpStream::connect(("127.0.0.1", socks)).is_ok(),
+            "core must survive"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 
     // A new interface sees the live connection.
     let mut c2 = Client::new(UnixStream::connect(env.socket()).await.unwrap());
@@ -272,13 +293,12 @@ async fn vpn_outlives_the_interface_and_dies_with_the_daemon() {
         .await;
 
     // kill -9 on the daemon: the core must not be left behind.
-    let before = pgrep_count(&format!(
+    let before = process_count(&format!(
         "xray run -c {}",
         env.dir.join("state/elf-gate/run/xray.json").display()
     ));
     assert!(before >= 1, "the core is running");
-    daemon.kill().unwrap();
-    daemon.wait().unwrap();
+    daemon.kill();
     let end = Instant::now() + Duration::from_secs(15);
     while std::net::TcpStream::connect(("127.0.0.1", socks)).is_ok() {
         assert!(Instant::now() < end, "the core outlived a killed daemon");
@@ -290,7 +310,7 @@ async fn vpn_outlives_the_interface_and_dies_with_the_daemon() {
 async fn autostart_is_written_into_the_isolated_config_and_removed_again() {
     let env = Env::new("autostart");
     env.config("");
-    let _d = Guard(env.daemon());
+    let _d = env.daemon();
     let mut c = Client::new(wait_socket(&env.socket()).await);
     c.until("a view", |_| true).await;
     let entry = env.dir.join("config/autostart/elf-gate.desktop");

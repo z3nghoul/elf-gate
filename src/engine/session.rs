@@ -580,14 +580,8 @@ mod tests {
     use super::*;
     use crate::model::rule::RoutingMode;
     use crate::platform::mock::MockTunHost;
+    use crate::test_support::TempDir;
     use tokio::sync::mpsc::unbounded_channel;
-
-    fn temp_dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("elf-gate-session-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
 
     /// An app in TUN mode with one real server and a scripted host. The TUN core path points at
     /// a file that exists unless `core_exists` is false.
@@ -612,7 +606,7 @@ mod tests {
 
     #[tokio::test]
     async fn first_tun_start_offers_the_discord_preset() {
-        let dir = temp_dir("offer");
+        let dir = TempDir::new("offer");
         let (mut a, id) = tun_app(MockTunHost::healthy(), true, &dir);
         a.connect(id);
         let alerts = a.alerts();
@@ -631,7 +625,7 @@ mod tests {
 
     #[tokio::test]
     async fn accepting_the_offer_switches_to_include_with_discord_only() {
-        let dir = temp_dir("accept");
+        let dir = TempDir::new("accept");
         // The core is missing, so after the offer the start stops at the problem popup
         // instead of spawning anything.
         let (mut a, id) = tun_app(MockTunHost::healthy(), false, &dir);
@@ -662,7 +656,7 @@ mod tests {
 
     #[tokio::test]
     async fn declining_the_offer_keeps_everything_through_the_vpn() {
-        let dir = temp_dir("decline");
+        let dir = TempDir::new("decline");
         let (mut a, id) = tun_app(MockTunHost::healthy(), false, &dir);
         a.handle_cmd(Cmd::Answer {
             ask: Ask::PresetOffer(id),
@@ -679,7 +673,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_offer_is_not_repeated_once_answered_or_once_rules_exist() {
-        let dir = temp_dir("once");
+        let dir = TempDir::new("once");
         let (mut a, _) = tun_app(MockTunHost::healthy(), true, &dir);
         assert!(a.tun_first_run());
         a.config.ui.tun_intro_done = true;
@@ -695,7 +689,7 @@ mod tests {
 
     #[tokio::test]
     async fn blocking_problems_stop_the_start_with_instructions() {
-        let dir = temp_dir("blocking");
+        let dir = TempDir::new("blocking");
         let cases: Vec<(MockTunHost, bool, &str)> = vec![
             (
                 MockTunHost::healthy(),
@@ -748,7 +742,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_privileges_get_the_right_dialog_for_the_platform() {
-        let dir = temp_dir("privileges");
+        let dir = TempDir::new("privileges");
         let host = MockTunHost {
             can_create_tun: Some(false),
             ..MockTunHost::healthy()
@@ -815,7 +809,7 @@ mod tests {
 
     #[tokio::test]
     async fn strict_rp_filter_is_a_notice_and_does_not_stop_the_start() {
-        let dir = temp_dir("rp");
+        let dir = TempDir::new("rp");
         let host = MockTunHost {
             rp: Some(crate::platform::RpFilter {
                 interface: "wlan0".into(),
@@ -854,8 +848,8 @@ mod tests {
 
     #[tokio::test]
     async fn tun_toggle_switches_mode_and_remembers_it() {
-        let dir = temp_dir("toggle");
-        let storage = Storage::new(&dir);
+        let dir = TempDir::new("toggle");
+        let storage = Storage::new(dir.path());
         let (tx, _rx) = unbounded_channel();
         let mut a = Engine::build(tx, Config::default(), Some(storage.clone()), false);
         assert_eq!(a.mode, Mode::Proxy);
@@ -870,7 +864,7 @@ mod tests {
 
     #[tokio::test]
     async fn cli_tun_connects_to_the_last_server_or_explains() {
-        let dir = temp_dir("cli");
+        let dir = TempDir::new("cli");
         let (mut a, _) = tun_app(MockTunHost::healthy(), false, &dir);
         a.mode = Mode::Proxy;
         a.config.ui.last_server = None;
@@ -888,7 +882,7 @@ mod tests {
 
     #[tokio::test]
     async fn auto_connect_is_off_by_default_and_uses_the_last_mode_when_on() {
-        let dir = temp_dir("auto");
+        let dir = TempDir::new("auto");
         let (mut a, id) = tun_app(MockTunHost::healthy(), false, &dir);
         a.mode = Mode::Proxy;
         a.config.mode.traffic = Mode::Tun;
@@ -915,8 +909,8 @@ mod tests {
 
     #[tokio::test]
     async fn startup_cleans_up_a_core_left_by_a_crash() {
-        let dir = temp_dir("cleanup");
-        let store = StateStore::new(&dir);
+        let dir = TempDir::new("cleanup");
+        let store = StateStore::new(dir.path());
         tun::mark_up(&store, 777, "elfgate0");
         let host = Arc::new(MockTunHost::healthy());
         let (tx, _rx) = unbounded_channel();
@@ -933,7 +927,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_missing_capability_with_process_rules_warns_once_and_does_not_stop_the_start() {
-        let dir = temp_dir("caps");
+        let dir = TempDir::new("caps");
         let host = MockTunHost {
             caps: Some("/x/xray cap_net_admin=ep".into()),
             ..MockTunHost::healthy()

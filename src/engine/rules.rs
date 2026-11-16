@@ -78,19 +78,20 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::platform::mock::MockTunHost;
+    use crate::test_support::TempDir;
     use tokio::sync::mpsc::unbounded_channel;
 
-    fn engine(tag: &str) -> Engine {
-        let dir = std::env::temp_dir().join(format!("elf-gate-rules-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+    fn engine(tag: &str) -> (Engine, TempDir) {
+        let dir = TempDir::new(tag);
         let (tx, _rx) = unbounded_channel();
-        Engine::build(tx, Config::default(), Some(Storage::new(dir)), false)
-            .with_tun_host(Arc::new(MockTunHost::healthy()))
+        let engine = Engine::build(tx, Config::default(), Some(Storage::new(dir.path())), false)
+            .with_tun_host(Arc::new(MockTunHost::healthy()));
+        (engine, dir)
     }
 
     #[tokio::test]
     async fn presets_and_rules_toggle_and_persist() {
-        let mut a = engine("toggle");
+        let (mut a, _dir) = engine("toggle");
         a.rules_toggle(RuleRef::Preset("discord-only".into()));
         assert!(a
             .config
@@ -122,7 +123,7 @@ mod tests {
 
     #[tokio::test]
     async fn bad_and_duplicate_rules_are_alerts_not_changes() {
-        let mut a = engine("bad");
+        let (mut a, _dir) = engine("bad");
         a.submit_rule(RuleKind::Ip, "10.0.0.0/33".into());
         a.submit_rule(RuleKind::Domain, "ok.example".into());
         a.submit_rule(RuleKind::Domain, "ok.example".into());
@@ -134,7 +135,7 @@ mod tests {
 
     #[tokio::test]
     async fn routing_mode_changes_and_a_live_core_is_offered_a_restart() {
-        let mut a = engine("routing");
+        let (mut a, _dir) = engine("routing");
         a.rules_set_routing(RoutingMode::Include);
         assert_eq!(a.config.mode.routing, RoutingMode::Include);
         assert!(a.alerts().is_empty(), "nothing runs: no question");
@@ -142,7 +143,7 @@ mod tests {
 
     #[tokio::test]
     async fn direct_rules_extend_the_proxy_bypass_list() {
-        let mut a = engine("bypass");
+        let (mut a, _dir) = engine("bypass");
         a.config
             .rules
             .push(Rule::new(RuleKind::Domain, "example.com"));

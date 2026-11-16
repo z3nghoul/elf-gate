@@ -209,13 +209,7 @@ impl ProxyHandle {
 mod tests {
     use super::*;
     use crate::platform::mock::{MockProxy, SharedMock};
-    use std::path::PathBuf;
-
-    fn temp_dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("elf-gate-proxy-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        d
-    }
+    use crate::test_support::TempDir;
 
     fn addr() -> ProxyAddr {
         ProxyAddr {
@@ -225,10 +219,13 @@ mod tests {
         }
     }
 
-    fn setup(tag: &str, user: &[(&str, &str)]) -> (Arc<MockProxy>, ProxyController, PathBuf) {
-        let dir = temp_dir(tag);
+    fn setup(tag: &str, user: &[(&str, &str)]) -> (Arc<MockProxy>, ProxyController, TempDir) {
+        let dir = TempDir::new(tag);
         let mock = Arc::new(MockProxy::with_user_settings(user));
-        let ctrl = ProxyController::new(Box::new(SharedMock(mock.clone())), StateStore::new(&dir));
+        let ctrl = ProxyController::new(
+            Box::new(SharedMock(mock.clone())),
+            StateStore::new(dir.path()),
+        );
         (mock, ctrl, dir)
     }
 
@@ -286,7 +283,10 @@ mod tests {
         drop(ctrl); // the process "dies": nothing was restored
 
         // A new process starts with a fresh controller over the same state dir.
-        let ctrl2 = ProxyController::new(Box::new(SharedMock(mock.clone())), StateStore::new(&dir));
+        let ctrl2 = ProxyController::new(
+            Box::new(SharedMock(mock.clone())),
+            StateStore::new(dir.path()),
+        );
         let note = ctrl2.recover().unwrap().expect("must report the recovery");
         assert!(note.contains("127.0.0.1:10809"), "{note}");
         assert_eq!(mock.snapshot(), before);

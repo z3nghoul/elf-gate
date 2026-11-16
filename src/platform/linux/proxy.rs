@@ -300,7 +300,7 @@ impl SystemProxy for Proxy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use crate::test_support::TempDir;
 
     #[test]
     fn gvariant_strings_are_escaped() {
@@ -323,13 +323,6 @@ mod tests {
             .collect()
     }
 
-    fn temp_dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("elf-gate-live-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
     /// Live test against the real `kwriteconfig`, but with `XDG_CONFIG_HOME` pointing to a
     /// temp dir so the user's own `kioslaverc` is never touched.
     #[test]
@@ -342,7 +335,7 @@ mod tests {
             eprintln!("SKIPPED: no kwriteconfig");
             return;
         };
-        let home = temp_dir("kde");
+        let home = TempDir::new("kde");
         let proxy = Proxy {
             desktop: Desktop::Kde { read, write },
             env: vec![("XDG_CONFIG_HOME".into(), home.display().to_string())],
@@ -388,7 +381,7 @@ mod tests {
             eprintln!("SKIPPED: no gsettings");
             return;
         }
-        let home = temp_dir("gnome");
+        let home = TempDir::new("gnome");
         let proxy = Proxy {
             desktop: Desktop::Gnome,
             env: vec![

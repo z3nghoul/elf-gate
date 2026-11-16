@@ -19,6 +19,8 @@ pub mod redact;
 pub mod storage;
 pub mod sync;
 pub mod sysproxy;
+#[cfg(test)]
+pub mod test_support;
 pub mod tray;
 pub mod tun;
 pub mod ui;

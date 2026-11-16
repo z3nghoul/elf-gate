@@ -93,12 +93,28 @@ fn the_source_has_no_cyrillic_outside_locales_and_tests() {
             continue;
         }
         let text = std::fs::read_to_string(&f).unwrap();
-        // Inline test modules sit at the end of a file.
+        // Skip inline test modules: `#[cfg(test)]` then `mod name {` up to the matching
+        // closing brace at the same indent. A `mod name;` line opens no block.
         let lines: Vec<&str> = text.lines().collect();
-        let end = (0..lines.len().saturating_sub(1))
-            .find(|&i| lines[i].trim() == "#[cfg(test)]" && lines[i + 1].starts_with("mod "))
-            .unwrap_or(lines.len());
-        for (n, line) in lines[..end].iter().enumerate() {
+        let mut end_of_test_block: Option<String> = None;
+        for (n, line) in lines.iter().enumerate() {
+            if let Some(closer) = &end_of_test_block {
+                if *line == closer {
+                    end_of_test_block = None;
+                }
+                continue;
+            }
+            let opens_test_block = line.trim() == "#[cfg(test)]"
+                && lines.get(n + 1).is_some_and(|next| {
+                    let next = next.trim_start();
+                    (next.starts_with("mod ") || next.starts_with("pub mod "))
+                        && next.trim_end().ends_with('{')
+                });
+            if opens_test_block {
+                let indent = &line[..line.len() - line.trim_start().len()];
+                end_of_test_block = Some(format!("{indent}}}"));
+                continue;
+            }
             if line.chars().any(|c| ('\u{400}'..='\u{4ff}').contains(&c)) {
                 bad.push(format!("{}:{}: {}", f.display(), n + 1, line.trim()));
             }

@@ -57,26 +57,7 @@ macro_rules! require_xray {
     };
 }
 
-/// A unique temp directory removed on drop (also while a panic unwinds).
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("elf-gate-it-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        TempDir(dir)
-    }
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
+use crate::test_support::TempDir;
 
 /// Next port to try. Tests run in parallel, and ports from `bind(0)` come from the ephemeral
 /// range that outgoing connections of other tests use as source ports, so they collide

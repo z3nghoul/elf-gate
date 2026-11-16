@@ -135,30 +135,26 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TempDir;
     use tokio::sync::mpsc::unbounded_channel;
 
     const REALITY: &str =
         "vless://u@h.example.com:443?security=reality&sni=x.org&pbk=K&sid=ab&fp=chrome#R";
 
-    fn app_with(links: &[&str]) -> (Engine, Vec<u64>) {
-        let dir = std::env::temp_dir().join(format!(
-            "elf-gate-opts-{}-{}",
-            std::process::id(),
-            links.len()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
+    fn app_with(links: &[&str]) -> (Engine, Vec<u64>, TempDir) {
+        let dir = TempDir::new("opts");
         let (tx, _rx) = unbounded_channel();
-        let mut a = Engine::build(tx, Config::default(), Some(Storage::new(dir)), false);
+        let mut a = Engine::build(tx, Config::default(), Some(Storage::new(dir.path())), false);
         for l in links {
             a.add_link((*l).into());
         }
         let ids = a.subs[0].servers.iter().map(|s| s.id).collect();
-        (a, ids)
+        (a, ids, dir)
     }
 
     #[tokio::test]
     async fn only_one_server_holds_each_role() {
-        let (mut a, ids) = app_with(&[
+        let (mut a, ids, _dir) = app_with(&[
             REALITY,
             &REALITY
                 .replace("#R", "#R2")
@@ -191,7 +187,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_backup_is_found_for_the_primary_only() {
-        let (mut a, ids) = app_with(&[
+        let (mut a, ids, _dir) = app_with(&[
             REALITY,
             &REALITY
                 .replace("#R", "#R2")
@@ -208,7 +204,7 @@ mod tests {
 
     #[tokio::test]
     async fn roles_and_fragmentation_survive_a_restart_and_leave_the_link_alone() {
-        let (mut a, ids) = app_with(&[REALITY]);
+        let (mut a, ids, _dir) = app_with(&[REALITY]);
         a.set_role(ids[0], Some(ServerRole::Backup));
         a.set_fragment(ids[0], true);
         let storage = a.storage.clone().unwrap();
@@ -228,7 +224,7 @@ mod tests {
 
     #[tokio::test]
     async fn fragmentation_is_for_tls_and_reality_only() {
-        let (mut a, _) = app_with(&["vless://u@10.0.0.5:443?security=none#Plain"]);
+        let (mut a, _, _dir) = app_with(&["vless://u@10.0.0.5:443?security=none#Plain"]);
         let id = a.subs[0].servers[0].id;
         a.set_fragment(id, true);
         assert!(a

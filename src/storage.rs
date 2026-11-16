@@ -603,12 +603,7 @@ fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("elf-gate-test-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        dir
-    }
+    use crate::test_support::TempDir;
 
     struct RecordingPrivileges {
         home: PathBuf,
@@ -642,7 +637,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn owner_fix_skips_symlinks() {
-        let home = temp_dir("symlink-home");
+        let home = TempDir::new("symlink-home");
         let state = home.join("state");
         let outside = home.join("outside");
         fs::create_dir_all(state.join("logs")).unwrap();
@@ -653,7 +648,7 @@ mod tests {
         std::os::unix::fs::symlink(&outside, state.join("dir-link")).unwrap();
 
         let privileges = RecordingPrivileges {
-            home: home.clone(),
+            home: home.to_path_buf(),
             chowned: Default::default(),
         };
         fix_owner_tree_with(&privileges, &state);
@@ -669,18 +664,18 @@ mod tests {
     #[test]
     fn saved_files_are_private() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = temp_dir("private");
+        let dir = TempDir::new("private");
         fs::create_dir_all(&dir).unwrap();
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
         // An older, world-readable file is tightened on the next save.
-        let st = Storage::new(&dir);
+        let st = Storage::new(dir.path());
         fs::write(dir.join("config.toml"), "").unwrap();
         fs::set_permissions(dir.join("config.toml"), fs::Permissions::from_mode(0o644)).unwrap();
         st.save(&Config::default()).unwrap();
         st.save_subscriptions(&SubscriptionCache::default())
             .unwrap();
         let mode = |p: PathBuf| fs::metadata(p).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(dir.clone()), 0o700);
+        assert_eq!(mode(dir.to_path_buf()), 0o700);
         assert_eq!(mode(dir.join("config.toml")), 0o600);
         assert_eq!(mode(st.cache_path()), 0o600);
         let _ = fs::remove_dir_all(dir);
@@ -688,14 +683,14 @@ mod tests {
 
     #[test]
     fn missing_file_gives_defaults() {
-        let st = Storage::new(temp_dir("missing"));
+        let st = Storage::new(TempDir::new("missing").path());
         assert_eq!(st.load().unwrap(), Config::default());
     }
 
     #[test]
     fn save_then_load_roundtrip() {
-        let dir = temp_dir("roundtrip");
-        let st = Storage::new(&dir);
+        let dir = TempDir::new("roundtrip");
+        let st = Storage::new(dir.path());
         let mut cfg = Config::default();
         cfg.servers.push(ServerEntry {
             link: "vless://u@h:443#Имя 🚀".into(),
@@ -714,10 +709,10 @@ mod tests {
 
     #[test]
     fn partial_file_uses_defaults_for_the_rest() {
-        let dir = temp_dir("partial");
+        let dir = TempDir::new("partial");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("config.toml"), "[core]\nsocks_port = 2000\n").unwrap();
-        let cfg = Storage::new(&dir).load().unwrap();
+        let cfg = Storage::new(dir.path()).load().unwrap();
         assert_eq!(cfg.core.socks_port, 2000);
         assert_eq!(cfg.core.http_port, 10809);
         let _ = fs::remove_dir_all(dir);
@@ -725,11 +720,11 @@ mod tests {
 
     #[test]
     fn broken_file_is_an_error() {
-        let dir = temp_dir("broken");
+        let dir = TempDir::new("broken");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("config.toml"), "this is [not toml").unwrap();
         assert!(matches!(
-            Storage::new(&dir).load(),
+            Storage::new(dir.path()).load(),
             Err(StorageError::Parse { .. })
         ));
         let _ = fs::remove_dir_all(dir);
