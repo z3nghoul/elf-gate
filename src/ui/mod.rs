@@ -25,6 +25,8 @@ mod settings;
 mod statusbar;
 pub mod text;
 pub mod theme;
+#[cfg(test)]
+mod update_tests;
 
 use crate::app::{AppState, Screen};
 use ratatui::layout::{Alignment, Constraint, Layout};

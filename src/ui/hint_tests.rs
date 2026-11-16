@@ -392,7 +392,9 @@ fn every_shown_key_is_the_key_the_table_maps_to_that_action() {
     }
     // The popup keys the bar promises really close the popup.
     let mut a = app(&[REALITY]);
-    a.on_link(LinkEvent::Update(Update::Alert(Alert::Notice("x".into()))));
+    a.on_link(LinkEvent::Update(crate::proto::Update::Alert(
+        Alert::Notice("x".into()),
+    )));
     assert!(matches!(a.popup, Some(Popup::Notice(_))));
     press(&mut a, KeyCode::Char('z'));
     assert!(a.popup.is_none(), "any key closes a notice");

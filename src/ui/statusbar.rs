@@ -134,6 +134,12 @@ fn segments(app: &AppState, th: &Theme) -> Vec<Segment> {
             th.text(),
         )]);
     }
+    if let Some(release) = &app.update {
+        out.push(vec![Span::styled(
+            crate::t!("status.update_available", version = release.version),
+            th.good(),
+        )]);
+    }
     if let Some(msg) = &app.status {
         out.push(vec![Span::styled(app.mask(msg), th.warn())]);
     }

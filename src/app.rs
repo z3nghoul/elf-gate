@@ -101,6 +101,8 @@ pub enum Popup {
     Error(String),
     /// Information the user should read but that is not a failure.
     Notice(String),
+    /// The new version: its notes and link; `s` stops the reminders about it.
+    Update(crate::update::Release),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +146,8 @@ pub struct AppState {
     pub process_unresolved: u64,
     pub tray: bool,
     pub autostart: bool,
+    /// A newer release is out (the status line says so, the `n` key shows the details).
+    pub update: Option<crate::update::Release>,
     /// Demo data and fake numbers are enabled (debug builds with `ELF_GATE_DEMO=1`).
     pub mock: bool,
     // ---- interface-only state ----
@@ -196,6 +200,7 @@ impl AppState {
             process_unresolved: 0,
             tray: false,
             autostart: false,
+            update: None,
             mock: false,
             selected: 0,
             list_state: ListState::default(),
@@ -333,6 +338,7 @@ impl AppState {
             process_unresolved,
             tray,
             autostart,
+            update,
             mock,
             ..
         } = view;
@@ -359,6 +365,7 @@ impl AppState {
         self.process_unresolved = process_unresolved;
         self.tray = tray;
         self.autostart = autostart;
+        self.update = update;
         self.mock = mock;
         self.got_view = true;
         self.clamp_selection();
@@ -638,6 +645,17 @@ impl AppState {
                 }
             }
             Popup::Error(_) | Popup::Notice(_) => self.show_next_alert(),
+            Popup::Update(release) => {
+                // The S key of the physical keyboard, whatever the layout.
+                let skip = matches!(
+                    key.code,
+                    KeyCode::Char(c) if crate::action::qwerty(c).eq_ignore_ascii_case(&'s')
+                );
+                if skip {
+                    self.send(Cmd::SkipUpdate(release.version));
+                }
+                self.show_next_alert();
+            }
         }
     }
 
@@ -730,6 +748,11 @@ impl AppState {
             Filter => self.filtering = true,
             Fingerprint => self.open_fingerprint_menu(),
             Privacy => self.toggle_privacy(),
+            Update => {
+                if let Some(release) = self.update.clone() {
+                    self.popup = Some(Popup::Update(release));
+                }
+            }
             ShowHidden => self.toggle_hidden(),
             Role => self.open_role_menu(),
             Fragment => self.toggle_fragment(),

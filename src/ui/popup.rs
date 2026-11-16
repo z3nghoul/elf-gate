@@ -18,6 +18,10 @@ fn centered(area: Rect, w: u16, h: u16) -> Rect {
 pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     let Some(popup) = &app.popup else { return };
     let w = area.width.saturating_sub(6).clamp(30, 96);
+    if let Popup::Update(release) = popup {
+        render_update(f, area, w, release, th);
+        return;
+    }
     let (title, lines, border) = match popup {
         Popup::Select {
             title,
@@ -75,6 +79,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             ],
             th.border(true),
         ),
+        // Drawn apart above.
+        Popup::Update(_) => return,
         Popup::Notice(msg) => {
             let mut lines: Vec<Line> = msg
                 .lines()
@@ -116,5 +122,49 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 .border_style(border),
         ),
         rect,
+    );
+}
+
+/// The new version: the notes may be long, so they get the room that is left and are cut at the
+/// bottom, while the link and the hint keep their own rows.
+fn render_update(f: &mut Frame, area: Rect, w: u16, release: &crate::update::Release, th: &Theme) {
+    let rect = centered(area, w, area.height.saturating_sub(2).min(24));
+    let block = Block::bordered()
+        .title(Span::styled(
+            format!(
+                " {} ",
+                crate::t!("popup.update_title", version = release.version)
+            ),
+            th.title(),
+        ))
+        .border_style(th.border(true));
+    let inner = block.inner(rect);
+    f.render_widget(Clear, rect);
+    f.render_widget(block, rect);
+    let [notes, foot] = Layout::vertical([Constraint::Min(1), Constraint::Length(5)]).areas(inner);
+    let text = if release.notes.is_empty() {
+        Line::from(Span::styled(crate::t!("popup.update_no_notes"), th.muted())).into()
+    } else {
+        ratatui::text::Text::from(
+            release
+                .notes
+                .lines()
+                .map(|l| Line::from(Span::styled(l.to_string(), th.text())))
+                .collect::<Vec<_>>(),
+        )
+    };
+    f.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), notes);
+    f.render_widget(
+        Paragraph::new(vec![
+            Line::default(),
+            Line::from(Span::styled(
+                crate::t!("popup.update_page", url = release.url),
+                th.title(),
+            )),
+            Line::default(),
+            Line::from(Span::styled(crate::t!("popup.update_hint"), th.muted())),
+        ])
+        .wrap(Wrap { trim: false }),
+        foot,
     );
 }

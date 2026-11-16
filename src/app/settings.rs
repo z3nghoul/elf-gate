@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::proto::Setting;
-use crate::storage::PingMode;
+use crate::storage::{PingMode, UpdateChannel};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettingId {
@@ -25,6 +25,8 @@ pub enum SettingId {
     ManageFirewall,
     AutoConnect,
     Autostart,
+    CheckUpdates,
+    UpdateChannel,
     Hwid,
     Theme,
     Language,
@@ -148,6 +150,19 @@ impl AppState {
                 onoff(self.autostart),
             ),
             (
+                SettingId::CheckUpdates,
+                crate::t!("setting.check_updates"),
+                onoff(c.updates.check),
+            ),
+            (
+                SettingId::UpdateChannel,
+                crate::t!("setting.update_channel"),
+                match c.updates.channel {
+                    UpdateChannel::Stable => crate::t!("setting.channel_stable"),
+                    UpdateChannel::Test => crate::t!("setting.channel_test"),
+                },
+            ),
+            (
                 SettingId::Hwid,
                 crate::t!("setting.hwid"),
                 c.device.hwid.clone(),
@@ -203,6 +218,11 @@ impl AppState {
             SettingId::ManageFirewall => Setting::ManageFirewall(!c.tun.manage_firewall),
             SettingId::AutoConnect => Setting::AutoConnect(!c.ui.auto_connect),
             SettingId::Autostart => Setting::Autostart(!self.autostart),
+            SettingId::CheckUpdates => Setting::CheckUpdates(!c.updates.check),
+            SettingId::UpdateChannel => Setting::UpdateChannel(match c.updates.channel {
+                UpdateChannel::Stable => UpdateChannel::Test,
+                UpdateChannel::Test => UpdateChannel::Stable,
+            }),
             SettingId::PingMode => Setting::PingMode(match c.ping.mode {
                 PingMode::Tcp => PingMode::Url,
                 PingMode::Url => PingMode::Tcp,

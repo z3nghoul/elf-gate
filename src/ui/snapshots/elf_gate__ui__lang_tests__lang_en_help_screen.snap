@@ -15,6 +15,7 @@ expression: frame
 │p                 ping all servers                                                                                    │
 │o                 sort by ping                                                                                        │
 │u                 update the subscriptions                                                                            │
+│n                 show the new version: release notes and the link                                                    │
 │a                 add a server or a subscription by link                                                              │
 │x                 delete the selected item                                                                            │
 │r                 rules screen                                                                                        │
@@ -24,7 +25,6 @@ expression: frame
 │Ctrl+P            privacy mode (hide addresses, keys and links on the screen)                                         │
 │f                 change the TLS fingerprint of the selected server                                                   │
 │h                 subscription: show hidden servers (restore: x on a hidden one)                                      │
-│b                 server role: primary / backup (automatic failover)                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │● Disconnected | PROXY                                                                                                │

@@ -87,6 +87,10 @@ fn modal_hints(app: &AppState) -> Option<Vec<Hint>> {
                     plain("n/Esc", &crate::t!("hint.no"), 1),
                 ],
             },
+            Popup::Update(_) => vec![
+                plain("s", &crate::t!("hint.skip_update"), 1),
+                plain(&crate::t!("hint.any_key"), &crate::t!("hint.close"), 1),
+            ],
             Popup::Error(_) | Popup::Notice(_) => vec![plain(
                 &crate::t!("hint.any_key"),
                 &crate::t!("hint.close"),
@@ -288,6 +292,7 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
             | Action::Quit
             | Action::QuitAll
             | Action::Help
+            | Action::Update
             | Action::Redraw => None,
             Action::DebugPanic => None,
         };

@@ -17,6 +17,8 @@ pub enum Action {
     PingAll,
     SortPing,
     UpdateSubs,
+    /// Show the new version (release notes and the link), when there is one.
+    Update,
     Add,
     Delete,
     Rules,
@@ -238,6 +240,16 @@ pub const BINDINGS: &[Binding] = &[
         bar: "u",
         prio: 5,
         scopes: scope::MAIN,
+    },
+    Binding {
+        label: "n",
+        action: Action::Update,
+        keys: &[(KeyCode::Char('n'), N)],
+        hidden: false,
+        bar: "n",
+        prio: 8,
+        // Not on the key bar: the status line names the key when there is something to show.
+        scopes: 0,
     },
     Binding {
         label: "a",
