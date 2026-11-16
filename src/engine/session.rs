@@ -57,7 +57,30 @@ where
             Err(e) => log(format!("could not clean up the TUN adapter {name}: {e}")),
         }
     }
-    start().await
+    let first = start().await;
+    let Some(name) = tun_name.filter(|_| host.adapter_lifecycle_managed()) else {
+        return first;
+    };
+    match first {
+        // The previous adapter is still in the way: one clean-up, one more try.
+        Err(f) if tun::looks_like_adapter_exists(&f.message) => {
+            log(format!(
+                "the TUN adapter {name} is in the way ({}), cleaning up",
+                f.message
+            ));
+            if let Err(e) = tun::free_adapter(host, name, wait, poll).await {
+                log(format!("could not clean up the TUN adapter {name}: {e}"));
+            }
+            match start().await {
+                Err(again) if tun::looks_like_adapter_exists(&again.message) => Err(Failure {
+                    message: crate::t!("eng.tun_adapter_stuck", raw = again.message),
+                    needs_privileges: false,
+                }),
+                other => other,
+            }
+        }
+        other => other,
+    }
 }
 
 /// What `start_core` needs.
@@ -1004,6 +1027,109 @@ mod tests {
         );
         assert_eq!(log[2], "start");
         assert_eq!(*host.removed_names.lock().unwrap(), ["elfgate0"]);
+    }
+
+    fn failure(text: &str) -> Failure {
+        Failure {
+            message: text.into(),
+            needs_privileges: false,
+        }
+    }
+
+    const EXISTS: &str = "Failed to setup adapter (problem code: 0x1F, ntstatus: 0xC0000035): Cannot create a file when that file already exists. (Code 0x000000B7)";
+
+    /// One clean-up and one more try; the second try works.
+    #[tokio::test]
+    async fn the_adapter_error_gets_one_cleanup_and_a_second_try() {
+        use std::sync::Mutex;
+        let log: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let host = MockTunHost {
+            managed_adapter: true,
+            stale_devices: Mutex::new(1),
+            ..MockTunHost::healthy()
+        };
+        let mut tries = 0;
+        let r: Result<u8, Failure> = start_after_stop(
+            async {},
+            Some("elfgate0"),
+            &host,
+            tiny(),
+            |t| log.lock().unwrap().push(t),
+            || {
+                tries += 1;
+                let n = tries;
+                async move {
+                    if n == 1 {
+                        Err(failure(EXISTS))
+                    } else {
+                        Ok(7)
+                    }
+                }
+            },
+        )
+        .await;
+        assert_eq!(r.unwrap(), 7);
+        assert_eq!(tries, 2);
+        // Cleaned up before the first start and again after its failure.
+        assert_eq!(host.removed_names.lock().unwrap().len(), 2);
+        assert!(log.lock().unwrap().iter().any(|l| l.contains("in the way")));
+    }
+
+    /// Still failing: the user gets the advice and the raw log, and there is no third try.
+    #[tokio::test]
+    async fn a_second_failure_gives_the_advice_with_the_raw_log_under_it() {
+        let host = MockTunHost {
+            managed_adapter: true,
+            ..MockTunHost::healthy()
+        };
+        let mut tries = 0;
+        let r: Result<u8, Failure> = crate::i18n::scoped(
+            crate::i18n::Lang::Ru,
+            start_after_stop(
+                async {},
+                Some("elfgate0"),
+                &host,
+                tiny(),
+                |_| {},
+                || {
+                    tries += 1;
+                    async { Err(failure(EXISTS)) }
+                },
+            ),
+        )
+        .await;
+        assert_eq!(tries, 2, "exactly one retry");
+        let message = r.unwrap_err().message;
+        let advice = message.find("езагрузите").expect("advice to restart");
+        assert!(message.contains("PROXY"), "{message}");
+        let raw_at = message.find(EXISTS).expect("the raw log is kept");
+        assert!(raw_at > advice, "the advice comes first, the log under it");
+    }
+
+    /// Other errors are not retried, and Linux never retries.
+    #[tokio::test]
+    async fn other_errors_and_unmanaged_hosts_are_not_retried() {
+        for (managed, text) in [(true, "port busy"), (false, EXISTS)] {
+            let host = MockTunHost {
+                managed_adapter: managed,
+                ..MockTunHost::healthy()
+            };
+            let mut tries = 0;
+            let r: Result<u8, Failure> = start_after_stop(
+                async {},
+                Some("elfgate0"),
+                &host,
+                tiny(),
+                |_| {},
+                || {
+                    tries += 1;
+                    async move { Err(failure(text)) }
+                },
+            )
+            .await;
+            assert_eq!(tries, 1, "{text} managed={managed}");
+            assert_eq!(r.unwrap_err().message, text);
+        }
     }
 
     /// Linux and the proxy mode: nothing is waited for, nothing is removed.

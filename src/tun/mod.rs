@@ -202,6 +202,29 @@ pub fn looks_like_missing_privileges(error_text: &str) -> bool {
             })
 }
 
+/// The adapter of the previous core is still there: Wintun answers "file already exists"
+/// (0xC0000035 / 0xB7), in the system language on Windows (lower case, as matched).
+pub fn looks_like_adapter_exists(error_text: &str) -> bool {
+    let t = error_text.to_lowercase();
+    t.contains("0xc0000035")
+        || t.contains("0x000000b7")
+        || t.contains("cannot create a file when that file already exists")
+        || (t.contains(ADAPTER_EXISTS_RU[0]) && t.contains(ADAPTER_EXISTS_RU[1]))
+        || (t.contains(ADAPTER_EXISTS_UK[0])
+            && (t.contains(ADAPTER_EXISTS_UK[1]) || t.contains(ADAPTER_EXISTS_UK[2])))
+}
+
+/// "create a file" and "already exists" in Russian and Ukrainian system messages.
+const ADAPTER_EXISTS_RU: [&str; 2] = [
+    "\u{441}\u{43e}\u{437}\u{434}\u{430}\u{442}\u{44c} \u{444}\u{430}\u{439}\u{43b}",
+    "\u{443}\u{436}\u{435} \u{441}\u{443}\u{449}\u{435}\u{441}\u{442}\u{432}\u{443}\u{435}\u{442}",
+];
+const ADAPTER_EXISTS_UK: [&str; 3] = [
+    "\u{441}\u{442}\u{432}\u{43e}\u{440}\u{438}\u{442}\u{438} \u{444}\u{430}\u{439}\u{43b}",
+    "\u{432}\u{436}\u{435} \u{456}\u{441}\u{43d}\u{443}\u{454}",
+    "\u{443}\u{436}\u{435} \u{456}\u{441}\u{43d}\u{443}\u{454}",
+];
+
 /// Windows Go prints system errors in the system language (lower case, as matched).
 /// Samples to be confirmed on a Russian and a Ukrainian Windows (docs/windows-checklist.md).
 const LOCALIZED_PRIVILEGE_ERRORS: [&str; 5] = [
@@ -623,6 +646,30 @@ mod tests {
         cfg.tun.xray_path = "  ".into();
         cfg.core.xray_path = "C:/tools/xray.exe".into();
         assert_eq!(tun_core_setting(&cfg), "C:/tools/xray.exe");
+    }
+
+    #[test]
+    fn an_adapter_left_behind_is_recognised_in_english_and_russian() {
+        // The log from a real failure on a Russian Windows.
+        let ru = "Failed to setup adapter (problem code: 0x1F, ntstatus: 0xC0000035): \
+            \u{41d}\u{435}\u{432}\u{43e}\u{437}\u{43c}\u{43e}\u{436}\u{43d}\u{43e} \u{441}\u{43e}\u{437}\u{434}\u{430}\u{442}\u{44c} \u{444}\u{430}\u{439}\u{43b}, \u{442}\u{430}\u{43a} \u{43a}\u{430}\u{43a} \u{43e}\u{43d} \u{443}\u{436}\u{435} \u{441}\u{443}\u{449}\u{435}\u{441}\u{442}\u{432}\u{443}\u{435}\u{442}. (Code 0x000000B7)";
+        let ru_no_code = "\u{41d}\u{435}\u{432}\u{43e}\u{437}\u{43c}\u{43e}\u{436}\u{43d}\u{43e} \u{441}\u{43e}\u{437}\u{434}\u{430}\u{442}\u{44c} \u{444}\u{430}\u{439}\u{43b}, \u{442}\u{430}\u{43a} \u{43a}\u{430}\u{43a} \u{43e}\u{43d} \u{443}\u{436}\u{435} \u{441}\u{443}\u{449}\u{435}\u{441}\u{442}\u{432}\u{443}\u{435}\u{442}.";
+        let en = "Failed to start: app/proxyman/inbound: failed to start proxy > Cannot create a file when that file already exists.";
+        for text in [
+            ru,
+            ru_no_code,
+            en,
+            "problem code: 0x1F, ntstatus: 0xC0000035",
+        ] {
+            assert!(looks_like_adapter_exists(text), "{text}");
+        }
+        for text in [
+            "Access is denied.",
+            "listen tcp 127.0.0.1:10085: bind: Only one usage of each socket address",
+            "failed to find matching adapter name (Code 0x00000490)",
+        ] {
+            assert!(!looks_like_adapter_exists(text), "{text}");
+        }
     }
 
     #[test]
