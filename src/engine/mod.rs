@@ -159,6 +159,8 @@ pub struct Engine {
     repeats: HashMap<String, (Instant, u32, String)>,
     last_auto_check: Option<Instant>,
     last_auto_ping: Option<Instant>,
+    /// Servers a ping is running for, and since when. A round does not start over a running one.
+    ping_inflight: HashMap<u64, Instant>,
     /// The check for a new version runs (set by the background process only: tests and the
     /// demo never go to the network).
     update_checks: bool,
@@ -303,6 +305,7 @@ impl Engine {
             repeats: HashMap::new(),
             last_auto_check: None,
             last_auto_ping: None,
+            ping_inflight: HashMap::new(),
             update_checks: false,
             releases: Vec::new(),
             update_busy: false,
@@ -754,6 +757,7 @@ impl Engine {
         match ev {
             BgEvent::Log(line) => self.push_log(line),
             BgEvent::Ping { id, result, kind } => {
+                self.ping_inflight.remove(&id);
                 let active = self.conn == Conn::Connected(id);
                 if let Some(s) = self
                     .subs
@@ -899,6 +903,12 @@ impl Engine {
             (Ask::ConfigureFirewall, false) => {}
             (Ask::ApplyRules(id), true) => self.connect(id),
             (Ask::ApplyRules(_), false) => {}
+            (Ask::PingToTcp, true) => {
+                self.config.ping.mode = crate::storage::PingMode::Tcp;
+                self.save_config();
+                self.status(crate::t!("eng.ping_now_tcp"));
+            }
+            (Ask::PingToTcp, false) => {}
         }
     }
 

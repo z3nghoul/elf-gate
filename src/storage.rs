@@ -279,15 +279,15 @@ pub struct PingConfig {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PingMode {
-    #[default]
     Tcp,
+    #[default]
     Url,
 }
 
 impl Default for PingConfig {
     fn default() -> Self {
         Self {
-            mode: PingMode::Tcp,
+            mode: PingMode::Url,
             url: "https://www.gstatic.com/generate_204".into(),
             timeout_ms: 3000,
             auto_interval_secs: 60,
@@ -406,9 +406,12 @@ impl SubscriptionConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Config {
+    /// Version of the file's layout, for one-time migrations. A file without it is version 0.
+    #[serde(default)]
+    pub schema: u32,
     pub core: CoreConfig,
     pub mode: ModeConfig,
     pub proxy: ProxyConfig,
@@ -428,7 +431,47 @@ pub struct Config {
     pub rules: Vec<Rule>,
 }
 
+/// 1: the ping mode of a config without a version moves from `tcp` to `url` (once).
+pub const CONFIG_SCHEMA: u32 = 1;
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            schema: CONFIG_SCHEMA,
+            core: Default::default(),
+            mode: Default::default(),
+            proxy: Default::default(),
+            tun: Default::default(),
+            presets: Default::default(),
+            ui: Default::default(),
+            ping: Default::default(),
+            device: Default::default(),
+            updates: Default::default(),
+            sub_defaults: Default::default(),
+            subscriptions: Default::default(),
+            servers: Default::default(),
+            overrides: Default::default(),
+            hidden: Default::default(),
+            rules: Default::default(),
+        }
+    }
+}
+
 impl Config {
+    /// One-time changes of an older file. `true` when something changed (the file is rewritten,
+    /// and from then on the version says it is done: a user who goes back to `tcp` stays there).
+    pub fn migrate(&mut self) -> bool {
+        if self.schema >= CONFIG_SCHEMA {
+            return false;
+        }
+        if self.ping.mode == PingMode::Tcp {
+            self.ping.mode = PingMode::Url;
+            tracing::info!("config migration 1: the ping mode tcp is now url (the new default)");
+        }
+        self.schema = CONFIG_SCHEMA;
+        true
+    }
+
     /// The copy the interface may see: no server links and no subscription URLs (they carry
     /// keys and tokens): of a URL only the scheme and the host stay (the subscription screen
     /// shows them), the path and the query are replaced by `***`. Everything else stays.
@@ -554,10 +597,16 @@ impl Storage {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Config::default()),
             Err(source) => return Err(StorageError::Read { path, source }),
         };
-        toml::from_str(&text).map_err(|e| StorageError::Parse {
-            path,
+        let mut config: Config = toml::from_str(&text).map_err(|e| StorageError::Parse {
+            path: path.clone(),
             message: e.to_string(),
-        })
+        })?;
+        if config.migrate() {
+            if let Err(e) = self.save(&config) {
+                tracing::warn!("config migration: cannot save: {e}");
+            }
+        }
+        Ok(config)
     }
 
     /// Writes via a temporary file and a rename, so a crash cannot leave a half-written config.
@@ -928,5 +977,43 @@ mod tests {
             Err(StorageError::Parse { .. })
         ));
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_new_config_pings_by_url() {
+        let c = Config::default();
+        assert_eq!(c.ping.mode, PingMode::Url);
+        assert_eq!(c.schema, CONFIG_SCHEMA);
+    }
+
+    #[test]
+    fn an_old_tcp_config_becomes_url_once_and_a_later_tcp_stays() {
+        let dir = TempDir::new("migrate");
+        let st = Storage::new(dir.path());
+        std::fs::write(
+            st.config_path(),
+            "[ping]\nmode = \"tcp\"\ntimeout_ms = 2000\n",
+        )
+        .unwrap();
+        let c = st.load().unwrap();
+        assert_eq!(c.ping.mode, PingMode::Url);
+        assert_eq!(c.ping.timeout_ms, 2000, "the rest is kept");
+        // The file was rewritten with the version: loading again changes nothing.
+        let text = std::fs::read_to_string(st.config_path()).unwrap();
+        assert!(text.contains("schema = 1"), "{text}");
+        // The user goes back to tcp: that is final.
+        let mut c = st.load().unwrap();
+        c.ping.mode = PingMode::Tcp;
+        st.save(&c).unwrap();
+        assert_eq!(st.load().unwrap().ping.mode, PingMode::Tcp);
+        assert_eq!(st.load().unwrap().ping.mode, PingMode::Tcp);
+    }
+
+    #[test]
+    fn an_old_url_config_is_only_stamped() {
+        let dir = TempDir::new("migrate-url");
+        let st = Storage::new(dir.path());
+        std::fs::write(st.config_path(), "[ping]\nmode = \"url\"\n").unwrap();
+        assert_eq!(st.load().unwrap().ping.mode, PingMode::Url);
     }
 }

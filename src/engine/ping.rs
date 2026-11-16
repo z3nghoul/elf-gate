@@ -35,6 +35,9 @@ pub fn choose_method(
     }
 }
 
+/// A ping that has not answered for this long is considered lost.
+const PING_STALE: Duration = Duration::from_secs(120);
+
 impl Engine {
     pub(super) fn ping_all(&mut self) {
         self.last_auto_ping = Some(Instant::now());
@@ -62,9 +65,21 @@ impl Engine {
         {
             return;
         }
+        // The previous round is still running (slow servers, few temporary cores at a time):
+        // the next one waits for it.
+        if self.ping_running() {
+            return;
+        }
         self.last_auto_ping = Some(Instant::now());
         self.ping_servers(false);
         self.spawn_vpn_series();
+    }
+
+    /// A ping is still running. An entry older than [`PING_STALE`] is a lost task, not a ping.
+    fn ping_running(&self) -> bool {
+        self.ping_inflight
+            .values()
+            .any(|t| t.elapsed() < PING_STALE)
     }
 
     /// The latency of the live connection: a few requests through the working tunnel, the median
@@ -144,7 +159,15 @@ impl Engine {
             match resolve_binary(&self.config.core.xray_path) {
                 Ok(b) => Some(b),
                 Err(e) => {
-                    self.status(crate::t!("eng.url_ping_error", error = e));
+                    // By hand: offer the way out. The background round only says it, quietly.
+                    if manual {
+                        self.alert(Alert::Ask {
+                            text: crate::t!("eng.url_ping_no_xray", error = e),
+                            ask: Ask::PingToTcp,
+                        });
+                    } else {
+                        self.status(crate::t!("eng.url_ping_error", error = e));
+                    }
                     return;
                 }
             }
@@ -166,6 +189,15 @@ impl Engine {
             if is_active && binary.is_some() {
                 continue;
             }
+            // Already being measured: not a second time.
+            if self
+                .ping_inflight
+                .get(&server.id)
+                .is_some_and(|t| t.elapsed() < PING_STALE)
+            {
+                continue;
+            }
+            self.ping_inflight.insert(server.id, Instant::now());
             if manual && !is_active {
                 self.set_ping(server.id, Ping::Pending);
             }
@@ -434,6 +466,7 @@ mod tests {
         });
         let (tx, mut rx) = unbounded_channel();
         let mut a = Engine::build(tx, crate::test_support::config_ru(), None, false);
+        a.config.ping.mode = crate::storage::PingMode::Tcp;
         a.add_link(format!("vless://u@127.0.0.1:{port}?security=none#Local"));
         let id = a.subs[0].servers[0].id;
         a.ping_all();
@@ -460,6 +493,7 @@ mod tests {
         });
         let (tx, mut rx) = unbounded_channel();
         let mut a = Engine::build(tx, crate::test_support::config_ru(), None, false);
+        a.config.ping.mode = crate::storage::PingMode::Tcp;
         a.add_link(format!("vless://u@127.0.0.1:{port}?security=none#L"));
         let id = a.subs[0].servers[0].id;
 
@@ -490,6 +524,55 @@ mod tests {
         let again = a.last_auto_ping;
         a.auto_ping_tick();
         assert_eq!(a.last_auto_ping, again, "not due yet");
+    }
+
+    #[tokio::test]
+    async fn a_new_auto_round_does_not_start_over_a_running_one() {
+        let (tx, _rx) = unbounded_channel();
+        let mut a = Engine::build(tx, crate::test_support::config_ru(), None, false);
+        a.config.ping.mode = crate::storage::PingMode::Tcp;
+        a.config.ping.auto_interval_secs = 60;
+        a.add_link("vless://u@127.0.0.1:9?security=none#L".into());
+        let id = a.subs[0].servers[0].id;
+        // A round is running (its answer has not arrived): the tick does nothing, however late.
+        a.ping_inflight.insert(id, Instant::now());
+        a.last_auto_ping = None;
+        a.auto_ping_tick();
+        assert_eq!(a.last_auto_ping, None, "no second round");
+        // The answer arrives: the next tick starts a round.
+        a.on_bg(BgEvent::Ping {
+            id,
+            result: Ping::Ms(5),
+            kind: PingKind::Tcp,
+        });
+        a.auto_ping_tick();
+        assert!(a.last_auto_ping.is_some());
+        // A lost task does not stop the refresh for ever.
+        a.ping_inflight
+            .insert(id, Instant::now() - PING_STALE - Duration::from_secs(1));
+        assert!(!a.ping_running());
+    }
+
+    #[tokio::test]
+    async fn url_ping_without_xray_offers_tcp_and_the_answer_switches() {
+        let (tx, _rx) = unbounded_channel();
+        let mut a = Engine::build(tx, crate::test_support::config_ru(), None, false);
+        a.config.ping.mode = crate::storage::PingMode::Url;
+        a.config.core.xray_path = "/nonexistent/xray-for-test".into();
+        a.add_link("vless://u@127.0.0.1:9?security=none#L".into());
+        a.ping_all();
+        let asked = a.alerts().iter().any(|x| {
+            matches!(
+                x,
+                Alert::Ask {
+                    ask: Ask::PingToTcp,
+                    ..
+                }
+            )
+        });
+        assert!(asked, "{:?}", a.alerts());
+        a.answer(Ask::PingToTcp, true);
+        assert_eq!(a.config.ping.mode, crate::storage::PingMode::Tcp);
     }
 
     #[test]

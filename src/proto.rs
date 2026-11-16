@@ -147,6 +147,8 @@ pub enum Ask {
     ConfigureFirewall,
     /// Rules changed while connected: restart the core to apply them.
     ApplyRules(u64),
+    /// URL ping needs Xray and it is not found: switch the ping mode to TCP.
+    PingToTcp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
