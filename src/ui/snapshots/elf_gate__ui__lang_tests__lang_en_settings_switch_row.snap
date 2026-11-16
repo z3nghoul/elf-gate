@@ -5,25 +5,25 @@ expression: frame
 ┌ Settings ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │  ─ Appearance ───────────────────────────────────────────────────────────────────────────────────────────────────────│
 │  Language                              English                                                                       │
-│  Privacy mode (Ctrl+P)                 off                                                                           │
 │  Theme                                 mocha                                                                         │
 │  Transparent background                off                                                                           │
+│  Privacy mode (Ctrl+P)                 off                                                                           │
 │  ─ Connection ───────────────────────────────────────────────────────────────────────────────────────────────────────│
-│  System proxy                          on                                                                            │
 │  Connect on start                      off                                                                           │
-│> Start at login                        off                                                                           │
+│  Start at login                        off                                                                           │
+│> System proxy                          on                                                                            │
 │  ─ Subscriptions ────────────────────────────────────────────────────────────────────────────────────────────────────│
 │  Default User-Agent                    v2rayNG/1.10.4                                                                │
 │  Default update interval, h (0 = off)  12                                                                            │
 │  Send HWID by default                  on                                                                            │
 │  ─ TUN ──────────────────────────────────────────────────────────────────────────────────────────────────────────────│
 │  Xray for TUN (Linux)                  /usr/local/lib/elf-gate/xray                                                  │
-│  System proxy together with TUN        on                                                                            │
 │  TUN interface name                    elfgate0                                                                      │
-│  DNS through the tunnel                1.1.1.1                                                                       │
-└─────────────────────────────────────────────────────────────────────────────────────────────────────────── ↓ 18 more ┘
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────── ↓ 20 more ┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│Start elf-gate automatically when you log in, so you do not have to start it by hand.                                 │
+│Send the system's programs through elf-gate automatically (system proxy). Turn off if you set the proxy in your       │
+│programs yourself.                                                                                                    │
+│                                                                                                                      │
 │                                                                                                                      │
 └ tray icon: none (not supported by this desktop or not running) ──────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐

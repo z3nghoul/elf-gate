@@ -532,16 +532,16 @@ up = "↑ {n} more"
 [explain]
 api_port = "The core's internal port for traffic statistics. Change only if it is taken. Applies at the next connection."
 auto_connect = "Connect to the last server as soon as the program starts. Off by default."
-autostart = "Start elf-gate automatically when you log in, so you do not have to start it by hand."
+autostart = "Start elf-gate automatically when you log in, so you do not have to start it by hand. In TUN mode Windows asks for administrator rights once, then does not ask again."
 check_updates = "Once a day, check whether a new elf-gate version is out. Nothing is downloaded: you only see a notice."
-firewall = "Windows only: let elf-gate allow itself in the firewall. Needed if TUN mode is blocked. Windows will ask you to confirm."
+firewall = "Let elf-gate work in the Windows Firewall. Helps if you get the error \"Windows blocked elf-gate from connecting\". Windows will ask you to confirm once."
 http_port = "The port where elf-gate accepts HTTP traffic. Change only if another program uses it. Applies at the next connection."
 hwid = "This device's identifier for subscription providers; it stays the same between runs. No need to change it. Enter shows details."
 language = "Interface language. Changes at once and does not affect the VPN."
 log_level = "How detailed the Xray core's log is. Choose debug when looking for a problem. Applies at the next connection."
-ping_auto = "How often to refresh the ping of all servers in the background, in seconds. 0 turns it off. Default: 60."
-ping_mode = "How to measure ping. url goes through a temporary Xray and is closer to real speed. tcp only opens the port: faster, no Xray. Default: url."
-ping_timeout = "How long to wait for a ping answer, in milliseconds. A server that does not answer in time counts as unreachable. Default: 3000."
+ping_auto = "How often to check all servers again in the background. 0 turns it off. Default: 60 s."
+ping_mode = "How to check servers. url opens a test page through the server: it shows the server really works, and the response time. tcp only checks that the port is open: faster, no Xray, but it does not guarantee the VPN works. Default: url."
+ping_timeout = "How long to wait for the server's answer when checking. A server that does not answer in time counts as unreachable. Default: 3000 ms (3 s)."
 ping_url = "The address opened by a url ping. Any fast site will do. Default: www.gstatic.com/generate_204."
 privacy = "Hides addresses, keys and links on the screen, handy for screenshots and screen sharing. Files and settings are not changed."
 proxy_with_tun = "Keep the system proxy on in TUN mode too, so programs that read it also go through the VPN. On by default."
@@ -566,6 +566,11 @@ tunnel_dns = "DNS server inside the tunnel: name lookups go through it so they d
 update_channel = "Which versions to show: stable ones are tested, test ones are newer but may have bugs."
 verbose_log = "Write every connection to the log (access). Helps find problems, but the log grows fast. Off by default."
 xray_path = "Where Xray is, the core that carries the traffic. Change only if it is installed in an unusual place. Applies at the next connection."
+
+[unit]
+ms = "ms"
+off = "off"
+s = "s"
 
 [section]
 appearance = "Appearance"

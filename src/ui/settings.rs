@@ -73,6 +73,14 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &Rende
                 let (id, label, value) = &rows[*i];
                 let value = if app.privacy() && *id == SettingId::Hwid {
                     crate::redact::hwid(value)
+                } else if *id == SettingId::PingTimeout {
+                    format!("{value} {}", crate::t!("unit.ms"))
+                } else if *id == SettingId::PingAuto {
+                    if value == "0" {
+                        crate::t!("unit.off")
+                    } else {
+                        format!("{value} {}", crate::t!("unit.s"))
+                    }
                 } else {
                     app.mask(value)
                 };

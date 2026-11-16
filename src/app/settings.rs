@@ -180,7 +180,14 @@ impl AppState {
     pub fn settings_rows_for(&self, windows: bool) -> Vec<(SettingId, String, String)> {
         let mut rows = self.settings_rows_unsorted();
         rows.retain(|r| available(&r.0, windows));
-        rows.sort_by_key(|r| section_of(&r.0) as u8);
+        // By section, then in the order of `SettingId::ALL`.
+        let rank = |id: &SettingId| {
+            SettingId::ALL
+                .iter()
+                .position(|x| x == id)
+                .unwrap_or(usize::MAX)
+        };
+        rows.sort_by_key(|r| (section_of(&r.0) as u8, rank(&r.0)));
         rows
     }
 
