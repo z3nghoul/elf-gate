@@ -1,0 +1,215 @@
+name: Release
+
+# A tag like v1.0.3 builds both archives, checks them and creates a DRAFT release.
+# Publishing the draft is a manual step (see docs/release.md).
+# workflow_dispatch must be started from a tag ("Use workflow from: Tag"), never from a branch.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: 'Mark the release as a pre-release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check tag and CHANGELOG
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: The tag matches the version in Cargo.toml
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" != tag ]; then
+            echo "::error::Run this workflow from a tag, not from $GITHUB_REF"
+            exit 1
+          fi
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $version in Cargo.toml"
+            exit 1
+          fi
+      - name: Release notes from CHANGELOG.md
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # The text between "## <version>" and the next "## " heading.
+          awk -v h="## $version" '
+            $0 == h { on = 1; next }
+            /^## / { on = 0 }
+            on { print }
+          ' CHANGELOG.md | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::CHANGELOG.md has no section '## $version'"
+            exit 1
+          fi
+          cat release-notes.md
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: check
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+          - name: windows-x86_64
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # One place for the Xray version and hashes, shared with ci.yml.
+      - name: Load the pinned Xray version
+        shell: bash
+        run: cat .github/xray.env >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      # The pinned hash makes a changed or tampered download fail the build.
+      - name: Install Xray (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/xray.zip" \
+            "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip"
+          echo "${XRAY_LINUX_SHA256}  $RUNNER_TEMP/xray.zip" | sha256sum -c -
+          mkdir -p bin
+          unzip -q -o "$RUNNER_TEMP/xray.zip" xray geoip.dat geosite.dat -d bin
+          unzip -p "$RUNNER_TEMP/xray.zip" LICENSE > bin/LICENSE-Xray
+          chmod +x bin/xray
+          bin/xray version | head -1
+      - name: Install Xray (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'xray-win.zip'
+          Invoke-WebRequest -Uri "https://github.com/XTLS/Xray-core/releases/download/$env:XRAY_VERSION/Xray-windows-64.zip" -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLower()
+          if ($actual -ne $env:XRAY_WIN_SHA256) {
+            throw "Xray archive SHA256 mismatch. expected $env:XRAY_WIN_SHA256, got $actual"
+          }
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          Expand-Archive -Path $zip -DestinationPath bin -Force
+          Move-Item -Force bin\LICENSE bin\LICENSE-Xray
+          .\bin\xray.exe version | Select-Object -First 1
+
+      # Tests run before packaging; Xray is in bin/, so the integration tests must really run.
+      - name: Tests
+        shell: bash
+        run: |
+          cargo test --locked
+          cargo test --locked xray::integration_tests -- --nocapture 2>&1 | tee xray-tests.log
+          if grep -q SKIPPED xray-tests.log; then echo "::error::Xray tests were skipped"; exit 1; fi
+      - name: Build release
+        shell: bash
+        env:
+          ELF_GATE_COMMIT: ${{ github.sha }}
+        run: cargo build --locked --release
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          name=elf-gate-linux-x86_64
+          mkdir -p "$name/bin" "$name/locales"
+          cp target/release/elf-gate target/release/elf-gated "$name/"
+          cp bin/xray bin/geoip.dat bin/geosite.dat bin/LICENSE-Xray "$name/"
+          cp locales/*.toml "$name/locales/"
+          cp presets.toml README.md LICENSE "$name/"
+          cp packaging/scripts/elf-gate-tun.sh "$name/"
+          chmod +x "$name/elf-gate-tun.sh"
+          ln -s ../xray "$name/bin/xray"
+          ln -s ../geoip.dat "$name/bin/geoip.dat"
+          ln -s ../geosite.dat "$name/bin/geosite.dat"
+          # Smoke test: the binaries start.
+          "$name/elf-gate" --version
+          "$name/xray" version | head -1
+          (cd "$name" && sha256sum elf-gate elf-gated xray geoip.dat geosite.dat LICENSE LICENSE-Xray > SHA256SUMS)
+          tar --owner=0 --group=0 --numeric-owner -czf "$name.tar.gz" "$name"
+          tar tzf "$name.tar.gz"
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = 'elf-gate-windows-x86_64'
+          New-Item -ItemType Directory -Path $out | Out-Null
+          Copy-Item 'target\release\elf-gate.exe', 'target\release\elf-gated.exe' $out
+          Copy-Item 'packaging\scripts\elf-gate-tun.bat' $out
+          # elf-gate itself is AGPL-3.0: the license text travels with the binaries.
+          Copy-Item 'LICENSE' $out
+          # wintun.dll is the TUN driver library the core loads (it must sit next to xray.exe).
+          foreach ($f in 'xray.exe', 'geoip.dat', 'geosite.dat', 'wintun.dll', 'LICENSE-Xray', 'LICENSE-Wintun') {
+            Copy-Item (Join-Path 'bin' $f) $out
+          }
+          # Smoke test: the binaries start (a missing DLL or a bad build fails the job here).
+          & (Join-Path $out 'elf-gate.exe') --version
+          if ($LASTEXITCODE -ne 0) { throw 'elf-gate.exe --version failed' }
+          & (Join-Path $out 'xray.exe') version | Select-Object -First 1
+          $sums = foreach ($f in 'elf-gate.exe', 'elf-gated.exe', 'xray.exe', 'geoip.dat', 'geosite.dat', 'wintun.dll', 'LICENSE', 'LICENSE-Xray', 'LICENSE-Wintun') {
+            $h = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $out $f)).Hash.ToLower()
+            "$h  $f"
+          }
+          [System.IO.File]::WriteAllText((Join-Path $out 'SHA256SUMS.txt'), (($sums -join "`n") + "`n"))
+          # Nothing but the expected files: no tests, no server links.
+          $allowed = @('elf-gate.exe', 'elf-gated.exe', 'elf-gate-tun.bat', 'xray.exe', 'geoip.dat', 'geosite.dat', 'wintun.dll',
+                       'LICENSE', 'LICENSE-Xray', 'LICENSE-Wintun', 'SHA256SUMS.txt')
+          $present = (Get-ChildItem -Path $out -Recurse -File).Name
+          $unexpected = $present | Where-Object { $allowed -notcontains $_ }
+          if ($unexpected) { throw "Unexpected files in the package: $($unexpected -join ', ')" }
+          $missing = $allowed | Where-Object { $present -notcontains $_ }
+          if ($missing) { throw "Missing files in the package: $($missing -join ', ')" }
+          Compress-Archive -Path $out -DestinationPath "$out.zip" -CompressionLevel Optimal
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: archive-${{ matrix.name }}
+          path: |
+            elf-gate-linux-x86_64.tar.gz
+            elf-gate-windows-x86_64.zip
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: Draft release
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS and the draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          DISPATCH_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          cd dist
+          ls -l
+          sha256sum elf-gate-linux-x86_64.tar.gz elf-gate-windows-x86_64.zip > SHA256SUMS
+          cat SHA256SUMS
+          flags=()
+          if [[ "$TAG" == *-* || "$DISPATCH_PRERELEASE" == true ]]; then flags+=(--prerelease); fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "$TAG" --notes-file release-notes.md "${flags[@]}" \
+            elf-gate-linux-x86_64.tar.gz elf-gate-windows-x86_64.zip SHA256SUMS
