@@ -369,7 +369,12 @@ mod tests {
 
     fn app_in(dir: &std::path::Path) -> Engine {
         let (tx, _rx) = unbounded_channel();
-        Engine::build(tx, Config::default(), Some(Storage::new(dir)), false)
+        Engine::build(
+            tx,
+            crate::test_support::config_ru(),
+            Some(Storage::new(dir)),
+            false,
+        )
     }
 
     fn dir(tag: &str) -> PathBuf {

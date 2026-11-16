@@ -7,6 +7,7 @@ use crate::action::{map_key, Action};
 use crate::app::tests::view_with;
 use crate::app::{AppState, Conn, Focus, LinkState, Popup, Screen};
 use crate::event::{Level, LinkEvent, LogLine};
+use crate::i18n::Lang;
 use crate::model::rule::{Rule, RuleKind};
 use crate::proto::{Alert, Ask, Update};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -18,9 +19,15 @@ const TLS: &str = "vless://u@h2.example.com:443?security=tls&sni=h2.example.com#
 const STUB: &str = "vless://00000000-0000-0000-0000-000000000000@0.0.0.0:1?security=none#Заглушка";
 
 fn app(links: &[&str]) -> AppState {
+    app_in(Lang::Ru, links)
+}
+
+fn app_in(lang: Lang, links: &[&str]) -> AppState {
     let (tx, _rx) = unbounded_channel();
     let mut a = AppState::new(tx);
-    a.apply_view(view_with(links));
+    let mut view = view_with(links);
+    view.config.ui.language = lang;
+    a.apply_view(view);
     a.link = LinkState::Up;
     a.selected = 1; // the first server (row 0 is the group)
     a
@@ -49,6 +56,13 @@ fn press(a: &mut AppState, code: KeyCode) {
 
 /// Every state: a name and the app in that state.
 pub(super) fn states() -> Vec<(&'static str, AppState, (u16, u16))> {
+    states_in(Lang::Ru)
+}
+
+/// The same states, with the screen language `lang` (texts kept in a state, such as a dialog,
+/// are made in it).
+pub(super) fn states_in(lang: Lang) -> Vec<(&'static str, AppState, (u16, u16))> {
+    let app = |links: &[&str]| app_in(lang, links);
     let big = (100, 30);
     let mut v: Vec<(&'static str, AppState, (u16, u16))> = Vec::new();
 

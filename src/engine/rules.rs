@@ -84,8 +84,13 @@ mod tests {
     fn engine(tag: &str) -> (Engine, TempDir) {
         let dir = TempDir::new(tag);
         let (tx, _rx) = unbounded_channel();
-        let engine = Engine::build(tx, Config::default(), Some(Storage::new(dir.path())), false)
-            .with_tun_host(Arc::new(MockTunHost::healthy()));
+        let engine = Engine::build(
+            tx,
+            crate::test_support::config_ru(),
+            Some(Storage::new(dir.path())),
+            false,
+        )
+        .with_tun_host(Arc::new(MockTunHost::healthy()));
         (engine, dir)
     }
 

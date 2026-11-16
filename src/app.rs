@@ -240,7 +240,7 @@ impl AppState {
             tun_active: false,
             proxy_active: false,
             health: HealthState::Unknown,
-            config: Config::default(),
+            config: crate::test_support::config_ru(),
             traffic: Traffic::default(),
             process_unresolved: 0,
             tray: false,
@@ -330,9 +330,7 @@ impl AppState {
             mock,
             ..
         } = view;
-        if !cfg!(test) {
-            crate::i18n::set(config.ui.language);
-        }
+        crate::i18n::bind_thread(config.ui.language);
         let collapsed: Vec<String> = self
             .subs
             .iter()

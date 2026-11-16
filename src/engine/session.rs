@@ -582,7 +582,7 @@ mod tests {
     /// An app in TUN mode with one real server and a scripted host. The TUN core path points at
     /// a file that exists unless `core_exists` is false.
     fn tun_app(host: MockTunHost, core_exists: bool, dir: &Path) -> (Engine, u64) {
-        let mut config = Config::default();
+        let mut config = crate::test_support::config_ru();
         config.tun.xray_path = if core_exists {
             let core = dir.join("xray");
             std::fs::write(&core, b"x").unwrap();
@@ -771,7 +771,7 @@ mod tests {
     #[tokio::test]
     async fn declining_elevation_explains_that_tun_needs_it() {
         let (tx, _rx) = unbounded_channel();
-        let mut a = Engine::build(tx, Config::default(), None, false);
+        let mut a = Engine::build(tx, crate::test_support::config_ru(), None, false);
         a.handle_cmd(Cmd::Answer {
             ask: Ask::RelaunchElevated,
             yes: false,
@@ -782,7 +782,7 @@ mod tests {
     #[tokio::test]
     async fn a_start_error_about_permissions_becomes_the_privileges_dialog() {
         let (tx, _rx) = unbounded_channel();
-        let mut a = Engine::build(tx, Config::default(), None, false);
+        let mut a = Engine::build(tx, crate::test_support::config_ru(), None, false);
         a.add_link("vless://u@10.0.0.5:443?security=none#Real".into());
         let id = a.subs[0].servers[0].id;
         a.conn = Conn::Connecting(id);
@@ -828,7 +828,7 @@ mod tests {
     #[tokio::test]
     async fn connection_check_results_are_stored_and_late_ones_ignored() {
         let (tx, _rx) = unbounded_channel();
-        let mut a = Engine::build(tx, Config::default(), None, false);
+        let mut a = Engine::build(tx, crate::test_support::config_ru(), None, false);
         a.add_link("vless://u@h.example.com:443?security=none#R".into());
         let id = a.subs[0].servers[0].id;
         a.conn = Conn::Connected(id);
@@ -847,7 +847,12 @@ mod tests {
         let dir = TempDir::new("toggle");
         let storage = Storage::new(dir.path());
         let (tx, _rx) = unbounded_channel();
-        let mut a = Engine::build(tx, Config::default(), Some(storage.clone()), false);
+        let mut a = Engine::build(
+            tx,
+            crate::test_support::config_ru(),
+            Some(storage.clone()),
+            false,
+        );
         assert_eq!(a.mode, Mode::Proxy);
         a.handle_cmd(Cmd::ToggleMode);
         assert_eq!(a.mode, Mode::Tun);
@@ -910,7 +915,7 @@ mod tests {
         tun::mark_up(&store, 777, "elfgate0");
         let host = Arc::new(MockTunHost::healthy());
         let (tx, _rx) = unbounded_channel();
-        let mut a = Engine::build(tx, Config::default(), None, false)
+        let mut a = Engine::build(tx, crate::test_support::config_ru(), None, false)
             .with_state_store(store.clone())
             .with_tun_host(host.clone());
         let note = a.startup_tun_cleanup().unwrap();
@@ -958,7 +963,7 @@ mod tests {
                 .into(),
         });
         let (tx, _rx) = unbounded_channel();
-        let mut a = Engine::build(tx, Config::default(), None, false);
+        let mut a = Engine::build(tx, crate::test_support::config_ru(), None, false);
         for n in 0..300 {
             a.on_bg(noise(n));
         }

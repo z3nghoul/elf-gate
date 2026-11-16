@@ -373,7 +373,7 @@ mod tests {
 
     fn app() -> (Engine, u64) {
         let (tx, _rx) = unbounded_channel();
-        let mut a = Engine::build(tx, Config::default(), None, false);
+        let mut a = Engine::build(tx, crate::test_support::config_ru(), None, false);
         a.add_link(REALITY.into());
         let id = a.subs[0].servers[0].id;
         (a, id)
@@ -433,7 +433,7 @@ mod tests {
             }
         });
         let (tx, mut rx) = unbounded_channel();
-        let mut a = Engine::build(tx, Config::default(), None, false);
+        let mut a = Engine::build(tx, crate::test_support::config_ru(), None, false);
         a.add_link(format!("vless://u@127.0.0.1:{port}?security=none#Local"));
         let id = a.subs[0].servers[0].id;
         a.ping_all();
@@ -459,7 +459,7 @@ mod tests {
             }
         });
         let (tx, mut rx) = unbounded_channel();
-        let mut a = Engine::build(tx, Config::default(), None, false);
+        let mut a = Engine::build(tx, crate::test_support::config_ru(), None, false);
         a.add_link(format!("vless://u@127.0.0.1:{port}?security=none#L"));
         let id = a.subs[0].servers[0].id;
 
@@ -543,7 +543,7 @@ mod tests {
     #[tokio::test]
     async fn the_unresolved_process_count_reaches_the_view_and_resets_on_connect() {
         let (tx, _rx) = unbounded_channel();
-        let mut a = Engine::build(tx, Config::default(), None, false);
+        let mut a = Engine::build(tx, crate::test_support::config_ru(), None, false);
         a.process_unresolved = 12;
         assert_eq!(a.view().process_unresolved, 12);
     }
@@ -551,7 +551,7 @@ mod tests {
     #[tokio::test]
     async fn the_device_id_exists_from_the_first_view() {
         let (tx, _rx) = unbounded_channel();
-        let a = Engine::build(tx, Config::default(), None, false);
+        let a = Engine::build(tx, crate::test_support::config_ru(), None, false);
         assert_eq!(a.view().config.device.hwid.len(), 16);
         assert_eq!(
             a.hub().subscribe().view.borrow().config.device.hwid.len(),

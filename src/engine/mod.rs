@@ -168,9 +168,7 @@ impl Engine {
     pub(crate) fn build(tx: BgTx, config: Config, storage: Option<Storage>, mock: bool) -> Self {
         // The device id exists from the first moment (the settings show it at once).
         let mut config = config;
-        if !cfg!(test) {
-            crate::i18n::set(config.ui.language);
-        }
+        crate::i18n::bind_thread(config.ui.language);
         let hwid_created = config.device.hwid.is_empty();
         if hwid_created {
             config.device.hwid = crate::net::device::generate_hwid();
@@ -1287,6 +1285,7 @@ impl Engine {
             Language(lang) => {
                 self.config.ui.language = lang;
                 crate::i18n::set(lang);
+                crate::i18n::bind_thread(lang);
             }
             Theme(v) => {
                 if v != "dark" && v != "light" {
@@ -1468,7 +1467,7 @@ mod noise_tests {
     #[tokio::test]
     async fn a_repeated_core_line_is_shown_once_and_counted() {
         let (tx, _rx) = unbounded_channel();
-        let mut e = Engine::build(tx, Config::default(), None, false);
+        let mut e = Engine::build(tx, crate::test_support::config_ru(), None, false);
         let line = |n: u32| LogLine {
             time: "00:00:00".into(),
             level: Level::Error,
@@ -1510,7 +1509,12 @@ mod settings_tests {
         let dir = std::env::temp_dir().join(format!("elf-gate-set-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let (tx, _rx) = unbounded_channel();
-        let mut e = Engine::build(tx, Config::default(), Some(Storage::new(&dir)), false);
+        let mut e = Engine::build(
+            tx,
+            crate::test_support::config_ru(),
+            Some(Storage::new(&dir)),
+            false,
+        );
         e.handle_cmd(Cmd::Set(Setting::SocksPort(80)));
         assert_eq!(e.config.core.socks_port, 10808);
         assert!(matches!(e.alerts().last(), Some(Alert::Error(_))));
@@ -1542,6 +1546,8 @@ mod settings_tests {
         assert_eq!(crate::i18n::current(), Lang::Ru);
         let text = std::fs::read_to_string(dir.join("config.toml")).unwrap();
         assert!(text.contains("language = \"ru\""), "{text}");
+        // The process-wide language is shared by all tests: put the default back.
+        crate::i18n::set(Lang::En);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

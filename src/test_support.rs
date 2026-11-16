@@ -1,7 +1,17 @@
 //! Helpers shared by unit tests.
 
+use crate::i18n::Lang;
+use crate::storage::Config;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+
+/// The default configuration with Russian texts: most unit tests assert on the Russian wording,
+/// and the engine and the screen state take their language from the config.
+pub fn config_ru() -> Config {
+    let mut config = Config::default();
+    config.ui.language = Lang::Ru;
+    config
+}
 
 /// An empty, uniquely named directory in the system temp folder, removed on drop (also while a
 /// panic unwinds). The name carries the pid and a counter, so parallel tests never share one.

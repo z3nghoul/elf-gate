@@ -111,7 +111,7 @@ fn lookup(lang: Lang, key: &str) -> Option<&'static str> {
 static GLOBAL: AtomicU8 = AtomicU8::new(0);
 
 thread_local! {
-    /// A language for this thread only: tests, and `with_lang` (rendering a message twice).
+    /// A language for this thread only: `bind_thread` and `with_lang` (rendering a message twice).
     static OVERRIDE: Cell<Option<Lang>> = const { Cell::new(None) };
 }
 
@@ -132,21 +132,20 @@ pub fn current() -> Lang {
     if let Some(l) = OVERRIDE.with(Cell::get) {
         return l;
     }
-    // Unit tests were written against the Russian texts and run threads in parallel: without an
-    // explicit choice they get Russian, and a choice only ever concerns its own thread.
-    if cfg!(test) {
-        return Lang::Ru;
-    }
     from_code(GLOBAL.load(Ordering::Relaxed))
 }
 
-/// Switches the language (the whole process; in unit tests only the calling thread).
+/// Switches the language of the whole process (threads without their own choice, see
+/// `bind_thread`, follow it).
 pub fn set(lang: Lang) {
-    if cfg!(test) {
-        OVERRIDE.with(|o| o.set(Some(lang)));
-    } else {
-        GLOBAL.store(code_of(lang), Ordering::Relaxed);
-    }
+    GLOBAL.store(code_of(lang), Ordering::Relaxed);
+}
+
+/// Gives the calling thread its own language, whatever the process language is. The engine and
+/// the screen state bind the thread that drives them to the language of their config, so
+/// several of them (unit tests run in parallel) can use different languages at once.
+pub fn bind_thread(lang: Lang) {
+    OVERRIDE.with(|o| o.set(Some(lang)));
 }
 
 /// Runs `f` with `lang` as the current language of this thread (the file log is always English).

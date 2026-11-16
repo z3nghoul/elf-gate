@@ -1,9 +1,9 @@
 //! The main screens in every language: a snapshot per language at 120 columns, and the check
 //! that no language breaks the layout (the key bar keeps its keys, nothing panics when narrow).
 
-use super::hint_tests::states;
+use super::hint_tests::states_in;
 use super::tests_support::draw;
-use crate::i18n::{self, Lang};
+use crate::i18n;
 
 const SCREENS: [&str; 8] = [
     "main_connected",
@@ -19,8 +19,7 @@ const SCREENS: [&str; 8] = [
 #[test]
 fn main_screens_match_their_snapshot_in_every_language() {
     for lang in i18n::ALL {
-        i18n::set(lang);
-        for (name, mut a, (_, h)) in states() {
+        for (name, mut a, (_, h)) in states_in(lang) {
             if !SCREENS.contains(&name) {
                 continue;
             }
@@ -28,14 +27,12 @@ fn main_screens_match_their_snapshot_in_every_language() {
             snap!(format!("lang_{}_{name}", lang.code()), frame);
         }
     }
-    i18n::set(Lang::Ru);
 }
 
 #[test]
 fn every_screen_fits_in_every_language_at_80_columns_and_keeps_its_help_and_quit_keys() {
     for lang in i18n::ALL {
-        i18n::set(lang);
-        for (name, mut a, (_, h)) in states() {
+        for (name, mut a, (_, h)) in states_in(lang) {
             let frame = draw(80, h.max(24), &mut a);
             assert!(!frame.trim().is_empty(), "{lang:?} {name}");
             let modal = name.starts_with("dialog_") || name == "filter_input";
@@ -47,21 +44,18 @@ fn every_screen_fits_in_every_language_at_80_columns_and_keeps_its_help_and_quit
             }
         }
     }
-    i18n::set(Lang::Ru);
 }
 
 #[test]
 fn the_screens_really_differ_between_languages() {
     let mut texts = Vec::new();
     for lang in i18n::ALL {
-        i18n::set(lang);
-        let (_, mut a, (_, h)) = states()
+        let (_, mut a, (_, h)) = states_in(lang)
             .into_iter()
             .find(|(n, ..)| *n == "main_connected")
             .unwrap();
         texts.push(draw(120, h, &mut a));
     }
-    i18n::set(Lang::Ru);
     assert_ne!(texts[0], texts[1]);
     assert_ne!(texts[1], texts[2]);
     assert!(texts[0].contains("Servers"), "{}", texts[0]);
