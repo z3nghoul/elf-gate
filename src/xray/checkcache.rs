@@ -288,9 +288,7 @@ mod tests {
 
     #[test]
     fn environmental_refusals_found_in_an_old_cache_file_are_dropped_on_load() {
-        let dir = std::env::temp_dir().join(format!("elf-gate-cc2-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::TempDir::new("cc2");
         let path = dir.join("check-cache.json");
         std::fs::write(
             &path,
@@ -302,13 +300,11 @@ mod tests {
         assert_eq!(c.lookup("a"), Some(Verdict::Accepted));
         assert_eq!(c.lookup("b"), None, "the stale environment error is gone");
         assert!(c.lookup("c").is_some());
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn verdicts_roundtrip_and_a_new_version_drops_them() {
-        let dir = std::env::temp_dir().join(format!("elf-gate-cc-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::test_support::TempDir::new("cc");
         let path = dir.join("check-cache.json");
         let mut c = CheckCache::load(Some(path.clone()));
         c.use_version("Xray 1");
@@ -324,7 +320,6 @@ mod tests {
         assert_eq!(again.lookup("k3"), None, "'could not run' is never cached");
         again.use_version("Xray 2");
         assert_eq!(again.len(), 0);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -342,15 +337,12 @@ mod tests {
 
     #[test]
     fn an_old_format_file_is_dropped() {
-        let dir = std::env::temp_dir().join(format!("elf-gate-cc3-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::TempDir::new("cc3");
         let path = dir.join("c.json");
         std::fs::write(&path, r#"{"xray_version":"v","entries":{"a":null}}"#).unwrap();
         let mut c = CheckCache::load(Some(path));
         c.use_version("v");
         assert_eq!(c.lookup("a"), None);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// A stand-in `xray` that counts how often it is asked to test a config.
@@ -381,9 +373,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_changed_core_or_data_file_invalidates_a_cached_refusal() {
-        let dir = std::env::temp_dir().join(format!("elf-gate-cc4-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::TempDir::new("cc4");
         std::fs::write(dir.join("geoip.dat"), b"geo").unwrap();
         std::fs::write(dir.join("geosite.dat"), b"geo").unwrap();
         let bin = counting_xray(&dir, false);
@@ -412,7 +402,6 @@ mod tests {
         std::fs::write(dir.join("geoip.dat"), b"geo-updated").unwrap();
         checker.check_config(&bin, &cfg, &run_dir).await;
         assert_eq!(runs(&dir), 3, "changed geoip.dat is asked again");
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[cfg(unix)]

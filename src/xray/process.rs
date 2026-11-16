@@ -472,8 +472,7 @@ mod tests {
 
     #[test]
     fn the_asset_dir_is_beside_the_binary_or_beside_the_real_file_of_a_symlink() {
-        let base = std::env::temp_dir().join(format!("elf-gate-assets-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let base = crate::test_support::TempDir::new("assets");
         let (real, link) = (base.join("real"), base.join("link"));
         std::fs::create_dir_all(&real).unwrap();
         std::fs::create_dir_all(&link).unwrap();
@@ -490,7 +489,6 @@ mod tests {
             line.contains("geoip.dat: есть") && line.contains("geosite.dat: НЕТ"),
             "{line}"
         );
-        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]
@@ -514,8 +512,7 @@ mod tests {
 
     #[test]
     fn bare_name_is_found_next_to_the_executable_before_path() {
-        let base = std::env::temp_dir().join(format!("elf-gate-resolve-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let base = crate::test_support::TempDir::new("resolve");
         let (beside, on_path) = (base.join("app"), base.join("pathdir"));
         std::fs::create_dir_all(&beside).unwrap();
         std::fs::create_dir_all(&on_path).unwrap();
@@ -532,7 +529,6 @@ mod tests {
         assert_eq!(found, beside.join(&name));
         // Neither: a clear error.
         assert!(resolve_binary_in("nothing-here", Some(&beside), Some(&path_var)).is_err());
-        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]

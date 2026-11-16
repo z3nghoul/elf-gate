@@ -368,9 +368,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn an_environment_dependent_refusal_is_retried_the_way_a_shell_runs_it() {
-        let dir = std::env::temp_dir().join(format!("elf-gate-fakex-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::TempDir::new("fakex");
         std::fs::write(dir.join("geoip.dat"), b"data").unwrap();
         std::fs::write(dir.join("geosite.dat"), b"data").unwrap();
         let bin = fake_xray(
@@ -383,15 +381,12 @@ echo "Configuration OK."; exit 0"#,
         assert_eq!(v, Verdict::Accepted, "the second way works, so it is used");
         assert!(asset_env_disabled());
         NO_ASSET_ENV.store(false, Ordering::Relaxed);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn a_refusal_that_persists_carries_the_full_output_and_a_spawn_report() {
-        let dir = std::env::temp_dir().join(format!("elf-gate-fakex2-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::TempDir::new("fakex2");
         std::fs::write(dir.join("geoip.dat"), b"data").unwrap();
         std::fs::write(dir.join("geosite.dat"), b"data").unwrap();
         let bin = fake_xray(
@@ -423,7 +418,6 @@ echo "Configuration OK."; exit 0"#,
             assert!(is_environmental(text), "{text}");
         }
         assert!(!asset_env_disabled());
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -458,9 +452,7 @@ echo "Configuration OK."; exit 0"#,
     #[cfg(unix)]
     #[tokio::test]
     async fn our_own_findings_and_unrecognized_failures_are_not_verdicts() {
-        let dir = std::env::temp_dir().join(format!("elf-gate-fakex3-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::TempDir::new("fakex3");
         // No data files at all, and a config-looking refusal: still not a verdict on the server.
         let bin = fake_xray(
             &dir,
@@ -486,6 +478,5 @@ echo "Configuration OK."; exit 0"#,
         // An unreadable binary is not asked at all.
         let v = check_config(&dir.join("nope"), &serde_json::json!({}), &dir.join("run")).await;
         assert!(matches!(v, Verdict::Unavailable(_)), "{v:?}");
-        let _ = std::fs::remove_dir_all(dir);
     }
 }

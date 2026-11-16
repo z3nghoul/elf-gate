@@ -305,8 +305,7 @@ mod tests {
 
     #[test]
     fn user_owned_binaries_are_not_trusted() {
-        let dir = std::env::temp_dir().join(format!("elf-gate-trust-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::TempDir::new("trust");
         let file = dir.join("xray");
         std::fs::write(&file, b"x").unwrap();
         let err = Host.trusted_binary(&file).unwrap_err();
@@ -319,7 +318,6 @@ mod tests {
         assert!(Host
             .trusted_binary(Path::new("/definitely/missing"))
             .is_err());
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

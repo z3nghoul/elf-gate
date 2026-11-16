@@ -1515,13 +1515,12 @@ mod settings_tests {
 
     #[tokio::test]
     async fn settings_are_validated_applied_and_saved() {
-        let dir = std::env::temp_dir().join(format!("elf-gate-set-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::test_support::TempDir::new("set");
         let (tx, _rx) = unbounded_channel();
         let mut e = Engine::build(
             tx,
             crate::test_support::config_ru(),
-            Some(Storage::new(&dir)),
+            Some(Storage::new(dir.path())),
             false,
         );
         e.handle_cmd(Cmd::Set(Setting::SocksPort(80)));
@@ -1532,24 +1531,25 @@ mod settings_tests {
         e.handle_cmd(Cmd::Set(Setting::PingAutoIntervalSecs(0)));
         e.handle_cmd(Cmd::Set(Setting::LogLevel("loud".into())));
         assert_eq!(e.config.core.log_level, "warning");
-        let saved = Storage::new(&dir).load().unwrap();
+        let saved = Storage::new(dir.path()).load().unwrap();
         assert_eq!(saved.core.socks_port, 2000);
         assert_eq!(saved.ui.theme, "light");
         assert_eq!(saved.ping.auto_interval_secs, 0);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
     async fn the_language_is_applied_at_once_saved_and_english_by_default() {
         use crate::i18n::Lang;
-        let dir = std::env::temp_dir().join(format!("elf-gate-lang-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::test_support::TempDir::new("lang");
         let (tx, _rx) = unbounded_channel();
-        let mut e = Engine::build(tx, Config::default(), Some(Storage::new(&dir)), false);
+        let mut e = Engine::build(tx, Config::default(), Some(Storage::new(dir.path())), false);
         assert_eq!(e.config.ui.language, Lang::En);
         e.handle_cmd(Cmd::Set(Setting::Language(Lang::Uk)));
         assert_eq!(crate::i18n::current(), Lang::Uk);
-        assert_eq!(Storage::new(&dir).load().unwrap().ui.language, Lang::Uk);
+        assert_eq!(
+            Storage::new(dir.path()).load().unwrap().ui.language,
+            Lang::Uk
+        );
         // The file log is English whatever the screen language is.
         e.handle_cmd(Cmd::Set(Setting::Language(Lang::Ru)));
         assert_eq!(crate::i18n::current(), Lang::Ru);
@@ -1557,6 +1557,5 @@ mod settings_tests {
         assert!(text.contains("language = \"ru\""), "{text}");
         // The process-wide language is shared by all tests: put the default back.
         crate::i18n::set(Lang::En);
-        let _ = std::fs::remove_dir_all(dir);
     }
 }
