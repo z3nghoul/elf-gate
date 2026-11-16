@@ -939,6 +939,20 @@ impl Engine {
         ));
     }
 
+    /// Moves the start-at-logon entry to where the mode wants it (Windows: TUN needs the
+    /// elevated task, PROXY the plain entry). Where there is no task, nothing depends on the mode.
+    pub fn sync_autostart(&mut self, trigger: crate::autostart::Trigger) {
+        if !self.autostart_on || crate::platform::logon_task().is_none() {
+            return;
+        }
+        let tun = self.config.mode.traffic == Mode::Tun;
+        if let Err(e) = crate::autostart::apply(true, tun, trigger) {
+            self.logt(Level::Warning, || {
+                crate::t!("eng.autostart_alert", error = e)
+            });
+        }
+    }
+
     fn toggle_mode(&mut self) {
         let next = match self.mode {
             Mode::Proxy => Mode::Tun,
@@ -948,6 +962,7 @@ impl Engine {
         self.config.mode.traffic = next;
         self.save_config();
         self.log(Level::Info, format!("mode: {}", mode_name(self.mode)));
+        self.sync_autostart(crate::autostart::Trigger::UserAction);
         // Switching the mode while connected restarts the connection in the new mode.
         if let Conn::Connected(id) | Conn::Connecting(id) = self.conn {
             self.connect(id);
@@ -1376,30 +1391,15 @@ impl Engine {
                 self.config.ui.theme = v;
             }
             Autostart(on) => {
-                let result = if on {
-                    crate::ipc::Spawn::default_for_current_exe()
-                        .map(|sp| {
-                            let mut cmd = vec![sp.program.display().to_string()];
-                            cmd.extend(sp.args);
-                            cmd
-                        })
-                        .ok_or_else(|| crate::t!("eng.no_exe_path"))
-                        .and_then(|cmd| {
-                            crate::platform::autostart()
-                                .enable(&cmd)
-                                .map_err(|e| e.to_string())
-                        })
-                } else {
-                    crate::platform::autostart()
-                        .disable()
-                        .map_err(|e| e.to_string())
-                };
-                match result {
-                    Ok(()) => self.autostart_on = on,
-                    Err(e) => {
-                        self.error_alert(crate::t!("eng.autostart_alert", error = e));
-                        return;
-                    }
+                let result = crate::autostart::apply(
+                    on,
+                    self.config.mode.traffic == Mode::Tun,
+                    crate::autostart::Trigger::UserAction,
+                );
+                self.autostart_on = crate::autostart::is_enabled();
+                if let Err(e) = result {
+                    self.error_alert(crate::t!("eng.autostart_alert", error = e));
+                    return;
                 }
                 self.logt(Level::Info, || {
                     crate::t!(

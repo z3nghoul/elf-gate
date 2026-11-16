@@ -92,6 +92,11 @@ pub async fn run(args: &[String]) -> i32 {
         };
     }
 
+    // `--autostart-task create <user>` / `delete`: started elevated, one run, no daemon.
+    if let Some(i) = args.iter().position(|a| a == crate::autostart::TASK_FLAG) {
+        return crate::autostart::run_once(&args[i + 1..]);
+    }
+
     let mut listener = match platform::ipc_bind() {
         Ok(l) => l,
         Err(IpcBindError::AlreadyRunning) => return 0,
@@ -132,12 +137,13 @@ pub async fn run(args: &[String]) -> i32 {
         .with_proxy(ProxyHandle::spawn(proxy, bg_tx))
         .with_state_store(StateStore::default_location())
         .with_check_cache(storage::state_dir().join("check-cache.json"))
-        .with_autostart(platform::autostart().is_enabled());
+        .with_autostart(crate::autostart::is_enabled());
     engine.startup_tun_cleanup();
     if let Some(note) = recovered {
         engine.log(crate::event::Level::Warning, note);
     }
     engine.start_background_checks();
+    engine.sync_autostart(crate::autostart::Trigger::Startup);
     if args.iter().any(|a| a == "--tun") {
         engine.start_tun_from_cli();
     } else {

@@ -3,6 +3,7 @@
 
 pub mod action;
 pub mod app;
+pub mod autostart;
 pub mod build_info;
 pub mod daemon;
 pub mod engine;

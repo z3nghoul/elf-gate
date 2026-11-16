@@ -22,10 +22,10 @@ pub fn open() -> Option<Box<dyn Firewall>> {
 struct Com;
 
 /// COM is initialised for the thread that makes the calls, and released again after them.
-struct ComScope;
+pub(super) struct ComScope;
 
 impl ComScope {
-    fn enter() -> Result<Self, String> {
+    pub(super) fn enter() -> Result<Self, String> {
         // SAFETY: balanced by `CoUninitialize` in `Drop`; a thread that already has COM in
         // another mode answers with an error, which is reported, not ignored.
         unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }

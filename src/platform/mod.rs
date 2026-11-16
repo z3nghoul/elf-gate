@@ -245,6 +245,28 @@ pub trait Autostart: Send + Sync {
     fn disable(&self) -> Result<(), PlatformError>;
 }
 
+/// The elevated "start at logon" entry (a Task Scheduler task on Windows; nothing on Linux).
+/// The task runs as the user who is logging in, with the highest rights, so no UAC prompt
+/// appears at logon.
+pub trait LogonTask: Send + Sync {
+    /// The command line the task runs (see [`command_line`]); `None` when there is no task.
+    fn command(&self) -> Result<Option<String>, PlatformError>;
+    /// Creates or replaces the task for `user` (`DOMAIN\name`). Needs administrator rights.
+    fn create(&self, user: &str, command: &[String]) -> Result<(), PlatformError>;
+    /// Removes the task; no task is not an error.
+    fn delete(&self) -> Result<(), PlatformError>;
+}
+
+/// A program and its argument string as one command line, comparable with [`quote_command`].
+pub fn command_line(program: &str, arguments: &str) -> String {
+    let program = quote_command(&[program.to_string()]);
+    if arguments.is_empty() {
+        program
+    } else {
+        format!("{program} {arguments}")
+    }
+}
+
 /// One command line in the Windows convention: arguments with spaces or quotes are quoted.
 pub fn quote_command(command: &[String]) -> String {
     command
@@ -273,6 +295,23 @@ mod command_tests {
             "\"C:\\Program Files\\elf-gate\\elf-gated.exe\" --background"
         );
         assert_eq!(c(&["a", "b \"c\""]), "a \"b \\\"c\\\"\"");
+    }
+
+    #[test]
+    fn a_task_action_reads_back_as_the_command_that_made_it() {
+        use super::command_line;
+        let made = quote_command(&[
+            "C:\\Program Files\\elf\\elf-gated.exe".into(),
+            "--x y".into(),
+        ]);
+        assert_eq!(
+            command_line("C:\\Program Files\\elf\\elf-gated.exe", "\"--x y\""),
+            made
+        );
+        assert_eq!(
+            command_line("C:\\elf\\elf-gated.exe", ""),
+            "C:\\elf\\elf-gated.exe"
+        );
     }
 }
 
@@ -336,6 +375,11 @@ pub fn run_supervisor(args: &[String]) -> i32 {
 
 pub fn autostart() -> Box<dyn Autostart> {
     Box::new(imp::autostart::Entry::detect())
+}
+
+/// The logon task; `None` where there is none (Linux).
+pub fn logon_task() -> Option<Box<dyn LogonTask>> {
+    imp::task::open()
 }
 
 /// The firewall rule set; `None` where there is no firewall to configure (Linux).

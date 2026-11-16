@@ -8,5 +8,6 @@ pub mod net;
 pub mod privileges;
 pub mod proxy;
 pub mod signals;
+pub mod task;
 pub mod tray;
 pub mod tun;
