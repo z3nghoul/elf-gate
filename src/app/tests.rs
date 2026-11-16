@@ -35,6 +35,7 @@ pub(crate) fn view_with(links: &[&str]) -> View {
         conn_mode: Mode::Proxy,
         tun_active: false,
         proxy_active: false,
+        tun_fallback: None,
         health: HealthState::Unknown,
         config: crate::test_support::config_ru(),
         traffic: Traffic::default(),

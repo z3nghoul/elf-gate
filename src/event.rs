@@ -76,6 +76,8 @@ pub enum BgEvent {
         needs_privileges: bool,
         /// The connection was refused by this machine (10013): the UI offers the firewall setup.
         local_block: bool,
+        /// TUN mode: the adapter or the interface could not be set up (not a rights problem).
+        tun_failed: bool,
     },
     /// Result of the connection check through the local proxy.
     Health {

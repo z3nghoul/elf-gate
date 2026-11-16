@@ -15,6 +15,7 @@ pub enum SettingId {
     LogLevel,
     VerboseLog,
     SetSystemProxy,
+    ProxyWithTun,
     PingMode,
     PingUrl,
     PingTimeout,
@@ -91,6 +92,11 @@ impl AppState {
                 SettingId::SetSystemProxy,
                 crate::t!("setting.system_proxy"),
                 onoff(c.proxy.set_system_proxy),
+            ),
+            (
+                SettingId::ProxyWithTun,
+                crate::t!("setting.proxy_with_tun"),
+                onoff(c.proxy.with_tun),
             ),
             (
                 SettingId::PingMode,
@@ -193,6 +199,7 @@ impl AppState {
         let set = match id {
             SettingId::VerboseLog => Setting::VerboseLog(!c.core.verbose_log),
             SettingId::SetSystemProxy => Setting::SetSystemProxy(!c.proxy.set_system_proxy),
+            SettingId::ProxyWithTun => Setting::ProxyWithTun(!c.proxy.with_tun),
             SettingId::ManageFirewall => Setting::ManageFirewall(!c.tun.manage_firewall),
             SettingId::AutoConnect => Setting::AutoConnect(!c.ui.auto_connect),
             SettingId::Autostart => Setting::Autostart(!self.autostart),

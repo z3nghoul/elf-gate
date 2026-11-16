@@ -1,5 +1,6 @@
 ---
 source: src/ui/lang_tests.rs
+assertion_line: 27
 expression: frame
 ---
 ┌ Settings ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -12,6 +13,7 @@ expression: frame
 │> Core log level                    warning                                                                           │
 │  Verbose core log (access)         off                                                                               │
 │  System proxy                      on                                                                                │
+│  System proxy together with TUN    on                                                                                │
 │  Ping mode                         tcp                                                                               │
 │  URL for URL ping                  https://www.gstatic.com/generate_204                                              │
 │  Ping timeout, ms                  3000                                                                              │
@@ -20,7 +22,6 @@ expression: frame
 │  DNS through the tunnel            1.1.1.1                                                                           │
 │  Auto Windows Firewall setup       on                                                                                │
 │  Connect on start                  off                                                                               │
-│  Start at login                    off                                                                               │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │tray icon: none (not supported by this desktop or not running)                                                        │

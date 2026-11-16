@@ -173,6 +173,7 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
                     Some(match kind {
                         Some(
                             SettingId::SetSystemProxy
+                            | SettingId::ProxyWithTun
                             | SettingId::ManageFirewall
                             | SettingId::AutoConnect
                             | SettingId::Autostart

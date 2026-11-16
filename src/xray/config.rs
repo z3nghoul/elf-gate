@@ -1007,6 +1007,17 @@ mod tests {
             .unwrap()
             .iter()
             .any(|i| i["tag"] == "socks-in"));
+        // Mixed mode: the system proxy points at these two, next to the TUN inbound.
+        for tag in ["socks-in", "http-in", "tun-in"] {
+            assert!(
+                cfg["inbounds"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|i| i["tag"] == tag),
+                "{tag}"
+            );
+        }
 
         plan.tun = Some(tun_plan(false, false));
         let cfg = build_with(&server(), &CoreConfig::default(), &plan).unwrap();

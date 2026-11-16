@@ -101,6 +101,8 @@ pub struct Engine {
     pub config: Config,
     /// The worker reported the system proxy as switched on.
     pub proxy_active: bool,
+    /// TUN did not start and the core runs without it, as a system proxy (the reason).
+    pub tun_fallback: Option<String>,
     pub traffic: Traffic,
     /// Demo data and fake numbers are enabled (debug builds).
     pub mock: bool,
@@ -120,6 +122,9 @@ pub struct Engine {
     proxy: Option<ProxyHandle>,
     /// We asked the worker to switch the system proxy on and have not asked to undo it.
     proxy_requested: bool,
+    /// The running core replaced an earlier one in TUN mode: say that old connections keep
+    /// their old route once the new core is up.
+    restart_hint: bool,
     /// The bypass list the system proxy was last given.
     proxy_bypass_sent: Vec<String>,
     /// A core start or stop is in flight; new connect requests wait for it.
@@ -226,6 +231,7 @@ impl Engine {
             conn_mode: config.mode.traffic,
             tun_active: false,
             proxy_active: false,
+            tun_fallback: None,
             health: HealthState::Unknown,
             config: config.redacted(),
             traffic: Traffic::default(),
@@ -244,6 +250,7 @@ impl Engine {
             tun_active: false,
             config,
             proxy_active: false,
+            tun_fallback: None,
             traffic: Traffic::default(),
             mock,
             tray: false,
@@ -256,6 +263,7 @@ impl Engine {
             core: None,
             proxy: None,
             proxy_requested: false,
+            restart_hint: false,
             proxy_bypass_sent: Vec::new(),
             busy: false,
             run_dir: std::env::temp_dir().join("elf-gate-run"),
@@ -541,6 +549,7 @@ impl Engine {
             conn_mode: self.conn_mode,
             tun_active: self.tun_active,
             proxy_active: self.proxy_active,
+            tun_fallback: self.tun_fallback.clone(),
             health: self.health.clone(),
             config: self.config.redacted(),
             traffic: self.traffic.clone(),
@@ -579,7 +588,7 @@ impl Engine {
     /// Points the system proxy at the local core, if the user wants that and it can work.
     fn request_proxy_on(&mut self) {
         let Some(handle) = &self.proxy else { return };
-        if !self.config.proxy.set_system_proxy || self.conn_mode != Mode::Proxy {
+        if !self.proxy_wanted() {
             return;
         }
         let bypass = self.proxy_bypass();
@@ -609,6 +618,32 @@ impl Engine {
         });
         self.proxy_bypass_sent = bypass;
         self.proxy_requested = true;
+    }
+
+    /// Whether the live connection should have the system proxy. Plain PROXY mode and TUN
+    /// ("mixed" mode, `[proxy].with_tun`) follow the settings; a TUN that did not start
+    /// leaves the proxy as the only way in, so it is switched on whatever the settings say.
+    fn proxy_wanted(&self) -> bool {
+        if self.tun_fallback.is_some() {
+            return true;
+        }
+        self.config.proxy.set_system_proxy
+            && match self.conn_mode {
+                Mode::Proxy => true,
+                Mode::Tun => self.config.proxy.with_tun,
+            }
+    }
+
+    /// Makes the system proxy match the settings of a live connection.
+    fn sync_proxy(&mut self) {
+        if !matches!(self.conn, Conn::Connected(_)) {
+            return;
+        }
+        if self.proxy_wanted() {
+            self.request_proxy_on();
+        } else {
+            self.request_proxy_off();
+        }
     }
 
     /// `[proxy].bypass` plus plain domains and IPs of the "direct" rules (exclude mode).
@@ -716,9 +751,10 @@ impl Engine {
                 error,
                 needs_privileges,
                 local_block,
+                tun_failed,
             } => {
                 self.busy = false;
-                self.on_core_failed(id, error, needs_privileges, local_block);
+                self.on_core_failed(id, error, needs_privileges, local_block, tun_failed);
             }
             BgEvent::Health { id, result } => self.on_health(id, result),
             BgEvent::CoreStopped => self.busy = false,
@@ -843,6 +879,7 @@ impl Engine {
         }
         self.conn = Conn::Disconnected;
         self.tun_active = false;
+        self.tun_fallback = None;
         self.log(Level::Info, "disconnected");
         self.request_proxy_off();
     }
@@ -885,10 +922,6 @@ impl Engine {
         self.config.mode.traffic = next;
         self.save_config();
         self.log(Level::Info, format!("mode: {}", mode_name(self.mode)));
-        if self.mode == Mode::Tun {
-            // TUN needs no system proxy.
-            self.request_proxy_off();
-        }
         // Switching the mode while connected restarts the connection in the new mode.
         if let Conn::Connected(id) | Conn::Connecting(id) = self.conn {
             self.connect(id);
@@ -1282,7 +1315,14 @@ impl Engine {
                 self.config.core.log_level = v;
             }
             VerboseLog(v) => self.config.core.verbose_log = v,
-            SetSystemProxy(v) => self.config.proxy.set_system_proxy = v,
+            SetSystemProxy(v) => {
+                self.config.proxy.set_system_proxy = v;
+                self.sync_proxy();
+            }
+            ProxyWithTun(v) => {
+                self.config.proxy.with_tun = v;
+                self.sync_proxy();
+            }
             PingMode(m) => self.config.ping.mode = m,
             PingUrl(v) => self.config.ping.url = v,
             PingTimeoutMs(v) => self.config.ping.timeout_ms = v.clamp(500, 30_000),

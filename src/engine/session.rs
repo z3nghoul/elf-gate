@@ -16,6 +16,8 @@ struct Failure {
     needs_privileges: bool,
     /// This machine's firewall, antivirus or another VPN refused the connection (10013).
     local_block: bool,
+    /// TUN mode: the adapter or the interface could not be set up (not a rights problem).
+    tun_failed: bool,
 }
 
 impl From<String> for Failure {
@@ -24,8 +26,31 @@ impl From<String> for Failure {
             message,
             needs_privileges: false,
             local_block: false,
+            tun_failed: false,
         }
     }
+}
+
+/// What a core start error means: `(needs_privileges, tun_failed)`. The core is the last step
+/// of a start, so in TUN mode what it cannot start (the adapter, the driver library, the
+/// interface) is a TUN problem; a missing right is not: that one has its own dialog.
+fn classify_start_error(mode: Mode, text: &str) -> (bool, bool) {
+    let needs_privileges = mode == Mode::Tun && tun::looks_like_missing_privileges(text);
+    (needs_privileges, mode == Mode::Tun && !needs_privileges)
+}
+
+/// The first non-empty line of a start error, short enough for a one-line notice.
+fn short_reason(error: &str) -> String {
+    let line = error
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    let mut out: String = line.chars().take(160).collect();
+    if line.chars().count() > 160 {
+        out.push('…');
+    }
+    out
 }
 
 fn log_warning(tx: &BgTx, text: String) {
@@ -79,6 +104,7 @@ where
                     message: crate::t!("eng.tun_adapter_stuck", raw = again.message),
                     needs_privileges: false,
                     local_block: false,
+                    tun_failed: true,
                 }),
                 other => other,
             }
@@ -134,6 +160,7 @@ async fn start_core(request: StartRequest<'_>) -> Result<Core, Failure> {
             },
             needs_privileges: false,
             local_block: e.local_block,
+            tun_failed: false,
         })?;
 
     // Ask Xray about the server itself first: a refusal greys the server out.
@@ -229,8 +256,10 @@ async fn start_core(request: StartRequest<'_>) -> Result<Core, Failure> {
         .await
         .map_err(|e| {
             let text = e.to_string();
+            let (needs_privileges, tun_failed) = classify_start_error(mode, &text);
             Failure {
-                needs_privileges: mode == Mode::Tun && tun::looks_like_missing_privileges(&text),
+                needs_privileges,
+                tun_failed,
                 message: text,
                 local_block: false,
             }
@@ -244,7 +273,20 @@ async fn start_core(request: StartRequest<'_>) -> Result<Core, Failure> {
 }
 
 impl Engine {
+    /// The user's request to connect (a command, a toggled mode, an answered question): runs
+    /// in the chosen mode, and an earlier TUN fallback is forgotten.
     pub(super) fn connect(&mut self, id: u64) {
+        if self.busy {
+            self.status(crate::t!("eng.wait_core"));
+            return;
+        }
+        self.tun_fallback = None;
+        self.connect_in(id, self.mode);
+    }
+
+    /// Starts the core for a server in the given mode. TUN that could not start comes back
+    /// here in PROXY mode (see `on_core_failed`).
+    fn connect_in(&mut self, id: u64, mode: Mode) {
         if self.busy {
             self.status(crate::t!("eng.wait_core"));
             return;
@@ -258,7 +300,6 @@ impl Engine {
             return;
         }
 
-        let mode = self.mode;
         let mut setup = None;
         if mode == Mode::Tun {
             if self.tun_first_run() {
@@ -299,6 +340,7 @@ impl Engine {
             setup = preflight.setup;
         }
 
+        self.restart_hint = mode == Mode::Tun && matches!(self.conn, Conn::Connected(_));
         self.traffic = Traffic::default();
         self.process_unresolved = 0;
         self.health = HealthState::Unknown;
@@ -368,6 +410,7 @@ impl Engine {
                     error: f.message,
                     needs_privileges: f.needs_privileges,
                     local_block: f.local_block,
+                    tun_failed: f.tun_failed,
                 },
             };
             let _ = tx.send(ev);
@@ -432,7 +475,10 @@ impl Engine {
         self.core = Some(core);
         self.conn = Conn::Connected(id);
         self.tun_active = self.conn_mode == Mode::Tun;
-        self.request_proxy_on();
+        self.sync_proxy();
+        if std::mem::take(&mut self.restart_hint) && self.conn_mode == Mode::Tun {
+            self.status(crate::t!("eng.restart_apps"));
+        }
         let name = self.server_by_id(id).map(|s| s.name.clone());
         self.log(
             Level::Info,
@@ -453,11 +499,27 @@ impl Engine {
         error: String,
         needs_privileges: bool,
         local_block: bool,
+        tun_failed: bool,
     ) {
         self.log(Level::Error, format!("[Error] {error}"));
         if self.conn != Conn::Connecting(id) {
             return;
         }
+        if tun_failed && self.conn_mode == Mode::Tun {
+            // TUN did not come up: do not leave the user without a VPN. The same start path
+            // again, without the TUN inbound; the system proxy goes on whatever the settings say.
+            let reason = short_reason(&error);
+            self.tun_active = false;
+            self.tun_fallback = Some(reason.clone());
+            self.restart_hint = false;
+            self.alert(Alert::Notice(crate::t!(
+                "eng.tun_fallback",
+                reason = reason
+            )));
+            self.connect_in(id, Mode::Proxy);
+            return;
+        }
+        self.tun_fallback = None;
         self.tun_active = false;
         self.conn = Conn::Error(crate::t!("eng.core_start_failed"));
         self.request_proxy_off();
@@ -892,6 +954,7 @@ mod tests {
             "Windows запретила elf-gate подключиться".into(),
             false,
             true,
+            false,
         );
         let last = a.alerts().last().cloned();
         if crate::platform::IS_WINDOWS {
@@ -945,6 +1008,7 @@ mod tests {
             "ядро завершилось сразу (operation not permitted)".into(),
             true,
             false,
+            false,
         );
         assert!(matches!(a.conn, Conn::Error(_)));
         assert!(!a.alerts().is_empty());
@@ -953,6 +1017,7 @@ mod tests {
         a.on_core_failed(
             id,
             "порт 10808 (socks) уже занят другой программой".into(),
+            false,
             false,
             false,
         );
@@ -1107,6 +1172,7 @@ mod tests {
             message: text.into(),
             needs_privileges: false,
             local_block: false,
+            tun_failed: true,
         }
     }
 
@@ -1391,5 +1457,186 @@ mod tests {
         a.config.core.verbose_log = true;
         a.on_bg(noise(1));
         assert!(a.logged("no process found"));
+    }
+
+    // ---------- mixed mode: TUN + system proxy, and the fall back to the proxy ----------
+
+    #[test]
+    fn only_a_real_tun_problem_counts_as_a_tun_failure() {
+        assert_eq!(
+            classify_start_error(Mode::Tun, "Failed to create wintun adapter"),
+            (false, true)
+        );
+        assert_eq!(
+            classify_start_error(Mode::Tun, "operation not permitted"),
+            (true, false),
+            "no rights: the privileges dialog, not a fall back"
+        );
+        assert_eq!(
+            classify_start_error(Mode::Proxy, "address already in use"),
+            (false, false)
+        );
+    }
+
+    #[tokio::test]
+    async fn the_proxy_follows_the_settings_in_both_modes_and_is_forced_after_a_fall_back() {
+        let dir = TempDir::new("wanted");
+        let (mut a, _) = tun_app(MockTunHost::healthy(), true, &dir);
+        for (conn_mode, set, with_tun, want) in [
+            (Mode::Proxy, true, true, true),
+            (Mode::Proxy, true, false, true),
+            (Mode::Proxy, false, true, false),
+            (Mode::Tun, true, true, true),
+            (Mode::Tun, true, false, false),
+            (Mode::Tun, false, true, false),
+        ] {
+            a.conn_mode = conn_mode;
+            a.config.proxy.set_system_proxy = set;
+            a.config.proxy.with_tun = with_tun;
+            assert_eq!(
+                a.proxy_wanted(),
+                want,
+                "{conn_mode:?} set={set} with_tun={with_tun}"
+            );
+        }
+        a.tun_fallback = Some("x".into());
+        a.conn_mode = Mode::Proxy;
+        a.config.proxy.set_system_proxy = false;
+        a.config.proxy.with_tun = false;
+        assert!(a.proxy_wanted(), "the proxy is the only way in now");
+    }
+
+    #[test]
+    fn the_default_setting_is_mixed_mode() {
+        assert!(crate::storage::Config::default().proxy.with_tun);
+    }
+
+    #[tokio::test]
+    async fn a_tun_that_does_not_start_restarts_the_core_as_a_proxy_and_says_so() {
+        let dir = TempDir::new("fallback");
+        let (mut a, id) = tun_app(MockTunHost::healthy(), true, &dir);
+        a.conn = Conn::Connecting(id);
+        a.conn_mode = Mode::Tun;
+        a.config.proxy.with_tun = false;
+        a.on_core_failed(
+            id,
+            "Failed to create wintun adapter\nsecond line".into(),
+            false,
+            false,
+            true,
+        );
+        assert_eq!(a.conn, Conn::Connecting(id), "a new start is under way");
+        assert_eq!(a.conn_mode, Mode::Proxy, "without the TUN inbound");
+        assert!(!a.tun_active);
+        assert_eq!(
+            a.tun_fallback.as_deref(),
+            Some("Failed to create wintun adapter")
+        );
+        assert!(a.proxy_wanted(), "even with the setting off");
+        let last = a.alerts().last().cloned();
+        let Some(Alert::Notice(text)) = last else {
+            panic!("{:?}", a.alerts())
+        };
+        assert!(
+            text.contains("wintun adapter") && text.contains("Discord"),
+            "{text}"
+        );
+        assert_eq!(a.view().tun_fallback, a.tun_fallback);
+    }
+
+    #[tokio::test]
+    async fn refusing_the_rights_is_not_a_tun_failure() {
+        let dir = TempDir::new("noroll");
+        let (mut a, id) = tun_app(MockTunHost::healthy(), true, &dir);
+        a.conn = Conn::Connecting(id);
+        a.conn_mode = Mode::Tun;
+        a.on_core_failed(id, "operation not permitted".into(), true, false, false);
+        assert!(a.tun_fallback.is_none());
+        assert!(matches!(a.conn, Conn::Error(_)), "{:?}", a.conn);
+        assert!(!a.alerts().is_empty(), "the rights dialog is shown");
+        assert!(a
+            .alerts()
+            .iter()
+            .all(|l| !matches!(l, Alert::Notice(t) if t.contains("Discord"))));
+    }
+
+    #[tokio::test]
+    async fn a_user_connect_forgets_an_earlier_fall_back() {
+        let dir = TempDir::new("forget");
+        let (mut a, id) = tun_app(MockTunHost::healthy(), true, &dir);
+        a.tun_fallback = Some("x".into());
+        a.mode = Mode::Proxy;
+        a.connect(id);
+        assert!(a.tun_fallback.is_none());
+    }
+
+    /// The system proxy set next to TUN is put back on exit, like in plain PROXY mode.
+    #[tokio::test]
+    async fn the_proxy_set_next_to_tun_is_restored_on_exit() {
+        use crate::platform::mock::{MockProxy, SharedMock};
+        let dir = TempDir::new("mixed-exit");
+        let mock = Arc::new(MockProxy::with_user_settings(&[("enabled", "0")]));
+        let before = mock.snapshot();
+        let controller = Arc::new(crate::sysproxy::ProxyController::new(
+            Box::new(SharedMock(mock.clone())),
+            StateStore::new(dir.path()),
+        ));
+        let (tx, _rx) = unbounded_channel();
+        let handle = crate::sysproxy::ProxyHandle::spawn(controller, tx.clone());
+        let (a, id) = tun_app(MockTunHost::healthy(), true, dir.path());
+        let mut a = a.with_proxy(handle);
+        a.conn = Conn::Connected(id);
+        a.conn_mode = Mode::Tun;
+        a.tun_active = true;
+        a.sync_proxy();
+        for _ in 0..100 {
+            if mock.snapshot().values.get("enabled").map(String::as_str) == Some("1") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(mock.snapshot().values["enabled"], "1", "on in TUN mode");
+        assert_eq!(mock.snapshot().values["server"], "127.0.0.1:10809");
+        a.shutdown().await;
+        assert_eq!(mock.snapshot(), before, "the user's settings are back");
+    }
+
+    #[tokio::test]
+    async fn with_tun_off_the_proxy_stays_untouched_next_to_tun() {
+        use crate::platform::mock::{MockProxy, SharedMock};
+        let dir = TempDir::new("tun-only");
+        let mock = Arc::new(MockProxy::with_user_settings(&[("enabled", "0")]));
+        let before = mock.snapshot();
+        let controller = Arc::new(crate::sysproxy::ProxyController::new(
+            Box::new(SharedMock(mock.clone())),
+            StateStore::new(dir.path()),
+        ));
+        let (tx, _rx) = unbounded_channel();
+        let handle = crate::sysproxy::ProxyHandle::spawn(controller, tx);
+        let (a, id) = tun_app(MockTunHost::healthy(), true, dir.path());
+        let mut a = a.with_proxy(handle);
+        a.config.proxy.with_tun = false;
+        a.conn = Conn::Connected(id);
+        a.conn_mode = Mode::Tun;
+        a.sync_proxy();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(mock.snapshot(), before);
+    }
+
+    /// A restart in TUN mode while connected (new rules, preset or server) tells the user that
+    /// programs which are already connected keep their old route.
+    #[tokio::test]
+    async fn a_restart_in_tun_mode_hints_to_restart_the_programs() {
+        let dir = TempDir::new("hint");
+        let (mut a, id) = tun_app(MockTunHost::healthy(), true, &dir);
+        a.config.ui.tun_intro_done = true;
+        a.conn = Conn::Connected(id);
+        a.connect(id);
+        assert!(a.restart_hint, "set by a restart that was Connected");
+        a.restart_hint = false;
+        a.busy = false;
+        a.conn = Conn::Disconnected;
+        a.connect(id);
+        assert!(!a.restart_hint, "a first connect needs no hint");
     }
 }

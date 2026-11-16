@@ -50,6 +50,7 @@ pub enum Setting {
     LogLevel(String),
     VerboseLog(bool),
     SetSystemProxy(bool),
+    ProxyWithTun(bool),
     PingMode(crate::storage::PingMode),
     PingUrl(String),
     PingTimeoutMs(u64),
@@ -161,6 +162,9 @@ pub struct View {
     pub conn_mode: TrafficMode,
     pub tun_active: bool,
     pub proxy_active: bool,
+    /// TUN could not start and the connection runs as a system proxy; the text is the reason.
+    #[serde(default)]
+    pub tun_fallback: Option<String>,
     pub health: HealthState,
     /// Without server links and subscription URLs, see [`Config::redacted`].
     pub config: Config,
@@ -265,6 +269,7 @@ mod tests {
             conn_mode: TrafficMode::Proxy,
             tun_active: false,
             proxy_active: false,
+            tun_fallback: None,
             health: HealthState::Unknown,
             config: config.redacted(),
             traffic: Traffic::default(),

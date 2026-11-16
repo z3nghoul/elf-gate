@@ -135,6 +135,8 @@ pub struct AppState {
     pub conn_mode: Mode,
     pub tun_active: bool,
     pub proxy_active: bool,
+    /// TUN did not start; the connection runs as a system proxy (the reason).
+    pub tun_fallback: Option<String>,
     pub health: HealthState,
     pub config: Config,
     pub traffic: Traffic,
@@ -187,6 +189,7 @@ impl AppState {
             conn_mode: Mode::Proxy,
             tun_active: false,
             proxy_active: false,
+            tun_fallback: None,
             health: HealthState::Unknown,
             config: Config::default(),
             traffic: Traffic::default(),
@@ -239,6 +242,7 @@ impl AppState {
             conn_mode: Mode::Proxy,
             tun_active: false,
             proxy_active: false,
+            tun_fallback: None,
             health: HealthState::Unknown,
             config,
             traffic: Traffic::default(),
@@ -321,6 +325,7 @@ impl AppState {
             conn_mode,
             tun_active,
             proxy_active,
+            tun_fallback,
             health,
             config,
             traffic,
@@ -346,6 +351,7 @@ impl AppState {
         self.conn_mode = conn_mode;
         self.tun_active = tun_active;
         self.proxy_active = proxy_active;
+        self.tun_fallback = tun_fallback;
         self.health = health;
         self.config = config;
         self.traffic = traffic;

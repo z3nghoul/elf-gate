@@ -5,13 +5,26 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-/// `PROXY`, or `TUN include` / `TUN exclude`.
+/// TUN and the system proxy both work at once.
+fn mixed(app: &AppState) -> bool {
+    app.tun_active && app.proxy_active
+}
+
+/// `PROXY`, `TUN include` / `TUN exclude`, or `TUN+PROXY include` / `TUN+PROXY exclude`.
+/// After a TUN that did not start the live connection is plain `PROXY`.
 fn mode_label(app: &AppState) -> String {
+    if app.tun_fallback.is_some() {
+        return mode_name(crate::app::Mode::Proxy).to_string();
+    }
     match app.mode {
         crate::app::Mode::Proxy => mode_name(app.mode).to_string(),
         crate::app::Mode::Tun => format!(
             "{} {}",
-            mode_name(app.mode),
+            if mixed(app) {
+                "TUN+PROXY".to_string()
+            } else {
+                mode_name(app.mode).to_string()
+            },
             match app.config.mode.routing {
                 crate::model::rule::RoutingMode::Exclude => "exclude",
                 crate::model::rule::RoutingMode::Include => "include",
@@ -96,7 +109,13 @@ fn segments(app: &AppState, th: &Theme) -> Vec<Segment> {
     first.push(Span::styled(text, th.text()));
     out.push(first);
     let mut mode = vec![Span::styled(mode_label(app), th.title())];
-    if app.proxy_active {
+    if app.tun_fallback.is_some() {
+        mode.push(Span::styled(
+            format!(" ({})", crate::t!("status.tun_fallback")),
+            th.warn(),
+        ));
+    }
+    if app.proxy_active && !mixed(app) {
         mode.push(Span::styled(" sys-proxy", th.good()));
     }
     out.push(mode);
@@ -169,7 +188,32 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
 
 #[cfg(test)]
 mod tests {
-    use super::format_bytes;
+    use super::{format_bytes, mode_label};
+    use crate::app::{AppState, Mode};
+
+    fn app(mode: Mode) -> AppState {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut a = AppState::new(tx);
+        a.mode = mode;
+        a
+    }
+
+    #[test]
+    fn the_mode_label_tells_tun_proxy_and_both() {
+        let mut a = app(Mode::Tun);
+        assert_eq!(mode_label(&a), "TUN exclude");
+        a.tun_active = true;
+        a.proxy_active = true;
+        assert_eq!(mode_label(&a), "TUN+PROXY exclude");
+        a.tun_fallback = Some("no adapter".into());
+        a.tun_active = false;
+        assert_eq!(
+            mode_label(&a),
+            "PROXY",
+            "after a fall back the live mode is PROXY"
+        );
+        assert_eq!(mode_label(&app(Mode::Proxy)), "PROXY");
+    }
 
     #[test]
     fn formats_bytes() {

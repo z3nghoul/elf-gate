@@ -96,6 +96,9 @@ impl CoreConfig {
 pub struct ProxyConfig {
     /// `false`: the system proxy is never touched (programs are configured by hand).
     pub set_system_proxy: bool,
+    /// TUN mode also points the system proxy at the local core (the "mixed" mode): programs
+    /// that respect the proxy keep working through the VPN even when the adapter is down.
+    pub with_tun: bool,
     pub bypass: Vec<String>,
 }
 
@@ -103,6 +106,7 @@ impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
             set_system_proxy: true,
+            with_tun: true,
             bypass: [
                 "localhost",
                 "127.*",
