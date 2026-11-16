@@ -450,8 +450,14 @@ pub fn qwerty(c: char) -> char {
 }
 
 fn lookup(code: KeyCode, mods: KeyModifiers) -> Option<Action> {
+    lookup_with(code, mods, crate::build_info::DEBUG_PANIC_KEY)
+}
+
+/// The panic key (F12) is bound only when `debug_keys` is set: a release build has no such key.
+fn lookup_with(code: KeyCode, mods: KeyModifiers, debug_keys: bool) -> Option<Action> {
     BINDINGS
         .iter()
+        .filter(|b| debug_keys || b.action != Action::DebugPanic)
         .find(|b| b.keys.iter().any(|(c, m)| *c == code && *m == mods))
         .map(|b| b.action)
 }
@@ -492,6 +498,17 @@ mod tests {
         assert_eq!(
             map_key(k(KeyCode::Char('G'), KeyModifiers::SHIFT)),
             Some(Action::Bottom)
+        );
+    }
+
+    #[test]
+    fn the_panic_key_exists_only_in_a_debug_build() {
+        let f12 = (KeyCode::F(12), KeyModifiers::NONE);
+        assert_eq!(lookup_with(f12.0, f12.1, true), Some(Action::DebugPanic));
+        assert_eq!(lookup_with(f12.0, f12.1, false), None);
+        assert_eq!(
+            lookup(f12.0, f12.1).is_some(),
+            crate::build_info::DEBUG_BUILD
         );
     }
 
