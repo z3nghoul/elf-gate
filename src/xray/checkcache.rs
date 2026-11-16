@@ -389,6 +389,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("geoip.dat"), b"geo").unwrap();
+        std::fs::write(dir.join("geosite.dat"), b"geo").unwrap();
         let bin = counting_xray(&dir, false);
         let checker = Checker::new(None);
         let cfg = serde_json::json!({"a": 1});

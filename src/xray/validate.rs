@@ -59,11 +59,85 @@ pub const LOCALIZED_ENVIRONMENT_ERRORS: [&str; 6] = [
     "\u{43d}\u{435} \u{432}\u{434}\u{430}\u{43b}\u{43e}\u{441}\u{44f} \u{437}\u{43d}\u{430}\u{439}\u{442}\u{438} \u{432}\u{43a}\u{430}\u{437}\u{430}\u{43d}\u{438}\u{439}",
 ];
 
+pub const ERROR_FILE_NOT_FOUND: u32 = 2;
+pub const ERROR_ACCESS_DENIED: u32 = 5;
+pub const ERROR_PRIVILEGE_NOT_HELD: u32 = 1314;
+
+/// Windows system error numbers named in `text`: "errno 5", "error code 1314", "winerror 2",
+/// "0x522". Go prints the system's own words, but some paths print the number; whatever the
+/// language, the number is the same. Only a number after one of these markers counts.
+pub fn windows_error_codes(text: &str) -> Vec<u32> {
+    let t = text.to_lowercase();
+    let mut out = Vec::new();
+    for marker in ["errno ", "error code ", "winerror ", "system error ", "0x"] {
+        let hex = marker == "0x";
+        let mut rest = t.as_str();
+        while let Some(i) = rest.find(marker) {
+            rest = &rest[i + marker.len()..];
+            let digits: String = rest
+                .chars()
+                .take_while(|c| {
+                    if hex {
+                        c.is_ascii_hexdigit()
+                    } else {
+                        c.is_ascii_digit()
+                    }
+                })
+                .collect();
+            if let Ok(n) = u32::from_str_radix(&digits, if hex { 16 } else { 10 }) {
+                out.push(n);
+            }
+        }
+    }
+    out
+}
+
+/// Xray's own words for a config problem: its startup failure, or the config reader.
+/// Anything else that makes `run -test` fail is not a verdict on the server.
+pub fn is_config_error(output: &str) -> bool {
+    output.contains("Failed to start") || output.contains("infra/conf")
+}
+
+/// What our own look at the core's surroundings found (it is read before Xray's words are
+/// believed).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct EnvProblems {
+    /// The binary cannot be read: nothing can be asked.
+    pub binary: Option<String>,
+    /// The data files (`geoip.dat`, `geosite.dat`) that are missing or unreadable.
+    pub data: Vec<String>,
+}
+
+pub fn environment_problems(binary: &Path) -> EnvProblems {
+    let open = |p: &Path| std::fs::File::open(p).err();
+    let binary_problem = open(binary)
+        .map(|e| crate::t!("val.binary_unreadable", path = binary.display(), error = e));
+    let dir = super::process::asset_dir(binary);
+    let data = ["geoip.dat", "geosite.dat"]
+        .iter()
+        .filter_map(|f| {
+            let path = dir.join(f);
+            open(&path).map(|e| crate::t!("val.geo_unreadable", path = path.display(), error = e))
+        })
+        .collect();
+    EnvProblems {
+        binary: binary_problem,
+        data,
+    }
+}
+
 /// A refusal caused by the environment (a file the core cannot see), not by the config: it says
 /// nothing about the server and must not be cached.
 pub fn is_environmental(reason: &str) -> bool {
     let r = reason.to_lowercase();
-    r.contains("stat ")
+    windows_error_codes(reason).iter().any(|c| {
+        [
+            ERROR_FILE_NOT_FOUND,
+            ERROR_ACCESS_DENIED,
+            ERROR_PRIVILEGE_NOT_HELD,
+        ]
+        .contains(c)
+    }) || r.contains("stat ")
         || r.contains("no such file")
         || r.contains("permission denied")
         || LOCALIZED_ENVIRONMENT_ERRORS.iter().any(|m| r.contains(m))
@@ -155,6 +229,10 @@ async fn run_once(binary: &Path, file: &Path, with_env: bool) -> Result<Run, Ver
 /// passes, the core is started that way too, and the log says so; when it does not, the
 /// refusal carries both outputs in full and a report of how the child was started.
 pub async fn check_config(binary: &Path, cfg: &serde_json::Value, run_dir: &Path) -> Verdict {
+    let env = environment_problems(binary);
+    if let Some(problem) = env.binary {
+        return Verdict::Unavailable(problem);
+    }
     let file = run_dir.join(format!(
         "check-{}-{}.json",
         std::process::id(),
@@ -180,8 +258,19 @@ pub async fn check_config(binary: &Path, cfg: &serde_json::Value, run_dir: &Path
         Ok(r) if r.ok => Verdict::Accepted,
         Ok(r) => {
             let first = root_cause(&r.text);
-            if !is_environmental(&first) {
-                Verdict::Rejected(first)
+            if !env.data.is_empty() {
+                // Our own check found something: say so, and do not call it a verdict.
+                Verdict::Unavailable(crate::t!(
+                    "val.env_found",
+                    found = env.data.join("; "),
+                    reason = first
+                ))
+            } else if !is_environmental(&first) {
+                if is_config_error(&r.text) {
+                    Verdict::Rejected(first)
+                } else {
+                    Verdict::Unavailable(crate::t!("val.unrecognized", text = first))
+                }
             } else {
                 // Retry with the other way of passing the assets.
                 match run_once(binary, &file, !with_env).await {
@@ -282,6 +371,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("elf-gate-fakex-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("geoip.dat"), b"data").unwrap();
+        std::fs::write(dir.join("geosite.dat"), b"data").unwrap();
         let bin = fake_xray(
             &dir,
             r#"if [ -n "$XRAY_LOCATION_ASSET" ]; then echo "Failed to start: x > stat $XRAY_LOCATION_ASSET/geoip.dat: no such file or directory"; exit 23; fi
@@ -302,6 +393,7 @@ echo "Configuration OK."; exit 0"#,
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("geoip.dat"), b"data").unwrap();
+        std::fs::write(dir.join("geosite.dat"), b"data").unwrap();
         let bin = fake_xray(
             &dir,
             r#"echo "Failed to start: a > b > stat /x/geoip.dat: no such file or directory"; exit 23"#,
@@ -346,5 +438,54 @@ echo "Configuration OK."; exit 0"#,
         c.store("k2".into(), &Verdict::Rejected("vless without TLS".into()));
         assert_eq!(c.lookup("k1"), None);
         assert!(c.lookup("k2").is_some());
+    }
+
+    #[test]
+    fn windows_error_numbers_are_found_after_their_markers_only() {
+        assert_eq!(windows_error_codes("open x: errno 5"), vec![5]);
+        assert_eq!(
+            windows_error_codes("Error code 1314 while creating wintun"),
+            vec![1314]
+        );
+        assert_eq!(windows_error_codes("winerror 2"), vec![2]);
+        assert_eq!(windows_error_codes("failed: 0x522"), vec![0x522]);
+        assert!(windows_error_codes("port 5 of 2 attempts, 1314 bytes").is_empty());
+        assert!(is_environmental("CreateFile x.json: errno 2"));
+        assert!(is_environmental("something: 0x5"));
+        assert!(!is_environmental("infra/conf: errno 87"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn our_own_findings_and_unrecognized_failures_are_not_verdicts() {
+        let dir = std::env::temp_dir().join(format!("elf-gate-fakex3-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // No data files at all, and a config-looking refusal: still not a verdict on the server.
+        let bin = fake_xray(
+            &dir,
+            r#"echo "Failed to start: x > infra/conf: some reason"; exit 23"#,
+        );
+        let v = check_config(&bin, &serde_json::json!({}), &dir.join("run")).await;
+        let Verdict::Unavailable(text) = &v else {
+            panic!("{v:?}")
+        };
+        assert!(
+            text.contains("geoip.dat") && text.contains("some reason"),
+            "{text}"
+        );
+        // With the data files present the same output is Xray's refusal.
+        std::fs::write(dir.join("geoip.dat"), b"d").unwrap();
+        std::fs::write(dir.join("geosite.dat"), b"d").unwrap();
+        let v = check_config(&bin, &serde_json::json!({}), &dir.join("run")).await;
+        assert_eq!(v, Verdict::Rejected("some reason".into()));
+        // A failure that does not look like a config problem says nothing about the server.
+        let bin = fake_xray(&dir, r#"echo "segmentation fault"; exit 139"#);
+        let v = check_config(&bin, &serde_json::json!({}), &dir.join("run")).await;
+        assert!(matches!(v, Verdict::Unavailable(_)), "{v:?}");
+        // An unreadable binary is not asked at all.
+        let v = check_config(&dir.join("nope"), &serde_json::json!({}), &dir.join("run")).await;
+        assert!(matches!(v, Verdict::Unavailable(_)), "{v:?}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

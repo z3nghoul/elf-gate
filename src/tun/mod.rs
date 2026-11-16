@@ -191,6 +191,15 @@ pub fn looks_like_missing_privileges(error_text: &str) -> bool {
         || t.contains("access is denied")
         || t.contains("required privilege")
         || LOCALIZED_PRIVILEGE_ERRORS.iter().any(|m| t.contains(m))
+        || crate::xray::validate::windows_error_codes(error_text)
+            .iter()
+            .any(|c| {
+                [
+                    crate::xray::validate::ERROR_ACCESS_DENIED,
+                    crate::xray::validate::ERROR_PRIVILEGE_NOT_HELD,
+                ]
+                .contains(c)
+            })
 }
 
 /// Windows Go prints system errors in the system language (lower case, as matched).
@@ -597,6 +606,9 @@ mod tests {
     fn privilege_errors_are_recognised() {
         assert!(looks_like_missing_privileges("Failed to start: app/proxyman/inbound: failed to start proxy > operation not permitted"));
         assert!(looks_like_missing_privileges("Access is denied."));
+        assert!(looks_like_missing_privileges("create adapter: errno 1314"));
+        assert!(looks_like_missing_privileges("wintun: error code 5"));
+        assert!(!looks_like_missing_privileges("wintun: errno 2"));
         assert!(looks_like_missing_privileges(
             "CreateFile wintun: Отказано в доступе."
         ));

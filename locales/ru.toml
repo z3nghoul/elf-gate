@@ -536,11 +536,15 @@ wintun_missing = "Для режима TUN нужен wintun.dll рядом с xr
 too_small = "Увеличьте окно (минимум {min_w}x{min_h}, сейчас {w}x{h})"
 
 [val]
+binary_unreadable = "xray не читается: {path}: {error}"
 bytes = "{file}: {n} байт"
+env_found = "{found}; xray ответил: {reason}"
 full_output = "{first}\n\nПолный вывод xray:\n{full}\n\nПовтор без XRAY_LOCATION_ASSET:\n{second}\n\n{report}"
+geo_unreadable = "файл данных не читается: {path}: {error}"
 report = "argv: {binary} run -test -c {cfg}; cwd: {cwd}; XRAY_LOCATION_ASSET: {asset}; PATH: {path}; HOME: {home}; XDG_RUNTIME_DIR: {xdg}; container/flatpak: {c1}/{c2}; родитель видит {f1} и {f2}; {limits}"
 spawn_failed = "не удалось запустить xray: {error}"
 timeout = "xray run -test не завершился за 10 с"
+unrecognized = "xray run -test завершился без ошибки конфига: {text}"
 unset = "не задан"
 wait_failed = "ошибка ожидания xray: {error}"
 write_failed = "не удалось записать {path}: {error}"

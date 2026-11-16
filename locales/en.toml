@@ -536,11 +536,15 @@ wintun_missing = "TUN mode needs wintun.dll next to xray.exe: {path} not found. 
 too_small = "Enlarge the window (minimum {min_w}x{min_h}, now {w}x{h})"
 
 [val]
+binary_unreadable = "xray cannot be read: {path}: {error}"
 bytes = "{file}: {n} bytes"
+env_found = "{found}; xray said: {reason}"
 full_output = "{first}\n\nFull xray output:\n{full}\n\nRetry without XRAY_LOCATION_ASSET:\n{second}\n\n{report}"
+geo_unreadable = "data file cannot be read: {path}: {error}"
 report = "argv: {binary} run -test -c {cfg}; cwd: {cwd}; XRAY_LOCATION_ASSET: {asset}; PATH: {path}; HOME: {home}; XDG_RUNTIME_DIR: {xdg}; container/flatpak: {c1}/{c2}; the parent sees {f1} and {f2}; {limits}"
 spawn_failed = "could not start xray: {error}"
 timeout = "xray run -test did not finish within 10 s"
+unrecognized = "xray run -test failed without a config error: {text}"
 unset = "not set"
 wait_failed = "error while waiting for xray: {error}"
 write_failed = "could not write {path}: {error}"

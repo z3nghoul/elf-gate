@@ -536,11 +536,15 @@ wintun_missing = "Для режиму TUN потрібен wintun.dll поруч
 too_small = "Збільште вікно (мінімум {min_w}x{min_h}, зараз {w}x{h})"
 
 [val]
+binary_unreadable = "xray не читається: {path}: {error}"
 bytes = "{file}: {n} байт"
+env_found = "{found}; xray відповів: {reason}"
 full_output = "{first}\n\nПовний вивід xray:\n{full}\n\nПовтор без XRAY_LOCATION_ASSET:\n{second}\n\n{report}"
+geo_unreadable = "файл даних не читається: {path}: {error}"
 report = "argv: {binary} run -test -c {cfg}; cwd: {cwd}; XRAY_LOCATION_ASSET: {asset}; PATH: {path}; HOME: {home}; XDG_RUNTIME_DIR: {xdg}; container/flatpak: {c1}/{c2}; батьківський процес бачить {f1} і {f2}; {limits}"
 spawn_failed = "не вдалося запустити xray: {error}"
 timeout = "xray run -test не завершився за 10 с"
+unrecognized = "xray run -test завершився без помилки конфігу: {text}"
 unset = "не задано"
 wait_failed = "помилка очікування xray: {error}"
 write_failed = "не вдалося записати {path}: {error}"
