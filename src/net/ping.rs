@@ -286,14 +286,16 @@ mod tests {
         });
         let ok = tcp_ping("127.0.0.1", port, Duration::from_secs(2)).await;
         assert!(matches!(ok, Ping::Ms(_)), "{ok:?}");
-        let closed = {
-            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            l.local_addr().unwrap().port()
-        };
+        // A socket that is bound but never listens: connecting is refused, and the port stays
+        // ours for the whole test (a freed port could be taken by a parallel test).
+        let closed_socket = tokio::net::TcpSocket::new_v4().unwrap();
+        closed_socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let closed = closed_socket.local_addr().unwrap().port();
         // Windows retries a refused loopback connect for about two seconds, so "closed" can
         // surface as a timeout there; either way it is not a measurement.
         let bad = tcp_ping("127.0.0.1", closed, Duration::from_secs(1)).await;
         assert!(matches!(bad, Ping::Error | Ping::Timeout), "{bad:?}");
+        drop(closed_socket);
     }
 
     #[test]
