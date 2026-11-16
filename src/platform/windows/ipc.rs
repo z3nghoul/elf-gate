@@ -135,8 +135,10 @@ struct Listener {
 }
 
 fn create(name: &str, sid: &str, first: bool) -> std::io::Result<NamedPipeServer> {
-    // Owner: the user. DACL (protected): the user and SYSTEM, nobody else.
-    let sddl: Vec<u16> = format!("O:{sid}D:P(A;;GA;;;{sid})(A;;GA;;;SY)\0")
+    // Owner: the user. DACL (protected): the user and SYSTEM, nobody else. Integrity label:
+    // medium, no write up. An elevated daemon would otherwise label the pipe "high", and the
+    // user's ordinary (medium) client could not write to it.
+    let sddl: Vec<u16> = format!("O:{sid}D:P(A;;GA;;;{sid})(A;;GA;;;SY)S:(ML;;NW;;;ME)\0")
         .encode_utf16()
         .collect();
     let mut sd = PSECURITY_DESCRIPTOR::default();
