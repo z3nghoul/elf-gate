@@ -1,12 +1,15 @@
 use crate::platform::{ChildGuard, PlatformError};
 use std::sync::OnceLock;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::System::Console::{
+    AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT,
+};
 use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
     SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
-use windows::Win32::System::Threading::CREATE_NO_WINDOW;
+use windows::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
 
 /// Owns the job handle for the lifetime of the process. When elf-gate dies for any
 /// reason, Windows closes the handle and kills every process in the job.
@@ -55,9 +58,34 @@ pub fn restrictions() -> String {
     String::new()
 }
 
+/// One console attachment at a time: a process can be attached to a single console.
+static CONSOLE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Sends CTRL_BREAK to the process group of `pid`: the core, started with
+/// CREATE_NEW_PROCESS_GROUP, so the group id is its pid. Go reads it as `os.Interrupt` and the
+/// core closes its inbounds (the TUN adapter among them) before it exits.
+///
+/// The background process has no console of its own and the core has a hidden one, so the
+/// event can only arrive after attaching to the core's console. Our own process is not in the
+/// target group and is not hit.
+fn ctrl_break(pid: u32) -> Result<(), String> {
+    let _one_at_a_time = crate::sync::lock(&CONSOLE);
+    // SAFETY: plain console calls; the attachment is undone before returning.
+    unsafe {
+        // A process may have only one console: leave ours, if there is one.
+        let _ = FreeConsole();
+        AttachConsole(pid).map_err(|e| format!("AttachConsole: {e}"))?;
+        let sent = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid)
+            .map_err(|e| format!("GenerateConsoleCtrlEvent: {e}"));
+        let _ = FreeConsole();
+        sent
+    }
+}
+
 impl ChildGuard for Guard {
     fn prepare(&self, cmd: &mut tokio::process::Command) {
-        cmd.creation_flags(CREATE_NO_WINDOW.0);
+        // A group of its own: only then CTRL_BREAK can be aimed at the core alone.
+        cmd.creation_flags(CREATE_NO_WINDOW.0 | CREATE_NEW_PROCESS_GROUP.0);
     }
 
     fn attach(&self, child: &tokio::process::Child) -> Result<(), PlatformError> {
@@ -73,6 +101,14 @@ impl ChildGuard for Guard {
     fn own_process_group(&self, _cmd: &mut tokio::process::Command) {}
 
     fn terminate(&self, child: &mut tokio::process::Child) {
-        let _ = child.start_kill();
+        // Soft first (the caller waits and kills after a timeout): a core killed outright
+        // cannot remove its TUN adapter, and the next start finds it still there.
+        let soft = child.id().map(ctrl_break);
+        if !matches!(soft, Some(Ok(()))) {
+            if let Some(Err(e)) = soft {
+                tracing::warn!("soft stop failed, killing the core: {e}");
+            }
+            let _ = child.start_kill();
+        }
     }
 }

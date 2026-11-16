@@ -102,8 +102,8 @@ pub trait ChildGuard: Send + Sync {
     fn prepare(&self, cmd: &mut tokio::process::Command);
     /// Binds the spawned child to the application's lifetime (Windows Job Object).
     fn attach(&self, child: &tokio::process::Child) -> Result<(), PlatformError>;
-    /// Asks the child to exit (SIGTERM on Linux, immediate kill on Windows where
-    /// a windowless console process has no graceful signal).
+    /// Asks the child to exit (SIGTERM on Linux, CTRL_BREAK on Windows, killing outright only
+    /// when that cannot be sent).
     fn terminate(&self, child: &mut tokio::process::Child);
     /// Makes the child leader of its own process group (Linux), so the supervisor and the
     /// core it starts can be found together later. No-op on Windows (Job Object).

@@ -23,6 +23,24 @@ use tokio::time::{sleep, timeout, Instant};
 pub const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
 /// Graceful stop budget before the process is killed.
 pub const STOP_TIMEOUT: Duration = Duration::from_secs(3);
+/// Windows: the core closes its TUN adapter on CTRL_BREAK, and that takes longer than a signal
+/// handler on Linux; only after this long is the process terminated.
+pub const STOP_TIMEOUT_WINDOWS: Duration = Duration::from_secs(5);
+
+/// How long the core gets to exit after the stop request.
+pub fn stop_grace(windows: bool, supervised: bool) -> Duration {
+    let base = if windows {
+        STOP_TIMEOUT_WINDOWS
+    } else {
+        STOP_TIMEOUT
+    };
+    // The supervisor gives the core its own grace period before killing it.
+    if supervised {
+        base * 2
+    } else {
+        base
+    }
+}
 const TAIL_LINES: usize = 20;
 
 #[derive(Debug)]
@@ -436,12 +454,7 @@ impl Core {
     pub async fn stop(mut self) {
         if self.child.try_wait().ok().flatten().is_none() {
             self.guard.terminate(&mut self.child);
-            // The supervisor gives the core its own grace period before killing it.
-            let grace = if self.supervised {
-                STOP_TIMEOUT * 2
-            } else {
-                STOP_TIMEOUT
-            };
+            let grace = stop_grace(platform::IS_WINDOWS, self.supervised);
             if timeout(grace, self.child.wait()).await.is_err() {
                 if let Some(pid) = self.child.id() {
                     // Takes the supervisor and the core together (same process group).
@@ -469,6 +482,13 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_stop_grace_is_longer_on_windows_and_unchanged_on_linux() {
+        assert_eq!(stop_grace(false, false), Duration::from_secs(3));
+        assert_eq!(stop_grace(false, true), Duration::from_secs(6));
+        assert_eq!(stop_grace(true, false), Duration::from_secs(5));
+    }
 
     #[test]
     fn the_asset_dir_is_beside_the_binary_or_beside_the_real_file_of_a_symlink() {
