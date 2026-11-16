@@ -3,6 +3,10 @@ use nix::fcntl::AtFlags;
 use nix::unistd::{fchownat, geteuid, Gid, Uid, User};
 use std::path::Path;
 
+pub fn private_umask() {
+    nix::sys::stat::umask(nix::sys::stat::Mode::from_bits_truncate(0o077));
+}
+
 pub struct Elevation;
 
 impl Privileges for Elevation {

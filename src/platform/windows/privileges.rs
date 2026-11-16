@@ -7,6 +7,8 @@ use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
+pub fn private_umask() {}
+
 pub struct Elevation;
 
 /// Quotes one command-line argument for `ShellExecuteW` (spaces and quotes).

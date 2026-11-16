@@ -20,6 +20,7 @@ use tracing_appender::rolling::{RollingFileAppender, Rotation};
 type Term = Terminal<CrosstermBackend<Stdout>>;
 
 fn init_logging() -> Option<WorkerGuard> {
+    storage::prepare_private_files();
     // stdout belongs to the TUI: logs go to a file only.
     let appender = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)

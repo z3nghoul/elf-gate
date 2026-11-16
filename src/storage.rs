@@ -560,6 +560,42 @@ pub fn create_private_dir(dir: &Path) -> io::Result<()> {
     }
 }
 
+/// Makes everything below `dir` owner-only: directories 0700, files 0600 (existing ones from
+/// older versions too). Symbolic links are left alone. No-op on Windows.
+pub fn harden_tree(dir: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let set = |p: &Path, mode: u32| {
+            let _ = fs::set_permissions(p, fs::Permissions::from_mode(mode));
+        };
+        set(dir, 0o700);
+        for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+            let p = entry.path();
+            match fs::symlink_metadata(&p) {
+                Ok(m) if m.file_type().is_symlink() => {}
+                Ok(m) if m.is_dir() => harden_tree(&p),
+                // A socket or a pipe keeps its mode: only plain files are touched.
+                Ok(m) if m.is_file() => set(&p, 0o600),
+                _ => {}
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+    }
+}
+
+/// At start: new files are private (`platform::private_umask`), the state and config
+/// directories exist as 0700, and what older versions left there is tightened.
+pub fn prepare_private_files() {
+    crate::platform::private_umask();
+    let _ = create_private_dir(&log_dir());
+    harden_tree(&state_dir());
+    harden_tree(&config_dir());
+}
+
 /// Writes `bytes` to `path` so that only the owner can read them (an existing file is
 /// tightened as well). On Windows the user profile already provides this.
 pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -582,7 +618,7 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
     }
 }
 
-fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let parent = path.parent();
     if let Some(parent) = parent {
@@ -674,6 +710,39 @@ mod tests {
         assert!(!chowned.contains(&state.join("logs/file-link")));
         assert!(!chowned.contains(&state.join("dir-link")));
         let _ = fs::remove_dir_all(home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hardening_tightens_files_and_directories_but_not_links() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("harden");
+        let outside = TempDir::new("harden-outside");
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        fs::create_dir_all(dir.join("logs")).unwrap();
+        fs::write(dir.join("check-cache.json"), "{}").unwrap();
+        fs::write(dir.join("logs/elf-gated.log.2026-11-16"), "x").unwrap();
+        fs::write(outside.join("target"), "x").unwrap();
+        std::os::unix::fs::symlink(outside.join("target"), dir.join("link")).unwrap();
+        for p in [
+            dir.to_path_buf(),
+            dir.join("logs"),
+            dir.join("check-cache.json"),
+            dir.join("logs/elf-gated.log.2026-11-16"),
+            outside.join("target"),
+        ] {
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        harden_tree(&dir);
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(&dir.join("logs")), 0o700);
+        assert_eq!(mode(&dir.join("check-cache.json")), 0o600);
+        assert_eq!(mode(&dir.join("logs/elf-gated.log.2026-11-16")), 0o600);
+        assert_eq!(
+            mode(&outside.join("target")),
+            0o755,
+            "a link is not followed"
+        );
     }
 
     #[cfg(unix)]

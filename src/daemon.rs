@@ -12,6 +12,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    storage::prepare_private_files();
     let appender = tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
         .filename_prefix("elf-gated.log")

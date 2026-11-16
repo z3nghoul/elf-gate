@@ -166,12 +166,8 @@ impl CheckCache {
         if !self.dirty {
             return;
         }
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
         if let Ok(text) = serde_json::to_string(&self.data) {
-            let tmp = path.with_extension("json.tmp");
-            if std::fs::write(&tmp, text).is_ok() && std::fs::rename(&tmp, path).is_ok() {
+            if crate::storage::write_atomic(path, &text).is_ok() {
                 self.dirty = false;
             }
         }
@@ -417,5 +413,20 @@ mod tests {
         checker.check_config(&bin, &cfg, &run_dir).await;
         assert_eq!(runs(&dir), 3, "changed geoip.dat is asked again");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_cache_file_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::test_support::TempDir::new("cc-mode");
+        let path = dir.join("state/check-cache.json");
+        let mut c = CheckCache::load(Some(path.clone()));
+        c.use_version("Xray 1");
+        c.store("k".into(), &Verdict::Accepted);
+        c.flush();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(mode(path.parent().unwrap()), 0o700);
     }
 }

@@ -247,6 +247,13 @@ pub fn child_guard() -> Box<dyn ChildGuard> {
     Box::new(imp::child::Guard)
 }
 
+/// Files this process creates from now on (logs created later by the rotating logger, files of
+/// the core) are readable by the owner only (Linux `umask 077`); no-op on Windows, where the
+/// user profile already provides this.
+pub fn private_umask() {
+    imp::privileges::private_umask();
+}
+
 pub fn privileges() -> Box<dyn Privileges> {
     Box::new(imp::privileges::Elevation)
 }
