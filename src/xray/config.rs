@@ -519,43 +519,32 @@ fn user_rules(plan: &Plan) -> Vec<Value> {
     rules
 }
 
-/// Server + settings -> Xray configuration (plain local proxy, no user rules).
-pub fn build(server: &Server, core: &CoreConfig) -> Result<Value, ConfigError> {
-    build_with(server, core, &Plan::proxy_default())
+/// The DNS section when the plan routes DNS, with its `dns-out` outbound and its rules (pushed
+/// to `outbounds` and `rules`).
+fn dns(plan: &Plan, outbounds: &mut Vec<Value>, rules: &mut Vec<Value>) -> Option<Value> {
+    let (t, listed) = plan.dns_routing()?;
+    let (section, dns_rules) = dns_section(plan, t, listed);
+    outbounds.push(json!({ "tag": "dns-out", "protocol": "dns" }));
+    rules.extend(dns_rules);
+    Some(section)
 }
 
-/// Server + settings + routing plan -> Xray configuration.
-pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Value, ConfigError> {
-    if let Some(reason) = &server.unsupported {
-        return Err(ConfigError::Unsupported(
-            server.name.clone(),
-            reason.clone(),
-        ));
-    }
-    let inbounds = inbounds(core, plan);
-
-    // A complete provider config: its outbounds (the whole chain) are carried over as they are.
-    let full = server.full.as_ref().map(|f| f.renamed(&plan.pin));
-    let mut outbounds = outbounds(server, plan, full.as_ref())?;
-    let full_balanced = full.as_ref().is_some_and(|p| p.balanced);
-    let mut rules: Vec<Value> = Vec::new();
-    let mut dns = None;
-    if let Some((t, listed)) = plan.dns_routing() {
-        let (section, dns_rules) = dns_section(plan, t, listed);
-        dns = Some(section);
-        outbounds.push(json!({ "tag": "dns-out", "protocol": "dns" }));
-        rules.extend(dns_rules);
-    }
-    rules.extend(user_rules(plan));
-
+/// Balancers for fail-over and for a provider's balanced config. Rules that used the "proxy"
+/// outbound are pointed at the balancer of the same name.
+fn balancers(
+    plan: &Plan,
+    full: Option<&crate::model::fullconfig::Renamed>,
+    rules: &mut Vec<Value>,
+) -> Vec<Value> {
+    let full_balanced = full.is_some_and(|p| p.balanced);
     let mut balancers = Vec::new();
-    if let Some(parts) = full.as_ref().filter(|p| p.balanced) {
+    if let Some(parts) = full.filter(|p| p.balanced) {
         balancers.extend(parts.balancers.clone());
     }
     if plan.failover.is_some() && full.is_none() || full_balanced {
         // Everything that used the "proxy" outbound now goes through the balancer of the same
         // name: the primary while the observatory says it is alive, else the backup.
-        for rule in &mut rules {
+        for rule in rules.iter_mut() {
             if rule["outboundTag"] == "proxy" {
                 if let Some(obj) = rule.as_object_mut() {
                     obj.remove("outboundTag");
@@ -577,6 +566,33 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
             }));
         }
     }
+    balancers
+}
+
+/// Server + settings -> Xray configuration (plain local proxy, no user rules).
+pub fn build(server: &Server, core: &CoreConfig) -> Result<Value, ConfigError> {
+    build_with(server, core, &Plan::proxy_default())
+}
+
+/// Server + settings + routing plan -> Xray configuration.
+pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Value, ConfigError> {
+    if let Some(reason) = &server.unsupported {
+        return Err(ConfigError::Unsupported(
+            server.name.clone(),
+            reason.clone(),
+        ));
+    }
+    let inbounds = inbounds(core, plan);
+
+    // A complete provider config: its outbounds (the whole chain) are carried over as they are.
+    let full = server.full.as_ref().map(|f| f.renamed(&plan.pin));
+    let mut outbounds = outbounds(server, plan, full.as_ref())?;
+    let full_balanced = full.as_ref().is_some_and(|p| p.balanced);
+    let mut rules: Vec<Value> = Vec::new();
+    let dns = dns(plan, &mut outbounds, &mut rules);
+    rules.extend(user_rules(plan));
+
+    let balancers = balancers(plan, full.as_ref(), &mut rules);
 
     // Traffic statistics for the interface (`xray api statsquery`); 0 turns them off
     // (temporary probe cores have no use for them and must not take the port).

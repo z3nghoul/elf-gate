@@ -32,22 +32,38 @@ fn log_warning(tx: &BgTx, text: String) {
     }));
 }
 
-/// Everything that happens between "connect" and "the core is listening", off the UI thread.
-#[allow(clippy::too_many_arguments)]
-async fn start_core(
-    server: &Server,
+/// What `start_core` needs.
+struct StartRequest<'a> {
+    server: &'a Server,
     mode: Mode,
     setup: Option<tun::Setup>,
-    core_cfg: &CoreConfig,
-    config: &Config,
-    host: &dyn TunHost,
-    run_dir: &Path,
-    tx: &BgTx,
-    store: Option<&StateStore>,
-    checker: &Checker,
+    core_cfg: &'a CoreConfig,
+    config: &'a Config,
+    host: &'a dyn TunHost,
+    run_dir: &'a Path,
+    tx: &'a BgTx,
+    store: Option<&'a StateStore>,
+    checker: &'a Checker,
     backup: Option<Server>,
     known_hosts: Vec<String>,
-) -> Result<Core, Failure> {
+}
+
+/// Everything that happens between "connect" and "the core is listening", off the UI thread.
+async fn start_core(request: StartRequest<'_>) -> Result<Core, Failure> {
+    let StartRequest {
+        server,
+        mode,
+        setup,
+        core_cfg,
+        config,
+        host,
+        run_dir,
+        tx,
+        store,
+        checker,
+        backup,
+        known_hosts,
+    } = request;
     // The server must answer over TCP before anything else: afterwards, with the tunnel up,
     // this machine's own connections would go through the tunnel. The address is resolved
     // here too, so Xray never has to resolve it through the tunnel.
@@ -249,20 +265,20 @@ impl Engine {
                     tun::mark_down(store);
                 }
             }
-            let result = start_core(
-                &server,
+            let result = start_core(StartRequest {
+                server: &server,
                 mode,
                 setup,
-                &core_cfg,
-                &config,
-                host.as_ref(),
-                &run_dir,
-                &tx,
-                store.as_ref(),
-                &checker,
+                core_cfg: &core_cfg,
+                config: &config,
+                host: host.as_ref(),
+                run_dir: &run_dir,
+                tx: &tx,
+                store: store.as_ref(),
+                checker: &checker,
                 backup,
                 known_hosts,
-            )
+            })
             .await;
             checker.flush();
             let ev = match result {
