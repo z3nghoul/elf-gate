@@ -69,6 +69,15 @@ fn free_port() -> u16 {
     }
 }
 
+/// Defaults for a test that starts a real core: its own statistics port. The default one (10085)
+/// would be shared by parallel tests, and Windows refuses a second listener on it.
+fn test_core_defaults() -> CoreConfig {
+    CoreConfig {
+        api_port: free_port(),
+        ..CoreConfig::default()
+    }
+}
+
 async fn wait_port(port: u16, open: bool, secs: u64) -> bool {
     let deadline = Instant::now() + Duration::from_secs(secs);
     while Instant::now() < deadline {
@@ -292,7 +301,7 @@ async fn xray_validation_decides_domains() {
     let tmp = TempDir::new("domains");
     let core_cfg = CoreConfig {
         xray_path: xray.to_string_lossy().into_owned(),
-        ..CoreConfig::default()
+        ..test_core_defaults()
     };
     let check = |host: &str, query: &str| {
         let server = parse_link(&format!("vless://{UUID}@{host}:443?{query}#d")).unwrap();
@@ -408,7 +417,7 @@ async fn client_reaches_http_server_through_local_vless_server() {
         xray_path: xray.to_string_lossy().into_owned(),
         socks_port: free_port(),
         http_port: free_port(),
-        ..CoreConfig::default()
+        ..test_core_defaults()
     };
     let mut cfg = config::build(&server, &core_cfg).unwrap();
     // The target is on loopback, which the default `geoip:private -> direct` rule would
@@ -467,7 +476,7 @@ fn dummy_client(xray: &Path) -> (CoreConfig, Value) {
         xray_path: xray.to_string_lossy().into_owned(),
         socks_port: free_port(),
         http_port: free_port(),
-        ..CoreConfig::default()
+        ..test_core_defaults()
     };
     let cfg = config::build(&server, &core_cfg).unwrap();
     (core_cfg, cfg)
@@ -498,7 +507,7 @@ async fn core_that_exits_early_reports_its_output() {
         xray_path: xray.to_string_lossy().into_owned(),
         socks_port: free_port(),
         http_port: free_port(),
-        ..CoreConfig::default()
+        ..test_core_defaults()
     };
     let (tx, _rx) = unbounded_channel();
     let err = Core::start(
@@ -559,7 +568,7 @@ fn rig(xray: &Path, tag: &str, set_system_proxy: bool) -> Rig {
         xray_path: xray.to_string_lossy().into_owned(),
         socks_port: free_port(),
         http_port: free_port(),
-        ..CoreConfig::default()
+        ..test_core_defaults()
     };
     let config = Config {
         core: core_cfg.clone(),
@@ -758,7 +767,7 @@ async fn repeated_checks_come_from_the_cache_and_a_new_version_drops_it() {
     .unwrap();
     let core = CoreConfig {
         xray_path: xray.display().to_string(),
-        ..CoreConfig::default()
+        ..test_core_defaults()
     };
     let cfg = config::build(&server, &core).unwrap();
 
@@ -825,7 +834,7 @@ async fn url_ping_runs_a_temporary_core_and_cleans_up() {
     .unwrap();
     let core = CoreConfig {
         xray_path: xray.display().to_string(),
-        ..CoreConfig::default()
+        ..test_core_defaults()
     };
     let run_dir = tmp.path().join("run");
     let cfg = |url: String| PingConfig {
@@ -932,7 +941,7 @@ async fn traffic_moves_to_the_backup_when_the_primary_dies_and_returns_after_cle
         xray_path: xray.display().to_string(),
         socks_port: free_port(),
         http_port: free_port(),
-        ..CoreConfig::default()
+        ..test_core_defaults()
     };
     let mut failover = Failover::new(
         link(b_port, "backup"),
@@ -1058,7 +1067,7 @@ async fn statsquery_counts_traffic_through_the_proxy_outbound() {
         socks_port: free_port(),
         http_port: free_port(),
         api_port: free_port(),
-        ..CoreConfig::default()
+        ..test_core_defaults()
     };
     let mut cfg = config::build(&server, &core_cfg).unwrap();
     // Keep only the api rule: the loopback target must go through the VLESS chain.

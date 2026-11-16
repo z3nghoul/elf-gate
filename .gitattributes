@@ -1,0 +1,2 @@
+# Snapshots are compared as text; a CRLF checkout on Windows must not change them.
+*.snap text eol=lf
