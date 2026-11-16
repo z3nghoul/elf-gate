@@ -127,6 +127,11 @@ impl AppState {
                 c.tun.tunnel_dns.clone(),
             ),
             (
+                SettingId::ManageFirewall,
+                crate::t!("setting.firewall"),
+                onoff(c.tun.manage_firewall),
+            ),
+            (
                 SettingId::AutoConnect,
                 crate::t!("setting.auto_connect"),
                 onoff(c.ui.auto_connect),
@@ -152,18 +157,6 @@ impl AppState {
                 c.ui.theme.clone(),
             ),
         ];
-        if crate::platform::IS_WINDOWS {
-            rows.insert(
-                rows.iter()
-                    .position(|r| r.0 == SettingId::AutoConnect)
-                    .unwrap_or(rows.len()),
-                (
-                    SettingId::ManageFirewall,
-                    crate::t!("setting.firewall"),
-                    onoff(c.tun.manage_firewall),
-                ),
-            );
-        }
         for s in &c.subscriptions {
             rows.push((
                 SettingId::SubUa(s.name.clone()),

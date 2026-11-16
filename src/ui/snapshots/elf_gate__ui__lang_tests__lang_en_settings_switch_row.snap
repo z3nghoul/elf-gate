@@ -18,9 +18,9 @@ expression: frame
 │  Auto ping, s (0 = off)            60                                                                                │
 │  TUN interface name                elfgate0                                                                          │
 │  DNS through the tunnel            1.1.1.1                                                                           │
+│  Auto Windows Firewall setup       on                                                                                │
 │  Connect on start                  off                                                                               │
 │  Start at login                    off                                                                               │
-│  HWID of this device                                                                                                 │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │tray icon: none (not supported by this desktop or not running)                                                        │
