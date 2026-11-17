@@ -440,7 +440,7 @@ fn the_status_line_wraps_into_rows_instead_of_being_cut() {
 fn names_with_emoji_keep_the_list_and_the_frame_aligned() {
     use crate::model::server::Ping;
     let names = [
-        "\u{1F1E9}\u{1F1EA}\u{26A1}\u{FE0F} #5 LTE \u{2014} \u{423}\u{43d}\u{438}\u{432}\u{435}\u{440}\u{441}\u{430}\u{43b}\u{44c}\u{43d}\u{44b}\u{439}",
+        "\u{1F1E9}\u{1F1EA}\u{26A1}\u{FE0F} #5 LTE - \u{423}\u{43d}\u{438}\u{432}\u{435}\u{440}\u{441}\u{430}\u{43b}\u{44c}\u{43d}\u{44b}\u{439}",
         "\u{1F1FB}\u{1F1F3}\u{1F51E}\u{1F353} Auto | very long name \u{26A1}\u{26A1}\u{26A1}",
         "\u{2B07}\u{FE0F} Plain \u{2B07}\u{FE0F}",
         "\u{1F525}\u{1F525}",
@@ -494,10 +494,12 @@ fn names_with_emoji_keep_the_list_and_the_frame_aligned() {
 #[test]
 fn the_name_column_takes_the_room_up_to_the_latency_and_a_dagger_marks_a_deprecated_transport() {
     use crate::model::server::Ping;
-    let name = "DE #5 LTE \u{2014} \u{423}\u{43d}\u{438}\u{432}\u{435}\u{440}\u{441}\u{430}\u{43b}\u{44c}\u{43d}\u{44b}\u{439}";
+    let name = "DE #5 LTE - \u{423}\u{43d}\u{438}\u{432}\u{435}\u{440}\u{441}\u{430}\u{43b}\u{44c}\u{43d}\u{44b}\u{439}";
     let links = [
         format!("vless://u@a.example.com:443?security=tls&sni=x.org#{name}"),
-        format!("vless://u@b.example.com:443?security=tls&sni=x.org&type=ws&path=/#NL #1 LTE \u{2014} {name}"),
+        format!(
+            "vless://u@b.example.com:443?security=tls&sni=x.org&type=ws&path=/#NL #1 LTE - {name}"
+        ),
         "vless://u@c.example.com:443?security=tls&sni=x.org#Short".to_string(),
     ];
     let refs: Vec<&str> = links.iter().map(String::as_str).collect();
