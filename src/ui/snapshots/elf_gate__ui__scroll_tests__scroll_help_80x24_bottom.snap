@@ -9,7 +9,7 @@ expression: draw(&mut a)
 │                  добавления)                                                 │
 │Ctrl+L            перерисовать экран целиком (если терминал исказил картинку) │
 │                                                                              │
-│elf-gate 1.0.3 (commit dev, debug)                                            │
+│elf-gate 2.0.0 (commit dev, debug)                                            │
 │                                                                              │
 │tag.deprecated    устаревший транспорт (ws, grpc): работает, но Xray его не   │
 │                  советует                                                    │
