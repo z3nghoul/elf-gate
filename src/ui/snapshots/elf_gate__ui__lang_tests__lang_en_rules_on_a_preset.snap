@@ -30,5 +30,5 @@ expression: frame
 │● Disconnected | PROXY                                                                                                │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│j/k select  PgUp/PgDn page  g/G start/end  a rule  Ctrl+P priv.  Space on/off  m mode  Esc back  ? help  q/Q exit     │
+│ j/k select  PgUp/PgDn page  g/G start/end  a rule  Ctrl+P priv.  Space on/off  m mode  Esc back  ? help  q/Q exit    │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -346,6 +346,36 @@ impl Theme {
                 .add_modifier(Modifier::BOLD)
         }
     }
+    /// A key in the key bar: a keycap, only the background (inversion where the theme has no
+    /// background of its own).
+    pub fn keycap(&self) -> Style {
+        if self.invert_selection {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default().fg(self.text).bg(self.selection)
+        }
+    }
+
+    /// A clickable element under the pointer (a hint, a button): lit by the accent colour,
+    /// by inversion and underline where the theme has no colours of its own.
+    pub fn hover(&self) -> Style {
+        if self.invert_selection {
+            Style::default()
+                .add_modifier(Modifier::REVERSED | Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            Style::default().fg(self.bg_for_badge()).bg(self.accent)
+        }
+    }
+
+    /// A row under the pointer: the selection colour without the bold of the chosen row.
+    pub fn row_hover(&self) -> Style {
+        if self.invert_selection {
+            Style::default().add_modifier(Modifier::UNDERLINED)
+        } else {
+            Style::default().bg(self.selection)
+        }
+    }
+
     pub fn good(&self) -> Style {
         Style::default().fg(self.ok)
     }
@@ -405,6 +435,9 @@ mod tests {
             assert!(c >= 4.5, "{name}: text on selection is {c:.2}:1");
             let c = contrast(p.muted_on_selection, p.selection);
             assert!(c >= 4.5, "{name}: muted on selection is {c:.2}:1");
+            // A lit hint or button: the screen colour on the accent.
+            let c = contrast(p.bg, p.accent);
+            assert!(c >= 4.5, "{name}: text on a lit element is {c:.2}:1");
         }
     }
 

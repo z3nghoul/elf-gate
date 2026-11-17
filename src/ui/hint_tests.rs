@@ -541,3 +541,18 @@ fn the_name_column_takes_the_room_up_to_the_latency_and_a_dagger_marks_a_depreca
         snap!(format!("name_column_{width}"), frame);
     }
 }
+
+#[test]
+fn the_keycaps_do_not_make_the_bar_longer() {
+    // Before the keycaps a hint was `key text` and two spaces: key + 1 + text + 2 columns. The
+    // keycap (a space on each side of the key) and the single space between hints take the
+    // same, so the bar has the same rows as before at every width.
+    for (name, a, _) in states() {
+        for h in super::hints::hints(&a) {
+            let before = h.key.chars().count() + 1 + h.text.chars().count() + 2;
+            assert_eq!(super::hints::width_of(&h), before, "{name}: {h:?}");
+        }
+        let lines = super::hints::bar_lines(&a, 78);
+        assert!(lines.iter().all(|l| l.chars().count() <= 78), "{name}");
+    }
+}

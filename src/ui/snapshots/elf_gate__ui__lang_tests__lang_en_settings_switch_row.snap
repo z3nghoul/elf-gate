@@ -30,5 +30,5 @@ expression: frame
 │● Disconnected | PROXY                                                                                                │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│j/k select  PgUp/PgDn page  g/G start/end  Tab section  Enter toggle  Ctrl+P priv.  Esc back  ? help  q/Q exit        │
+│ j/k select  PgUp/PgDn page  g/G start/end  Tab section  Enter toggle  Ctrl+P priv.  Esc back  ? help  q/Q exit       │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

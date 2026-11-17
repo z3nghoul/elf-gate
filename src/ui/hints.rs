@@ -5,7 +5,9 @@
 use crate::action::{scope, Action, Binding, BINDINGS};
 use crate::app::{AppState, ConfirmKind, Conn, Focus, LinkState, Popup, Row, Screen, SettingId};
 use crate::model::server::Security;
+use crate::ui::hits::Target;
 use crate::ui::theme::Theme;
+use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
@@ -18,6 +20,8 @@ pub struct Hint {
     /// 1 stays longest when the window is narrow.
     pub prio: u8,
     pub action: Option<Action>,
+    /// The key a click on the hint presses where there is no action to run (a dialog).
+    pub press: Option<(KeyCode, KeyModifiers)>,
 }
 
 fn binding(action: Action) -> &'static Binding {
@@ -34,6 +38,7 @@ fn hint(action: Action, text: impl Into<String>) -> Hint {
         text: text.into(),
         prio: b.prio,
         action: Some(action),
+        press: b.keys.first().copied(),
     }
 }
 
@@ -43,6 +48,15 @@ fn plain(key: &str, text: &str, prio: u8) -> Hint {
         text: text.into(),
         prio,
         action: None,
+        press: None,
+    }
+}
+
+/// A hint of a dialog: a click presses `code`.
+fn pressing(key: &str, text: &str, prio: u8, code: KeyCode) -> Hint {
+    Hint {
+        press: Some((code, KeyModifiers::NONE)),
+        ..plain(key, text, prio)
     }
 }
 
@@ -59,6 +73,7 @@ pub fn tail() -> Vec<Hint> {
             text: binding(Action::Quit).short(),
             prio: 1,
             action: Some(Action::Quit),
+            press: None,
         },
     ]
 }
@@ -68,64 +83,80 @@ fn modal_hints(app: &AppState) -> Option<Vec<Hint>> {
     if let Some(p) = &app.popup {
         return Some(match p {
             Popup::Select { .. } => vec![
-                plain("j/k", &crate::t!("hint.select"), 2),
-                plain("Enter", &crate::t!("hint.apply"), 1),
-                plain("Esc", &crate::t!("hint.cancel"), 1),
+                pressing("j/k", &crate::t!("hint.select"), 2, KeyCode::Down),
+                pressing("Enter", &crate::t!("hint.apply"), 1, KeyCode::Enter),
+                pressing("Esc", &crate::t!("hint.cancel"), 1, KeyCode::Esc),
             ],
             Popup::Processes { .. } => vec![
-                plain("↑↓", &crate::t!("hint.select"), 2),
-                plain("Enter", &crate::t!("hint.apply"), 1),
-                plain("Esc", &crate::t!("hint.clear_close"), 1),
-                plain("PgUp/PgDn", &crate::t!("hint.page"), 4),
+                pressing("↑↓", &crate::t!("hint.select"), 2, KeyCode::Down),
+                pressing("Enter", &crate::t!("hint.apply"), 1, KeyCode::Enter),
+                pressing("Esc", &crate::t!("hint.clear_close"), 1, KeyCode::Esc),
+                pressing("PgUp/PgDn", &crate::t!("hint.page"), 4, KeyCode::PageDown),
                 plain(&crate::t!("hint.text"), &crate::t!("hint.filter"), 3),
             ],
             Popup::Input { purpose, .. } => {
                 let mut v = vec![
-                    plain("Enter", &crate::t!("hint.confirm"), 1),
-                    plain("Esc", &crate::t!("hint.cancel"), 1),
+                    pressing("Enter", &crate::t!("hint.confirm"), 1, KeyCode::Enter),
+                    pressing("Esc", &crate::t!("hint.cancel"), 1, KeyCode::Esc),
                 ];
                 // A separate element with its action: a mouse click can be hung on it later.
                 if *purpose == crate::app::InputPurpose::Link {
                     v.push(hint(Action::Paste, crate::t!("hint.paste")));
                 }
-                v.push(plain("Backspace", &crate::t!("hint.erase"), 3));
+                v.push(pressing(
+                    "Backspace",
+                    &crate::t!("hint.erase"),
+                    3,
+                    KeyCode::Backspace,
+                ));
                 v
             }
             Popup::Confirm { kind, .. } => match kind {
                 ConfirmKind::Paste(_) => vec![
-                    plain("Enter", &crate::t!("hint.apply"), 1),
-                    plain("Esc", &crate::t!("hint.cancel"), 1),
+                    pressing("Enter", &crate::t!("hint.apply"), 1, KeyCode::Enter),
+                    pressing("Esc", &crate::t!("hint.cancel"), 1, KeyCode::Esc),
                 ],
                 ConfirmKind::Ask(_) => vec![
-                    plain("y/Enter", &crate::t!("hint.yes"), 1),
-                    plain("n/Esc", &crate::t!("hint.no"), 1),
+                    pressing("y/Enter", &crate::t!("hint.yes"), 1, KeyCode::Char('y')),
+                    pressing("n/Esc", &crate::t!("hint.no"), 1, KeyCode::Char('n')),
                 ],
                 _ => vec![
-                    plain("y/Enter", &crate::t!("hint.yes"), 1),
-                    plain("n/Esc", &crate::t!("hint.no"), 1),
+                    pressing("y/Enter", &crate::t!("hint.yes"), 1, KeyCode::Char('y')),
+                    pressing("n/Esc", &crate::t!("hint.no"), 1, KeyCode::Char('n')),
                 ],
             },
             Popup::Update(_) => vec![
-                plain("↑↓", &crate::t!("hint.scroll"), 3),
-                plain("s", &crate::t!("hint.skip_update"), 1),
-                plain(&crate::t!("hint.any_key"), &crate::t!("hint.close"), 1),
+                pressing("↑↓", &crate::t!("hint.scroll"), 3, KeyCode::Down),
+                pressing("s", &crate::t!("hint.skip_update"), 1, KeyCode::Char('s')),
+                pressing(
+                    &crate::t!("hint.any_key"),
+                    &crate::t!("hint.close"),
+                    1,
+                    KeyCode::Esc,
+                ),
             ],
             // A separate element with its action: a mouse click can be hung on it later.
             Popup::ConnError(_) => vec![
                 hint(Action::Diag, crate::t!("hint.check")),
-                plain(&crate::t!("hint.any_key"), &crate::t!("hint.close"), 1),
+                pressing(
+                    &crate::t!("hint.any_key"),
+                    &crate::t!("hint.close"),
+                    1,
+                    KeyCode::Esc,
+                ),
             ],
-            Popup::Error(_) | Popup::Notice(_) => vec![plain(
+            Popup::Error(_) | Popup::Notice(_) => vec![pressing(
                 &crate::t!("hint.any_key"),
                 &crate::t!("hint.close"),
                 1,
+                KeyCode::Esc,
             )],
         });
     }
     if app.filtering {
         return Some(vec![
-            plain("Enter", &crate::t!("hint.accept_filter"), 1),
-            plain("Esc", &crate::t!("hint.reset"), 1),
+            pressing("Enter", &crate::t!("hint.accept_filter"), 1, KeyCode::Enter),
+            pressing("Esc", &crate::t!("hint.reset"), 1, KeyCode::Esc),
             plain(&crate::t!("hint.text"), &crate::t!("hint.typing"), 3),
         ]);
     }
@@ -375,14 +406,18 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
                 text,
                 prio: b.prio,
                 action: Some(a),
+                press: None,
             });
         }
     }
     out
 }
 
-fn width_of(h: &Hint) -> usize {
-    h.key.chars().count() + 1 + h.text.chars().count() + 2
+/// Columns a hint takes in the bar: the keycap (the key with a space on each side), the
+/// description right after it and a space before the next keycap. That is exactly what the bar
+/// took before the keycaps (key, space, description, two spaces), so it never needs more rows.
+pub(super) fn width_of(h: &Hint) -> usize {
+    h.key.chars().count() + 2 + h.text.chars().count() + 1
 }
 
 /// Most rows the key bar may take.
@@ -442,6 +477,25 @@ pub fn rows(app: &AppState, width: usize) -> Vec<Vec<Hint>> {
 
 fn row_text(row: &[Hint]) -> String {
     row.iter()
+        .map(|h| format!(" {} {}", h.key, h.text))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The bar as text, one string per row (tests and snapshots).
+pub fn bar_lines(app: &AppState, width: usize) -> Vec<String> {
+    rows(app, width)
+        .iter()
+        .map(|r| row_text(r).chars().take(width).collect())
+        .collect()
+}
+
+/// All rows joined, each hint as `key text` (for substring checks: the keycap's spaces are
+/// only how the bar is drawn).
+pub fn bar_text(app: &AppState, width: usize) -> String {
+    rows(app, width)
+        .iter()
+        .flatten()
         .map(|h| {
             if h.text.is_empty() {
                 h.key.clone()
@@ -453,36 +507,48 @@ fn row_text(row: &[Hint]) -> String {
         .join("  ")
 }
 
-/// The bar as text, one string per row (tests and snapshots).
-pub fn bar_lines(app: &AppState, width: usize) -> Vec<String> {
-    rows(app, width)
-        .iter()
-        .map(|r| row_text(r).chars().take(width).collect())
-        .collect()
-}
-
-/// All rows joined (for substring checks).
-pub fn bar_text(app: &AppState, width: usize) -> String {
-    bar_lines(app, width).join("  ")
+/// What a click on the hint does: the key bound to its action on this screen, or the key it
+/// stands for in a dialog.
+fn click_target(app: &AppState, h: &Hint) -> Option<Target> {
+    if app.popup.is_some() || app.filtering {
+        h.press.map(|(code, mods)| Target::Key(code, mods))
+    } else {
+        h.action.map(Target::Action)
+    }
 }
 
 pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
-    let lines: Vec<Line> = rows(app, area.width as usize)
-        .iter()
-        .take(area.height.max(1) as usize)
-        .map(|row| {
-            let mut spans = Vec::new();
-            for (i, h) in row.iter().enumerate() {
-                if i > 0 {
-                    spans.push(Span::styled("  ", th.muted()));
-                }
-                spans.push(Span::styled(h.key.clone(), th.title()));
-                if !h.text.is_empty() {
-                    spans.push(Span::styled(format!(" {}", h.text), th.text()));
-                }
+    let rows = rows(app, area.width as usize);
+    let mut lines: Vec<Line> = Vec::new();
+    for (y, row) in rows.iter().take(area.height.max(1) as usize).enumerate() {
+        let mut spans = Vec::new();
+        let mut x = area.x;
+        for (i, h) in row.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::raw(" "));
+                x += 1;
             }
-            Line::from(spans)
-        })
-        .collect();
+            let width = (width_of(h) - 1) as u16;
+            let rect = Rect::new(x, area.y + y as u16, width, 1);
+            let target = click_target(app, h);
+            if let Some(t) = target {
+                app.hits.click(rect, t);
+            }
+            // The pointer on a clickable hint lights it; the mouse setting off lights nothing
+            // (the map is empty then, see `AppState::handle_mouse`).
+            let lit = target.is_some() && app.config.ui.mouse && app.hits.is_hover(rect);
+            let (cap, text) = if lit {
+                (th.hover(), th.hover())
+            } else {
+                (th.keycap(), th.text())
+            };
+            spans.push(Span::styled(format!(" {} ", h.key), cap));
+            if !h.text.is_empty() {
+                spans.push(Span::styled(h.text.clone(), text));
+            }
+            x += width;
+        }
+        lines.push(Line::from(spans));
+    }
     f.render_widget(Paragraph::new(lines), area);
 }
