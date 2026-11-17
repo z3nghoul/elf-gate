@@ -116,6 +116,21 @@ async fn a_new_rule_goes_to_the_running_core_as_a_whole_list_and_nothing_restart
     );
     assert!(!e.busy, "the core was not restarted");
     assert!(e.logged("rules applied"));
+    // The status says what the change does not reach: open connections keep their route.
+    let status = e
+        .sent
+        .iter()
+        .find_map(|u| match u {
+            Update::Status(s) if s.contains("переподключения") || s.contains("reconnecting") => {
+                Some(s.clone())
+            }
+            _ => None,
+        })
+        .expect("a status after the rules were applied");
+    assert!(
+        status.contains("-") && (status.contains("перезапустите") || status.contains("restart")),
+        "{status}"
+    );
     // The file the core was started with follows.
     let text = std::fs::read_to_string(dir.path().join("xray.json")).unwrap();
     let on_disk: Value = serde_json::from_str(&text).unwrap();
