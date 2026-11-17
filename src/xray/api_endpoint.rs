@@ -72,19 +72,16 @@ mod tests {
 
     #[test]
     fn on_unix_the_api_is_a_socket_in_the_run_folder_with_mode_0600() {
-        let e =
-            ApiEndpoint::choose_with(Path::new("/home/u/.local/state/elf-gate/run"), true, || 1);
-        assert_eq!(
-            e,
-            ApiEndpoint::Unix("/home/u/.local/state/elf-gate/run/api.sock".into())
-        );
+        // The expected path is built the way the code builds it: `join` uses the separator
+        // of the system the test runs on.
+        let run_dir = Path::new("/home/u/.local/state/elf-gate/run");
+        let socket = run_dir.join("api.sock");
+        let e = ApiEndpoint::choose_with(run_dir, true, || 1);
+        assert_eq!(e, ApiEndpoint::Unix(socket.clone()));
         let (listen, port) = e.listen();
-        assert_eq!(listen, "/home/u/.local/state/elf-gate/run/api.sock,0600");
+        assert_eq!(listen, format!("{},0600", socket.display()));
         assert_eq!(port, None);
-        assert_eq!(
-            e.server_arg(),
-            "unix:///home/u/.local/state/elf-gate/run/api.sock"
-        );
+        assert_eq!(e.server_arg(), format!("unix://{}", socket.display()));
     }
 
     #[test]
