@@ -4,7 +4,7 @@ expression: frame
 ---
 ┌ Rules ───────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │Routing mode: exclude (everything through the VPN except the rules)                                                   │
-│Traffic mode: PROXY, process rules are inactive (they work only in TUN mode)                                          │
+│Traffic mode: PROXY, process rules are inactive (they work only in TUN mode). Browsers may show the real IP through We│
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌ Presets and your rules ──────────────────────────────────────────────────────────────────────────────────────────────┐
 │> [ ] preset  Only Discord through the VPN  (inactive in exclude mode)                                                │

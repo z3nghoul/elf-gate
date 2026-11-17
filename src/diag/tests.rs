@@ -21,6 +21,7 @@ struct Mock {
     stale: Option<String>,
     proxy: ProxyView,
     running: bool,
+    proxy_mode: bool,
     connected: bool,
     ru_on: bool,
     vpn_ip: Result<String, String>,
@@ -49,6 +50,7 @@ impl Mock {
             stale: None,
             proxy: ProxyView::NotOurs,
             running: true,
+            proxy_mode: false,
             connected: true,
             ru_on: true,
             vpn_ip: Ok("203.0.113.7".into()),
@@ -120,6 +122,9 @@ impl Env for Mock {
     }
     fn proxy_view(&self) -> ProxyView {
         self.proxy
+    }
+    fn proxy_mode(&self) -> bool {
+        self.proxy_mode
     }
     fn core_running(&self) -> bool {
         self.running
@@ -229,6 +234,28 @@ async fn tun_core_is_checked_for_version_and_capability_and_both_versions_are_sh
     is(&one(&m, CheckId::Core).await, State::Problem);
     m.caps = None;
     is(&one(&m, CheckId::Core).await, State::Ok);
+}
+
+#[tokio::test]
+async fn webrtc_is_warned_about_in_proxy_mode_and_not_in_tun() {
+    let mut m = Mock::healthy();
+    m.proxy_mode = true;
+    let r = one(&m, CheckId::WebRtc).await;
+    is(&r, State::Problem);
+    let todo = r.todo.unwrap();
+    for word in [
+        "TUN",
+        "WebRtcIPHandling",
+        "disable_non_proxied_udp",
+        "media.peerconnection.enabled",
+    ] {
+        assert!(todo.contains(word), "{word} is missing: {todo}");
+    }
+    assert!(r.detail.contains("WebRTC"));
+    // TUN (or a TUN that did start): no warning.
+    let r = one(&Mock::healthy(), CheckId::WebRtc).await;
+    is(&r, State::Ok);
+    assert!(r.todo.is_none());
 }
 
 #[tokio::test]

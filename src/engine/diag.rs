@@ -21,6 +21,7 @@ pub(super) struct LiveEnv {
     connected: bool,
     tun_active: bool,
     core_running: bool,
+    proxy_mode: bool,
 }
 
 fn scrub(text: &str) -> String {
@@ -228,6 +229,10 @@ impl Env for LiveEnv {
         }
     }
 
+    fn proxy_mode(&self) -> bool {
+        self.proxy_mode
+    }
+
     fn core_running(&self) -> bool {
         self.core_running
     }
@@ -282,6 +287,12 @@ impl Engine {
             connected: matches!(self.conn, Conn::Connected(_)),
             tun_active: self.tun_active,
             core_running: self.core.is_some(),
+            // What carries the traffic now: the mode of the connection, else the chosen one.
+            proxy_mode: if matches!(self.conn, Conn::Connected(_)) {
+                self.conn_mode == Mode::Proxy
+            } else {
+                self.mode == Mode::Proxy
+            },
         };
         let tx = self.tx.clone();
         self.spawn(async move {
@@ -345,6 +356,7 @@ mod tests {
             connected: false,
             tun_active: false,
             core_running: false,
+            proxy_mode: true,
         }
     }
 

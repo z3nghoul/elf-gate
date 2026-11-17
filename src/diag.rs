@@ -19,13 +19,14 @@ pub enum CheckId {
     Firewall,
     Adapter,
     SysProxy,
+    WebRtc,
     VpnIp,
     RuDirect,
 }
 
 impl CheckId {
     /// In the order they run and are shown.
-    pub const ALL: [CheckId; 12] = [
+    pub const ALL: [CheckId; 13] = [
         CheckId::Core,
         CheckId::Geodata,
         CheckId::ServerTcp,
@@ -36,6 +37,7 @@ impl CheckId {
         CheckId::Firewall,
         CheckId::Adapter,
         CheckId::SysProxy,
+        CheckId::WebRtc,
         CheckId::VpnIp,
         CheckId::RuDirect,
     ];
@@ -52,6 +54,7 @@ impl CheckId {
             CheckId::Firewall => "firewall",
             CheckId::Adapter => "adapter",
             CheckId::SysProxy => "sysproxy",
+            CheckId::WebRtc => "webrtc",
             CheckId::VpnIp => "vpn_ip",
             CheckId::RuDirect => "ru_direct",
         }
@@ -216,6 +219,9 @@ pub trait Env {
     /// `Some(name)`: an adapter of ours is left although no TUN core runs (Windows only).
     fn stale_adapter(&self) -> Option<String>;
     fn proxy_view(&self) -> ProxyView;
+    /// Traffic goes through the local proxy (the mode is PROXY, or TUN did not start and fell
+    /// back to it): a browser may still send WebRTC around it.
+    fn proxy_mode(&self) -> bool;
     /// Our core process is running.
     fn core_running(&self) -> bool;
     fn connected(&self) -> bool;
@@ -253,6 +259,7 @@ pub async fn run<E: Env>(env: &E, mut emit: impl FnMut(CheckResult)) {
             CheckId::Firewall => check_firewall(env),
             CheckId::Adapter => check_adapter(env),
             CheckId::SysProxy => check_proxy(env),
+            CheckId::WebRtc => check_webrtc(env),
             CheckId::VpnIp => {
                 let (result, ip) = check_vpn(env).await;
                 vpn_ip = ip;
@@ -568,6 +575,21 @@ fn check_proxy<E: Env>(env: &E) -> CheckResult {
             crate::t!("diag.todo_proxy"),
         )
         .with_fix(Fix::ClearProxy),
+    }
+}
+
+/// In PROXY mode only what is sent to the proxy goes through the VPN: a browser's WebRTC sends
+/// UDP around it and can show the real address. In TUN everything goes through the tunnel.
+fn check_webrtc<E: Env>(env: &E) -> CheckResult {
+    let id = CheckId::WebRtc;
+    if env.proxy_mode() {
+        CheckResult::problem(
+            id,
+            crate::t!("diag.webrtc_risk"),
+            crate::t!("diag.todo_webrtc"),
+        )
+    } else {
+        CheckResult::ok(id, crate::t!("diag.webrtc_ok"))
     }
 }
 

@@ -17,9 +17,9 @@ expression: frame
 │  waiting  Firewall rules                                                                         │
 │  waiting  Adapter from an earlier run                                                            │
 │  waiting  System proxy                                                                           │
+│  waiting  WebRTC                                                                                 │
 │  waiting  Request through the VPN                                                                │
 │  waiting  Russian sites go direct                                                                │
-│                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
