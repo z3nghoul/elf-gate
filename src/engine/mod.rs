@@ -476,6 +476,18 @@ impl Engine {
                 return;
             }
         }
+        // A closed connection of a program is not a fault of the core: the screen shows these
+        // only at the debug level, the file always has them (as they are, hosts hidden).
+        if is_stream_noise(&line.text) {
+            tracing::info!(
+                target: "core",
+                "{}",
+                crate::redact::text(&line.text, crate::redact::Mode::Full)
+            );
+            if self.config.core.log_level != "debug" {
+                return;
+            }
+        }
         if line.text.starts_with("[xray") {
             let key = dedupe_key(&line.text);
             let now = Instant::now();
@@ -1513,6 +1525,13 @@ fn is_process_noise(text: &str) -> bool {
         || text.contains("find local process name")
 }
 
+/// The warnings of the inbounds about a connection the program closed itself ("failed to read
+/// response ... closed pipe", "unexpected EOF"). Errors of `app/dns` and others are not noise.
+fn is_stream_noise(text: &str) -> bool {
+    (text.contains("proxy/http") || text.contains("proxy/socks"))
+        && (text.contains("closed pipe") || text.contains("unexpected EOF"))
+}
+
 fn short(text: &str) -> String {
     text.chars().take(160).collect()
 }
@@ -1592,6 +1611,28 @@ mod noise_tests {
             dedupe_key("[xray:err] 2026/11/10 [Error] no process found for inode 9616"),
             dedupe_key("[xray:err] 2026/11/11 [Error] no process found for inode 3801271")
         );
+    }
+
+    #[tokio::test]
+    async fn closed_connection_warnings_of_the_inbounds_show_only_at_debug_level() {
+        let (tx, _rx) = unbounded_channel();
+        let mut e = Engine::build(tx, crate::test_support::config_ru(), None, false);
+        let log = |text: &str| LogLine {
+            time: "t".into(),
+            level: Level::Error,
+            text: text.into(),
+        };
+        let pipe = "[xray:err] [Warning] proxy/http: failed to read response from a.example > io: read/write on closed pipe";
+        let eof = "[xray:err] [Warning] proxy/socks: failed to transfer request > unexpected EOF";
+        let dns = "[xray:err] [Warning] app/dns: A record lookup error > unexpected EOF";
+        for l in [pipe, eof, dns] {
+            e.on_bg(BgEvent::Log(log(l)));
+        }
+        assert!(!e.logged("closed pipe") && !e.logged("proxy/socks"));
+        assert!(e.logged("app/dns"), "DNS errors stay visible");
+        e.config.core.log_level = "debug".into();
+        e.on_bg(BgEvent::Log(log(&format!("{pipe} again"))));
+        assert!(e.logged("closed pipe"));
     }
 
     #[tokio::test]
