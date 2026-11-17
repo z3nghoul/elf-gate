@@ -1611,11 +1611,14 @@ impl AppState {
             os: platform::os_description(),
             mode: mode_name(self.mode).to_string(),
             presets: self.config.presets.enabled.clone(),
-            server_addresses: self
+            servers: self
                 .subs
                 .iter()
                 .flat_map(|g| g.servers.iter())
-                .map(|s| s.address.clone())
+                .map(|s| crate::diag::ReportServer {
+                    name: s.name.clone(),
+                    address: s.address.clone(),
+                })
                 .collect(),
             log: self
                 .logs

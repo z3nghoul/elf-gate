@@ -413,6 +413,37 @@ async fn the_vpn_requests_ok_problem_and_skipped_when_not_connected() {
 
 // ---------- the report ----------
 
+fn server(name: &str, address: &str) -> ReportServer {
+    ReportServer {
+        name: name.into(),
+        address: address.into(),
+    }
+}
+
+#[test]
+fn server_names_in_the_log_become_the_same_number_as_the_address() {
+    let results = vec![];
+    let text = report(&ReportInput {
+        version_line: String::new(),
+        os: String::new(),
+        mode: String::new(),
+        presets: vec![],
+        servers: vec![
+            server("Frankfurt secret", "a.example.org"),
+            server("Paris secret", "b.example.org"),
+        ],
+        log: vec!["connected to Paris secret (b.example.org); was Frankfurt secret".into()],
+        results: &results,
+    });
+    let one = crate::t!("diag.report_server", n = 1);
+    let two = crate::t!("diag.report_server", n = 2);
+    assert!(!text.contains("secret"), "{text}");
+    assert!(
+        text.contains(&format!("connected to {two} ({two}); was {one}")),
+        "{text}"
+    );
+}
+
 #[test]
 fn the_report_holds_none_of_the_secrets_of_the_config() {
     let secrets = [
@@ -422,6 +453,7 @@ fn the_report_holds_none_of_the_secrets_of_the_config() {
         "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789ABCDEFG", // publicKey
         "0123abcd",                                    // shortId
         "vpn.secret-host.example",
+        "Frankfurt secret", // the name of a server
         "203.0.113.7", // an address seen through the VPN
         "198.51.100.9",
     ];
@@ -435,7 +467,7 @@ fn the_report_holds_none_of_the_secrets_of_the_config() {
         CheckResult::ok(CheckId::RuDirect, "your address 198.51.100.9".into()),
     ];
     let log = vec![
-        "12:00:01 info connecting to vpn.secret-host.example".into(),
+        "12:00:01 info connecting to vpn.secret-host.example (Frankfurt secret)".into(),
         "12:00:02 info subscription https://sub.provider.example/api/v1/token-aaa111 updated".into(),
         format!("12:00:03 info link {}", secrets[1]),
         "12:00:04 info id 11111111-1111-1111-1111-111111111111 key AbCdEfGhIjKlMnOpQrStUvWxYz0123456789ABCDEFG sid 0123abcd".into(),
@@ -446,7 +478,10 @@ fn the_report_holds_none_of_the_secrets_of_the_config() {
         os: "Linux 7".into(),
         mode: "proxy".into(),
         presets: vec!["ru-direct".into()],
-        server_addresses: vec!["vpn.secret-host.example".into(), "203.0.113.7".into()],
+        servers: vec![
+            server("Frankfurt secret", "vpn.secret-host.example"),
+            server("-", "203.0.113.7"),
+        ],
         log,
         results: &results,
     });
@@ -473,7 +508,7 @@ fn the_report_names_the_servers_in_the_order_of_the_list() {
         os: String::new(),
         mode: String::new(),
         presets: vec![],
-        server_addresses: vec!["a.example.org".into(), "b.example.org".into()],
+        servers: vec![server("A", "a.example.org"), server("B", "b.example.org")],
         log: vec![],
         results: &results,
     });

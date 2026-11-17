@@ -613,14 +613,20 @@ async fn check_ru<E: Env>(env: &E, vpn_ip: Option<&str>) -> CheckResult {
     }
 }
 
+/// A configured server as the report knows it.
+pub struct ReportServer {
+    pub name: String,
+    pub address: String,
+}
+
 /// What the report holds besides the results.
 pub struct ReportInput<'a> {
     pub version_line: String,
     pub os: String,
     pub mode: String,
     pub presets: Vec<String>,
-    /// The addresses of the configured servers: they become "server 1", "server 2".
-    pub server_addresses: Vec<String>,
+    /// The configured servers: address and name both become "server 1", "server 2".
+    pub servers: Vec<ReportServer>,
     /// The last lines of the log, as the interface has them.
     pub log: Vec<String>,
     pub results: &'a [CheckResult],
@@ -661,32 +667,26 @@ pub fn report(input: &ReportInput<'_>) -> String {
     lines.extend(input.log.iter().cloned());
     // Links go first: an address replaced inside a link would leave the rest of it readable.
     let mut text = crate::redact::secrets(&lines.join("\n"));
-    // Longest first, so an address that contains another one is replaced whole.
-    let mut addresses: Vec<&String> = input
-        .server_addresses
-        .iter()
-        .filter(|a| a.len() >= 3)
-        .collect();
-    addresses.sort_by_key(|a| std::cmp::Reverse(a.len()));
-    addresses.dedup();
-    let numbered: Vec<(usize, &String)> = {
-        let mut seen: Vec<&String> = Vec::new();
-        for a in input.server_addresses.iter().filter(|a| a.len() >= 3) {
-            if !seen.contains(&a) {
-                seen.push(a);
+    // The number of a server is the place of its address in the list (equal addresses share it).
+    let mut seen: Vec<&str> = Vec::new();
+    let mut words: Vec<(&str, usize)> = Vec::new();
+    for s in &input.servers {
+        let n = match seen.iter().position(|a| *a == s.address) {
+            Some(i) => i + 1,
+            None => {
+                seen.push(&s.address);
+                seen.len()
             }
-        }
-        seen.into_iter()
-            .enumerate()
-            .map(|(i, a)| (i + 1, a))
-            .collect()
-    };
-    for a in addresses {
-        let n = numbered
-            .iter()
-            .find(|(_, x)| *x == a)
-            .map_or(0, |(n, _)| *n);
-        text = text.replace(a.as_str(), &crate::t!("diag.report_server", n = n));
+        };
+        words.push((&s.address, n));
+        words.push((&s.name, n));
+    }
+    // Longest first, so a name that contains an address (or the other way round) goes whole.
+    words.retain(|(w, _)| w.chars().count() >= 3);
+    words.sort_by_key(|(w, _)| std::cmp::Reverse(w.len()));
+    words.dedup_by(|a, b| a.0 == b.0);
+    for (word, n) in words {
+        text = text.replace(word, &crate::t!("diag.report_server", n = n));
     }
     crate::redact::text(&text, crate::redact::Mode::Full)
 }

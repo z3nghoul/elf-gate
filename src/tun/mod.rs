@@ -779,9 +779,19 @@ mod tests {
             .await
             .is_ok());
         drop(listener);
-        let err = tcp_reachable(ip, port, Duration::from_secs(2))
-            .await
-            .unwrap_err();
+        // Another test may take the freed port at once: try a few fresh ones.
+        let mut closed = port;
+        let mut result = tcp_reachable(ip, closed, Duration::from_secs(2)).await;
+        for _ in 0..5 {
+            if result.is_err() {
+                break;
+            }
+            let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            closed = probe.local_addr().unwrap().port();
+            drop(probe);
+            result = tcp_reachable(ip, closed, Duration::from_secs(2)).await;
+        }
+        let err = result.unwrap_err();
         assert!(err.text.contains("недоступен"), "{}", err.text);
         assert!(!err.local_block);
     }
