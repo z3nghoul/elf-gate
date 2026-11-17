@@ -5,6 +5,9 @@ use std::cell::RefCell;
 struct Mock {
     windows: bool,
     core: Result<PathBuf, String>,
+    other_core: Option<PathBuf>,
+    other_version: Result<String, String>,
+    caps: Option<String>,
     version: Result<String, String>,
     geo: (bool, bool),
     ping_url: bool,
@@ -30,6 +33,9 @@ impl Mock {
         Mock {
             windows: false,
             core: Ok(PathBuf::from("/opt/xray/xray")),
+            other_core: None,
+            other_version: Ok("26.1.0".into()),
+            caps: None,
             version: Ok("26.1.0".into()),
             geo: (true, true),
             ping_url: true,
@@ -65,7 +71,16 @@ impl Env for Mock {
     fn core_binary(&self) -> Result<PathBuf, String> {
         self.core.clone()
     }
-    async fn core_version(&self, _: &Path) -> Result<String, String> {
+    fn other_core(&self) -> Option<PathBuf> {
+        self.other_core.clone()
+    }
+    fn core_capabilities(&self, _: &Path) -> Option<String> {
+        self.caps.clone()
+    }
+    async fn core_version(&self, path: &Path) -> Result<String, String> {
+        if Some(path) == self.other_core.as_deref() {
+            return self.other_version.clone();
+        }
         self.version.clone()
     }
     fn geodata(&self, _: &Path) -> (bool, bool) {
@@ -186,6 +201,34 @@ async fn core_ok_problem_and_a_fix_only_when_the_url_ping_needs_it() {
     let r = one(&m, CheckId::Core).await;
     is(&r, State::Problem);
     assert_eq!(r.fix, None);
+}
+
+#[tokio::test]
+async fn tun_core_is_checked_for_version_and_capability_and_both_versions_are_shown() {
+    let mut m = Mock::healthy();
+    m.other_core = Some(PathBuf::from("/home/u/xray"));
+    m.caps = Some("/usr/local/lib/elf-gate/xray cap_net_admin=ep".into());
+    let r = one(&m, CheckId::Core).await;
+    is(&r, State::Ok);
+    assert!(
+        r.detail.contains("TUN") && r.detail.matches("26.1.0").count() == 2,
+        "{r:?}"
+    );
+
+    m.other_version = Ok("26.2.0".into());
+    let r = one(&m, CheckId::Core).await;
+    is(&r, State::Problem);
+    assert!(
+        r.detail.contains("26.1.0") && r.detail.contains("26.2.0"),
+        "{r:?}"
+    );
+    assert!(r.todo.as_deref().unwrap().contains("elf-gate-tun.sh"));
+
+    m.other_version = Ok("26.1.0".into());
+    m.caps = Some("/usr/local/lib/elf-gate/xray".into());
+    is(&one(&m, CheckId::Core).await, State::Problem);
+    m.caps = None;
+    is(&one(&m, CheckId::Core).await, State::Ok);
 }
 
 #[tokio::test]

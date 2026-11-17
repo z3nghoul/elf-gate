@@ -190,8 +190,13 @@ pub enum ProxyView {
 #[allow(async_fn_in_trait)]
 pub trait Env {
     fn windows(&self) -> bool;
-    /// The core binary, or the text saying where it was looked for.
+    /// The core binary of the current mode (in TUN mode: the "Xray for TUN"), or the text
+    /// saying where it was looked for.
     fn core_binary(&self) -> Result<PathBuf, String>;
+    /// In TUN mode with a separate TUN core (Linux): the normal core, to compare versions.
+    fn other_core(&self) -> Option<PathBuf>;
+    /// The file capabilities of the core as `getcap` prints them; `None` when unknown.
+    fn core_capabilities(&self, core: &Path) -> Option<String>;
     async fn core_version(&self, core: &Path) -> Result<String, String>;
     /// `(geoip.dat, geosite.dat)` present next to the core.
     fn geodata(&self, core: &Path) -> (bool, bool);
@@ -276,27 +281,66 @@ async fn check_core<E: Env>(env: &E) -> (CheckResult, Option<PathBuf>) {
             return (r, None);
         }
     };
-    match env.core_version(&path).await {
-        Ok(version) => (
+    let version = match env.core_version(&path).await {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                CheckResult::problem(
+                    id,
+                    crate::t!("diag.core_broken", error = e),
+                    crate::t!("diag.todo_core_broken"),
+                ),
+                None,
+            )
+        }
+    };
+    let shown = crate::redact::strip_home(&path.display().to_string());
+    let Some(other) = env.other_core() else {
+        return (
             CheckResult::ok(
                 id,
-                crate::t!(
-                    "diag.core_ok",
-                    version = version,
-                    path = crate::redact::strip_home(&path.display().to_string())
-                ),
+                crate::t!("diag.core_ok", version = version, path = shown),
             ),
             Some(path),
-        ),
-        Err(e) => (
-            CheckResult::problem(
-                id,
-                crate::t!("diag.core_broken", error = e),
-                crate::t!("diag.todo_core_broken"),
+        );
+    };
+    // TUN mode: the core that runs is the privileged copy; the normal one is only compared.
+    let main_version = env
+        .core_version(&other)
+        .await
+        .unwrap_or_else(|_| "?".into());
+    let result = if main_version != "?" && main_version != version {
+        CheckResult::problem(
+            id,
+            crate::t!(
+                "diag.core_tun_differs",
+                tun = version,
+                main = main_version,
+                path = shown
             ),
-            None,
-        ),
-    }
+            crate::t!("diag.todo_core_tun_update"),
+        )
+    } else if env
+        .core_capabilities(&path)
+        .is_some_and(|caps| !caps.contains("cap_net_admin"))
+    {
+        CheckResult::problem(
+            id,
+            crate::t!("diag.core_tun_no_caps", version = version, path = shown),
+            crate::t!("diag.todo_tun_linux"),
+        )
+    } else {
+        CheckResult::ok(
+            id,
+            crate::t!(
+                "diag.core_ok_tun",
+                tun = version,
+                main = main_version,
+                path = shown
+            ),
+        )
+    };
+    (result, Some(path))
 }
 
 fn check_geodata<E: Env>(env: &E, core: Option<&Path>) -> CheckResult {

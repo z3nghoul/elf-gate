@@ -87,7 +87,25 @@ impl Env for LiveEnv {
     }
 
     fn core_binary(&self) -> Result<PathBuf, String> {
-        crate::xray::process::resolve_binary(&self.config.core.xray_path).map_err(|e| e.to_string())
+        let setting = if self.config.mode.traffic == crate::model::rule::TrafficMode::Tun {
+            crate::tun::tun_core_setting(&self.config)
+        } else {
+            &self.config.core.xray_path
+        };
+        crate::xray::process::resolve_binary(setting).map_err(|e| e.to_string())
+    }
+
+    fn other_core(&self) -> Option<PathBuf> {
+        if self.config.mode.traffic != crate::model::rule::TrafficMode::Tun {
+            return None;
+        }
+        let tun = self.core_binary().ok()?;
+        let normal = crate::xray::process::resolve_binary(&self.config.core.xray_path).ok()?;
+        (tun != normal).then_some(normal)
+    }
+
+    fn core_capabilities(&self, core: &Path) -> Option<String> {
+        self.tun_host.core_capabilities(core)
     }
 
     async fn core_version(&self, core: &Path) -> Result<String, String> {
