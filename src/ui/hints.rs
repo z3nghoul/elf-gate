@@ -113,7 +113,7 @@ fn modal_hints(app: &AppState) -> Option<Vec<Hint>> {
             }
             Popup::Confirm { kind, .. } => match kind {
                 ConfirmKind::Paste(_) => vec![
-                    pressing("Enter", &crate::t!("hint.apply"), 1, KeyCode::Enter),
+                    pressing("Enter", &crate::t!("hint.add"), 1, KeyCode::Enter),
                     pressing("Esc", &crate::t!("hint.cancel"), 1, KeyCode::Esc),
                 ],
                 ConfirmKind::Ask(_) => vec![

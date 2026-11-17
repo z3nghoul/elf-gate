@@ -205,7 +205,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             rows: None,
             buttons: if matches!(kind, crate::app::ConfirmKind::Paste(_)) {
                 vec![
-                    button("Enter", crate::t!("hint.apply"), KeyCode::Enter),
+                    button("Enter", crate::t!("hint.add"), KeyCode::Enter),
                     button("Esc", crate::t!("hint.cancel"), KeyCode::Esc),
                 ]
             } else {
