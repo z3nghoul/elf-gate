@@ -12,6 +12,7 @@ use crate::proto::{Alert, Ask, Cmd, RuleRef, Traffic, Update, View};
 use crate::storage::Config;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
+mod mouse;
 pub mod settings;
 pub mod subscription;
 pub use settings::SettingId;
@@ -213,6 +214,10 @@ pub struct AppState {
     pub rules_scroll: crate::ui::scroll::Scroll,
     pub popup_scroll: crate::ui::scroll::Scroll,
     pub link: LinkState,
+    /// What the mouse can act on, as drawn last (see `ui::hits`).
+    pub hits: crate::ui::hits::HitMap,
+    /// The last click and when it was made, for the double click.
+    pub(crate) last_click: Option<(std::time::Instant, crate::ui::hits::Target)>,
     /// Servers are listed by ping instead of in their own order.
     pub sorted_by_ping: bool,
     /// The check screen: one row per check, the cursor on it, the server it looked at.
@@ -275,6 +280,8 @@ impl AppState {
             rules_scroll: Default::default(),
             popup_scroll: Default::default(),
             link: LinkState::Connecting,
+            hits: Default::default(),
+            last_click: None,
             sorted_by_ping: false,
             diag: crate::diag::CheckId::ALL
                 .iter()
@@ -595,13 +602,17 @@ impl AppState {
 
     // ---------- events ----------
 
-    pub fn handle_event(&mut self, ev: Event) {
+    /// One event. `false` means nothing on the screen changed (the pointer moved inside the
+    /// same element), so the screen need not be drawn again.
+    pub fn handle_event(&mut self, ev: Event) -> bool {
         match ev {
             Event::Key(k) => self.handle_key(k),
             Event::Tick => self.expire_status(),
             Event::Resize => {}
             Event::Link(l) => self.on_link(l),
+            Event::Mouse(m) => return self.handle_mouse(m),
         }
+        true
     }
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) {

@@ -74,6 +74,7 @@ async fn run(terminal: &mut Term, tun_from_cli: bool, colors: ui::theme::ColorMo
 
     let mut forced_logged = false;
     let mut mouse_captured = false;
+    let mut draw = true;
     while !app.should_quit {
         // The "Mouse" setting applies at once: the terminal hands over the mouse events only
         // while it is on (and selects text itself while it is off).
@@ -91,20 +92,26 @@ async fn run(terminal: &mut Term, tun_from_cli: bool, colors: ui::theme::ColorMo
         }
         if app.take_redraw() {
             terminal.clear()?;
+            draw = true;
         }
-        terminal.draw(|f| {
-            let ctx = ui::RenderCtx::native(&app.config.ui, colors);
-            if !forced_logged && ui::theme::Theme::resolve(&app.config.ui.theme, colors, false).1 {
-                forced_logged = true;
-                tracing::warn!(
-                    "the terminal has no 256 colours: the terminal theme is used instead of {}",
-                    app.config.ui.theme
-                );
-            }
-            ui::render(f, &mut app, &ctx)
-        })?;
+        if draw {
+            terminal.draw(|f| {
+                let ctx = ui::RenderCtx::native(&app.config.ui, colors);
+                if !forced_logged
+                    && ui::theme::Theme::resolve(&app.config.ui.theme, colors, false).1
+                {
+                    forced_logged = true;
+                    tracing::warn!(
+                        "the terminal has no 256 colours: the terminal theme is used instead of {}",
+                        app.config.ui.theme
+                    );
+                }
+                ui::render(f, &mut app, &ctx)
+            })?;
+        }
         match events.next().await {
-            Some(ev) => app.handle_event(ev),
+            // A pointer that stays on the same element does not need a new frame.
+            Some(ev) => draw = app.handle_event(ev),
             None => break,
         }
     }

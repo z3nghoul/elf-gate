@@ -1,6 +1,9 @@
 use crate::model::server::Ping;
 use crate::xray::process::Core;
-use crossterm::event::{Event as TermEvent, EventStream, KeyEvent, KeyEventKind};
+use crossterm::event::{
+    Event as TermEvent, EventStream, KeyEvent, KeyEventKind, MouseButton, MouseEvent,
+    MouseEventKind,
+};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -140,6 +143,7 @@ pub enum LinkEvent {
 #[derive(Debug)]
 pub enum Event {
     Key(KeyEvent),
+    Mouse(MouseEvent),
     Resize,
     Tick,
     Link(LinkEvent),
@@ -179,7 +183,20 @@ impl EventLoop {
                         return Some(Event::Key(k));
                     }
                     Ok(TermEvent::Resize(..)) => return Some(Event::Resize),
-                    // Mouse, focus, paste, key release, read errors: ignore.
+                    // Pressing the left button, the wheel and moving count; releases, drags and
+                    // the other buttons are not used.
+                    Ok(TermEvent::Mouse(m))
+                        if matches!(
+                            m.kind,
+                            MouseEventKind::Down(MouseButton::Left)
+                                | MouseEventKind::Moved
+                                | MouseEventKind::ScrollUp
+                                | MouseEventKind::ScrollDown
+                        ) =>
+                    {
+                        return Some(Event::Mouse(m));
+                    }
+                    // Focus, paste, key release, read errors: ignore.
                     _ => {}
                 },
                 _ = self.tick.tick() => return Some(Event::Tick),

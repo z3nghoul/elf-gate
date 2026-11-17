@@ -17,6 +17,7 @@ mod help;
 #[cfg(test)]
 mod hint_tests;
 pub mod hints;
+pub mod hits;
 #[cfg(test)]
 mod lang_tests;
 mod logs;
@@ -71,6 +72,8 @@ impl RenderCtx {
 pub fn render(f: &mut Frame, app: &mut AppState, ctx: &RenderCtx) {
     let th = ctx.theme;
     let area = f.area();
+    // The mouse map is drawn again with the frame.
+    app.hits.begin();
     f.render_widget(Block::new().style(th.base()), area);
 
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
