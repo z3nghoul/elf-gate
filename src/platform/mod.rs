@@ -224,7 +224,7 @@ pub trait TunHost: Send + Sync {
 }
 
 /// The system clipboard as text. Reading and writing can take a moment (an external tool or
-/// PowerShell runs), so callers use them only on a key press, never in a loop.
+/// tool runs), so callers use them only on a key press, never in a loop.
 pub trait Clipboard: Send + Sync {
     /// The text on the clipboard; an empty clipboard or one with something other than text is
     /// `Ok("")`. `Err` means the clipboard cannot be reached at all (the text says why).
@@ -233,10 +233,12 @@ pub trait Clipboard: Send + Sync {
 }
 
 /// How long a clipboard tool may run, and the most text read from it.
+#[cfg(unix)]
 const CLIPBOARD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 const CLIPBOARD_MAX: u64 = 1 << 20;
 
 /// What a clipboard tool did.
+#[cfg(unix)]
 pub(crate) enum ToolRun {
     /// It exited with success; its output (empty when not captured).
     Done(Vec<u8>),
@@ -248,6 +250,7 @@ pub(crate) enum ToolRun {
 /// after that. With `capture` its output is read (at most [`CLIPBOARD_MAX`] bytes), without it
 /// the output goes nowhere: a tool that stays in the background to own the clipboard (`xclip`,
 /// `wl-copy`) would otherwise keep the pipe open and be waited for forever.
+#[cfg(unix)]
 pub(crate) fn run_clipboard_tool(
     mut cmd: std::process::Command,
     input: Option<&[u8]>,
