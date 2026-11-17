@@ -40,11 +40,26 @@ glibc той машины, где он собран, или новее. У Ubunt
 
 ## Состав архивов
 
-- `elf-gate-linux-x86_64.tar.gz`: `elf-gate`, `elf-gated`, `xray`, `geoip.dat`, `geosite.dat`, `bin/` (ссылки на
-  xray и dat-файлы), `locales/`, `presets.toml`, `elf-gate-tun.sh`, `README.md`, `LICENSE`, `LICENSE-Xray`,
-  `SHA256SUMS` (суммы файлов внутри).
-- `elf-gate-windows-x86_64.zip`: `elf-gate.exe`, `elf-gated.exe`, `xray.exe`, `geoip.dat`, `geosite.dat`,
-  `wintun.dll`, `elf-gate-tun.bat`, `LICENSE`, `LICENSE-Xray`, `LICENSE-Wintun`, `SHA256SUMS.txt`.
+Состав задан в одном месте: `packaging/archive-files.txt` (строка `<архив> <файл>`, причина - в комментарии над
+файлом). Шаги упаковки в `release.yml` собирают папку и запускают `packaging/scripts/check-archive.sh <архив> <папка>`:
+лишний файл, недостающий файл или подпапка делают job красным. Новый файл попадает в архив только через этот список с
+объяснением, зачем он. Файл остаётся, только если программа читает его при работе, его требует лицензия или без него
+нельзя запустить программу так, как описано в README.
+
+| Файл | Linux | Windows | Зачем |
+|---|---|---|---|
+| `elf-gate`, `elf-gated` (`.exe`) | да | да | интерфейс и фоновая часть; больше ничего они не читают: строки (`locales/`) и встроенные пресеты (`presets.toml`) вшиты в бинарник |
+| `xray` (`xray.exe`) | да | да | ядро; `elf-gate` ищет его рядом с собой (папку `bin/` не смотрит) |
+| `geoip.dat`, `geosite.dat` | да | да | данные правил маршрутизации; ядро ищет их рядом с собой |
+| `wintun.dll` | нет | да | библиотека драйвера TUN, ядро грузит её из своей папки |
+| `elf-gate-tun.sh` | да | нет | права для TUN без root на Linux (по README); на Windows фоновая часть сама перезапускается через UAC |
+| `LICENSE`, `LICENSE-Xray` | да | да | AGPL-3.0 (elf-gate) и MPL-2.0 (ядро просит текст рядом с бинарником) |
+| `LICENSE-Wintun` | нет | да | лицензия Wintun |
+
+Не кладём: `locales/` и `presets.toml` (вшиты через `include_str`), `bin/` с ссылками (поиск Xray его не использует;
+`elf-gate-tun.sh` берёт ядро из своей папки, а в папке разработки из `bin/`), `README.md` (он на GitHub), `SHA256SUMS`
+внутри архива (суммы самих архивов лежат в `SHA256SUMS` релиза), `elf-gate-tun.bat` (README: на Windows права для TUN
+запрашивает сама программа).
 
 Версия Xray и хэши его архивов - в `.github/xray.env`; скачанный архив проверяется по хэшу до сборки.
 

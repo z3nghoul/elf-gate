@@ -1,0 +1,37 @@
+# The files of the release archives, one line each: `<archive> <file>`. The packaging steps of
+# .github/workflows/release.yml run packaging/scripts/check-archive.sh over the folder they
+# built: a file that is not here, or one that is missing, turns the job red. A new file enters an
+# archive only through this list, with the reason in the comment above it (docs/release.md).
+# A file stays only if the program reads it while it runs, the license requires it, or the
+# README's way of starting the program cannot work without it.
+#
+# elf-gate: the interface the user runs. elf-gated: the background part it starts by name from
+# its own folder (it holds the core, the proxy, the tray). Both read nothing else: the
+# strings (locales/) and the built-in presets (presets.toml) are compiled in.
+linux-x86_64 elf-gate
+linux-x86_64 elf-gated
+# xray, geoip.dat, geosite.dat: the core and the data of the routing rules. elf-gate finds the
+# core next to itself (a folder `bin/` is not looked at) and the core finds the data next to
+# itself.
+linux-x86_64 xray
+linux-x86_64 geoip.dat
+linux-x86_64 geosite.dat
+# elf-gate-tun.sh: the TUN rights without root (the README's way to TUN on Linux): it installs a
+# root-owned copy of the core with the capabilities into /usr/local/lib/elf-gate.
+linux-x86_64 elf-gate-tun.sh
+# The licenses: elf-gate is AGPL-3.0, the core is MPL-2.0 and asks for its text with the binary.
+linux-x86_64 LICENSE
+linux-x86_64 LICENSE-Xray
+#
+# Windows: the same programs. wintun.dll is the TUN driver library the core loads from its own
+# folder. No script: the background part restarts itself through UAC for TUN (README).
+windows-x86_64 elf-gate.exe
+windows-x86_64 elf-gated.exe
+windows-x86_64 xray.exe
+windows-x86_64 geoip.dat
+windows-x86_64 geosite.dat
+windows-x86_64 wintun.dll
+# The licenses: AGPL-3.0 (elf-gate), MPL-2.0 (the core), and the Wintun license.
+windows-x86_64 LICENSE
+windows-x86_64 LICENSE-Xray
+windows-x86_64 LICENSE-Wintun

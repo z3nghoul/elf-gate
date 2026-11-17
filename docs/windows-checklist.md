@@ -225,7 +225,8 @@ already exists` (0xC0000035 / 0xB7). Теперь ядро останавлив�
 - [ ] Скачать `elf-gate-windows-x86_64.zip` из черновика релиза, сверить хэш с `SHA256SUMS`
   (`Get-FileHash -Algorithm SHA256`).
 - [ ] В распакованной папке нет файлов вида `ТЕСТ-README.txt`, `ЧЕК-ЛИСТ.txt`, `ВЕРСИЯ.txt`; есть `elf-gate.exe`,
-  `elf-gated.exe`, `xray.exe`, `wintun.dll`, `geoip.dat`, `geosite.dat`, `elf-gate-tun.bat`, три лицензии.
+  `elf-gated.exe`, `xray.exe`, `wintun.dll`, `geoip.dat`, `geosite.dat`, три лицензии (`LICENSE`, `LICENSE-Xray`,
+  `LICENSE-Wintun`); больше ничего (ни скрипта `.bat`, ни `SHA256SUMS.txt`).
 - [ ] `elf-gate.exe --version` печатает версию из тега и 7 символов хэша коммита тега.
 
 ## Смешанный режим TUN+PROXY (1.0.3)

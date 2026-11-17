@@ -463,3 +463,20 @@ SPEC.md не правится; отступления от него описан
   покрыто тестом на подставном `/proc` (`processes_in`): длинные имена целиком, дубликаты склеены, `(deleted)` убран.
 - Не проверялось: программы других пользователей и в песочнице без `cap_sys_ptrace`/`cap_dac_read_search` (тогда `exe`
   недоступен и ядро пишет «no process found» - это уже описано в части про права ядра).
+
+## Состав релизных архивов (часть G)
+
+- Состав задан списком `packaging/archive-files.txt` для обеих ОС; шаги упаковки сверяют папку со списком через
+  `packaging/scripts/check-archive.sh` (лишний файл, недостающий файл, подпапка - job красный). Тесты `tests/archives.rs`
+  держат в согласии список, скрипт, workflow и `docs/release.md`.
+- Убрано из Linux-архива: `locales/` и `presets.toml` (вшиты через `include_str`), `bin/` с символическими ссылками (поиск
+  Xray смотрит рядом с `elf-gate` и в `PATH`, в `bin/` не смотрит; `elf-gate-tun.sh` теперь берёт ядро из своей папки, а
+  в папке разработки из `bin/`), `README.md`, `SHA256SUMS` внутри архива (суммы архивов лежат в `SHA256SUMS` релиза).
+- Убрано из Windows-архива: `elf-gate-tun.bat` (README: права для TUN запрашивает сама фоновая часть через UAC, а .bat
+  только перезапускал `elf-gate.exe` от администратора) и `SHA256SUMS.txt`. Файл `packaging/scripts/elf-gate-tun.bat`
+  остался в репозитории: его по-прежнему кладёт `windows-test.yml` (тестовая сборка для тестировщика).
+- Остаётся: оба исполняемых файла, ядро, `geoip.dat`, `geosite.dat`, `wintun.dll` (Windows), `elf-gate-tun.sh` (Linux) и
+  лицензии (`LICENSE`, `LICENSE-Xray`, `LICENSE-Wintun`).
+- Проверено локально (Linux): шаги упаковки повторены на собранных `elf-gate`, `elf-gated` и `bin/xray`; папка прошла
+  проверку, `elf-gate --version` и `xray version` запускаются из неё. Windows-архив локально не собрать (нет линкера
+  mingw для `x86_64-pc-windows-gnu`): его папка проверена скриптом на заглушках, настоящая сборка - в dry run.

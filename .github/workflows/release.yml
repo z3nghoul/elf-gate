@@ -133,25 +133,23 @@ jobs:
           ELF_GATE_COMMIT: ${{ github.sha }}
         run: cargo build --locked --release
 
+      # What goes into an archive is decided in one place: packaging/archive-files.txt. The step
+      # builds the folder, then packaging/scripts/check-archive.sh compares it with the list.
       - name: Package (Linux)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           name=elf-gate-linux-x86_64
-          mkdir -p "$name/bin" "$name/locales"
+          mkdir "$name"
           cp target/release/elf-gate target/release/elf-gated "$name/"
           cp bin/xray bin/geoip.dat bin/geosite.dat bin/LICENSE-Xray "$name/"
-          cp locales/*.toml "$name/locales/"
-          cp presets.toml README.md LICENSE "$name/"
+          cp LICENSE "$name/"
           cp packaging/scripts/elf-gate-tun.sh "$name/"
           chmod +x "$name/elf-gate-tun.sh"
-          ln -s ../xray "$name/bin/xray"
-          ln -s ../geoip.dat "$name/bin/geoip.dat"
-          ln -s ../geosite.dat "$name/bin/geosite.dat"
           # Smoke test: the binaries start.
           "$name/elf-gate" --version
           "$name/xray" version | head -1
-          (cd "$name" && sha256sum elf-gate elf-gated xray geoip.dat geosite.dat LICENSE LICENSE-Xray > SHA256SUMS)
+          packaging/scripts/check-archive.sh linux-x86_64 "$name"
           tar --owner=0 --group=0 --numeric-owner -czf "$name.tar.gz" "$name"
           tar tzf "$name.tar.gz"
       - name: Package (Windows)
@@ -161,7 +159,6 @@ jobs:
           $out = 'elf-gate-windows-x86_64'
           New-Item -ItemType Directory -Path $out | Out-Null
           Copy-Item 'target\release\elf-gate.exe', 'target\release\elf-gated.exe' $out
-          Copy-Item 'packaging\scripts\elf-gate-tun.bat' $out
           # elf-gate itself is AGPL-3.0: the license text travels with the binaries.
           Copy-Item 'LICENSE' $out
           # wintun.dll is the TUN driver library the core loads (it must sit next to xray.exe).
@@ -172,19 +169,15 @@ jobs:
           & (Join-Path $out 'elf-gate.exe') --version
           if ($LASTEXITCODE -ne 0) { throw 'elf-gate.exe --version failed' }
           & (Join-Path $out 'xray.exe') version | Select-Object -First 1
-          $sums = foreach ($f in 'elf-gate.exe', 'elf-gated.exe', 'xray.exe', 'geoip.dat', 'geosite.dat', 'wintun.dll', 'LICENSE', 'LICENSE-Xray', 'LICENSE-Wintun') {
-            $h = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $out $f)).Hash.ToLower()
-            "$h  $f"
-          }
-          [System.IO.File]::WriteAllText((Join-Path $out 'SHA256SUMS.txt'), (($sums -join "`n") + "`n"))
-          # Nothing but the expected files: no tests, no server links.
-          $allowed = @('elf-gate.exe', 'elf-gated.exe', 'elf-gate-tun.bat', 'xray.exe', 'geoip.dat', 'geosite.dat', 'wintun.dll',
-                       'LICENSE', 'LICENSE-Xray', 'LICENSE-Wintun', 'SHA256SUMS.txt')
-          $present = (Get-ChildItem -Path $out -Recurse -File).Name
-          $unexpected = $present | Where-Object { $allowed -notcontains $_ }
-          if ($unexpected) { throw "Unexpected files in the package: $($unexpected -join ', ')" }
-          $missing = $allowed | Where-Object { $present -notcontains $_ }
-          if ($missing) { throw "Missing files in the package: $($missing -join ', ')" }
+      - name: Check the Windows folder against the list
+        if: runner.os == 'Windows'
+        shell: bash
+        run: packaging/scripts/check-archive.sh windows-x86_64 elf-gate-windows-x86_64
+      - name: Zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = 'elf-gate-windows-x86_64'
           Compress-Archive -Path $out -DestinationPath "$out.zip" -CompressionLevel Optimal
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

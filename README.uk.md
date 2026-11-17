@@ -57,9 +57,8 @@ cd elf-gate-linux-x86_64
 | `xray` / `xray.exe` | xray-core 26.11.9 |
 | `geoip.dat`, `geosite.dat` | геодані для правил маршрутизації |
 | `wintun.dll` | бібліотека драйвера tun (лише windows) |
-| `elf-gate-tun.sh` / `.bat` | запуск із підтримкою tun (див. нижче) |
-| `locales/` | копії рядків інтерфейсу (en, ru, uk), у програмі вони вже вбудовані (архів linux) |
-| `ТЕСТ-README.txt`, `ЧЕК-ЛИСТ.txt` | нотатки для тестувальника та чек-лист, російською (архів windows) |
+| `elf-gate-tun.sh` | лише linux: видає xray право створювати інтерфейс tun (див. нижче) |
+| `LICENSE`, `LICENSE-Xray`, `LICENSE-Wintun` | ліцензії: elf-gate (AGPL-3.0), xray-core (MPL-2.0), wintun (лише windows) |
 
 </details>
 

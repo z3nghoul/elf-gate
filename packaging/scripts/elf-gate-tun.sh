@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # Запуск elf-gate с поддержкой режима TUN на Linux.
-# Положите рядом с бинарником elf-gate (ожидается bin/xray рядом).
+# Лежит в папке архива рядом с elf-gate, xray, geoip.dat и geosite.dat (из репозитория, где ядро в bin/,
+# тоже работает).
 # Запускать от обычного пользователя, НЕ через sudo: sudo спросится сам,
 # и только один раз - чтобы выдать xray право на создание TUN.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_XRAY="$DIR/bin/xray"
+# Где лежат ядро и его данные: рядом со скриптом (архив) или в bin/ (папка разработки).
+SRC_DIR="$DIR"
+if [[ ! -f "$DIR/xray" && -f "$DIR/bin/xray" ]]; then
+    SRC_DIR="$DIR/bin"
+fi
+SRC_XRAY="$SRC_DIR/xray"
 DST_DIR="/usr/local/lib/elf-gate"
 DST_XRAY="$DST_DIR/xray"
 
@@ -41,7 +47,7 @@ fi
 # Копия ядра ищет geoip.dat и geosite.dat только рядом с собой: держим их там же и обновляем, если исходники изменились.
 GEO_FILES=(geoip.dat geosite.dat)
 for f in "${GEO_FILES[@]}"; do
-    if [[ -f "$DIR/bin/$f" ]] && ! cmp -s "$DIR/bin/$f" "$DST_DIR/$f"; then
+    if [[ -f "$SRC_DIR/$f" ]] && ! cmp -s "$SRC_DIR/$f" "$DST_DIR/$f"; then
         needs_setup=1
     fi
 done
@@ -56,10 +62,10 @@ if [[ $needs_setup -eq 1 ]]; then
     sudo install -o root -g root -m 0755 "$SRC_XRAY" "$DST_XRAY"
     sudo setcap "$CAPS" "$DST_XRAY"
     for f in "${GEO_FILES[@]}"; do
-        if [[ -f "$DIR/bin/$f" ]]; then
-            sudo install -o root -g root -m 0644 "$DIR/bin/$f" "$DST_DIR/$f"
+        if [[ -f "$SRC_DIR/$f" ]]; then
+            sudo install -o root -g root -m 0644 "$SRC_DIR/$f" "$DST_DIR/$f"
         else
-            echo "Предупреждение: нет $DIR/bin/$f, TUN не стартует без него в $DST_DIR" >&2
+            echo "Предупреждение: нет $SRC_DIR/$f, TUN не стартует без него в $DST_DIR" >&2
         fi
     done
     echo "Готово."

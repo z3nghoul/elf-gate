@@ -57,9 +57,8 @@ on windows unpack `elf-gate-windows-x86_64.zip` and run `elf-gate.exe`. then:
 | `xray` / `xray.exe` | xray-core 26.11.9 |
 | `geoip.dat`, `geosite.dat` | geodata for the routing rules |
 | `wintun.dll` | the tun driver library (windows only) |
-| `elf-gate-tun.sh` / `.bat` | start with tun support (see below) |
-| `locales/` | copies of the interface strings (en, ru, uk), the program has them built in (linux archive) |
-| `ТЕСТ-README.txt`, `ЧЕК-ЛИСТ.txt` | tester notes and a checklist, in russian (windows archive) |
+| `elf-gate-tun.sh` | linux only: gives xray the right to create the tun interface (see below) |
+| `LICENSE`, `LICENSE-Xray`, `LICENSE-Wintun` | the licenses: elf-gate (AGPL-3.0), xray-core (MPL-2.0), wintun (windows only) |
 
 </details>
 
