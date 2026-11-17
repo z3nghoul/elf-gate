@@ -12,6 +12,8 @@ use thiserror::Error;
 
 const APP_DIR: &str = "elf-gate";
 const CONFIG_FILE: &str = "config.toml";
+/// The copy of a 1.x config, made once before the first migration: 1.0.3 can be put back from it.
+const BACKUP_1X_FILE: &str = "config.toml.bak-1.x";
 const STATE_FILE: &str = "state.json";
 
 /// Under `sudo` the config belongs to the user who ran it, not to root.
@@ -625,8 +627,19 @@ impl Storage {
             message: e.to_string(),
         })?;
         if config.migrate() {
-            if let Err(e) = self.save(&config) {
-                tracing::warn!("config migration: cannot save: {e}");
+            // The old file is kept as it was, once: a later migration never replaces the copy.
+            // Without the copy the file on disk stays as it is (the migration is repeated at
+            // the next start).
+            let backup = self.dir.join(BACKUP_1X_FILE);
+            let saved = backup.exists() || {
+                write_atomic(&backup, &text)
+                    .map_err(|e| tracing::warn!("config migration: cannot keep a copy: {e}"))
+                    .is_ok()
+            };
+            if saved {
+                if let Err(e) = self.save(&config) {
+                    tracing::warn!("config migration: cannot save: {e}");
+                }
             }
         }
         Ok(config)
@@ -1063,6 +1076,28 @@ mod tests {
         st.save(&c).unwrap();
         assert_eq!(st.load().unwrap().ping.mode, PingMode::Tcp);
         assert_eq!(st.load().unwrap().ping.mode, PingMode::Tcp);
+    }
+
+    #[test]
+    fn the_first_migration_keeps_a_copy_of_the_old_file_and_never_replaces_it() {
+        let dir = TempDir::new("migrate-backup");
+        let st = Storage::new(dir.path());
+        let backup = dir.path().join("config.toml.bak-1.x");
+        let old = "[ping]\nmode = \"tcp\"\n";
+        std::fs::write(st.config_path(), old).unwrap();
+        st.load().unwrap();
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), old);
+        // The file is now new; a copy exists already: an older file coming back later
+        // does not replace it.
+        std::fs::write(st.config_path(), "schema = 1\n[core]\napi_port = 0\n").unwrap();
+        st.load().unwrap();
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), old);
+        // A file that needs no migration makes no copy.
+        let dir = TempDir::new("migrate-backup-none");
+        let st = Storage::new(dir.path());
+        st.save(&Config::default()).unwrap();
+        st.load().unwrap();
+        assert!(!dir.path().join("config.toml.bak-1.x").exists());
     }
 
     #[test]
