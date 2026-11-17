@@ -74,7 +74,7 @@ fn free_port() -> u16 {
 /// would be shared by parallel tests, and Windows refuses a second listener on it.
 fn test_core_defaults() -> CoreConfig {
     CoreConfig {
-        api_port: free_port(),
+        api_endpoint: Some(ApiEndpoint::Tcp(free_port())),
         ..CoreConfig::default()
     }
 }
@@ -1067,7 +1067,7 @@ async fn statsquery_counts_traffic_through_the_proxy_outbound() {
         xray_path: xray.display().to_string(),
         socks_port: free_port(),
         http_port: free_port(),
-        api_port: free_port(),
+        api_endpoint: Some(ApiEndpoint::Tcp(free_port())),
         ..test_core_defaults()
     };
     let mut cfg = config::build(&server, &core_cfg).unwrap();
@@ -1087,7 +1087,7 @@ async fn statsquery_counts_traffic_through_the_proxy_outbound() {
     .await
     .unwrap();
     assert!(body.contains("elf-gate-chain-ok"));
-    let c = stats::query(&xray, &ApiEndpoint::Tcp(core_cfg.api_port))
+    let c = stats::query(&xray, core_cfg.api_endpoint.as_ref().unwrap())
         .await
         .expect("statsquery output");
     // (The uplink counter of a short request can still read 0 when it is queried.)
@@ -1257,7 +1257,7 @@ async fn a_rule_changed_through_the_api_works_for_new_connections_and_keeps_the_
     CliRulesApi
         .replace(
             &xray,
-            &ApiEndpoint::Tcp(core_cfg.api_port),
+            core_cfg.api_endpoint.as_ref().unwrap(),
             &run_dir,
             blocked,
         )
@@ -1285,7 +1285,7 @@ async fn a_rule_changed_through_the_api_works_for_new_connections_and_keeps_the_
     CliRulesApi
         .replace(
             &xray,
-            &ApiEndpoint::Tcp(core_cfg.api_port),
+            core_cfg.api_endpoint.as_ref().unwrap(),
             &run_dir,
             vec![api_rule],
         )

@@ -47,7 +47,7 @@ expression: "config_for(&format!(\"vless://{UUID}@nl.example.com:443?security=re
     },
     {
       "listen": "127.0.0.1",
-      "port": 1,
+      "port": 10085,
       "protocol": "dokodemo-door",
       "settings": {
         "address": "127.0.0.1"

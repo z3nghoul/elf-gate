@@ -65,10 +65,13 @@ pub struct CoreConfig {
     pub xray_path: String,
     pub socks_port: u16,
     pub http_port: u16,
-    /// Any value but 0 turns the core's API on (traffic statistics, rules without a restart);
-    /// 0 turns it off. The address is not this number: it is chosen at every start of the core
-    /// (`api_endpoint`, see `xray::api_endpoint`).
-    pub api_port: u16,
+    /// The core's API is on (traffic statistics, rules without a restart). Its address is
+    /// chosen at every start of the core (`api_endpoint`, see `xray::api_endpoint`).
+    pub api_enabled: bool,
+    /// The old switch: 0 was off, any port was on. Only read, to become `api_enabled` once
+    /// (config migration 2); never written.
+    #[serde(skip_serializing)]
+    pub(crate) api_port: Option<u16>,
     /// Where the API of the running core listens; set when the core starts, never saved.
     #[serde(skip)]
     pub api_endpoint: Option<crate::xray::api_endpoint::ApiEndpoint>,
@@ -90,7 +93,8 @@ impl CoreConfig {
             xray_path: if windows { "xray.exe" } else { "xray" }.to_string(),
             socks_port: 10808,
             http_port: 10809,
-            api_port: 1,
+            api_enabled: true,
+            api_port: None,
             api_endpoint: None,
             log_level: "warning".into(),
             verbose_log: false,
@@ -442,7 +446,8 @@ pub struct Config {
 }
 
 /// 1: the ping mode of a config without a version moves from `tcp` to `url` (once).
-pub const CONFIG_SCHEMA: u32 = 1;
+/// 2: `core.api_port` (0 = off, a port = on) becomes `core.api_enabled`.
+pub const CONFIG_SCHEMA: u32 = 2;
 
 impl Default for Config {
     fn default() -> Self {
@@ -474,9 +479,17 @@ impl Config {
         if self.schema >= CONFIG_SCHEMA {
             return false;
         }
-        if self.ping.mode == PingMode::Tcp {
+        if self.schema < 1 && self.ping.mode == PingMode::Tcp {
             self.ping.mode = PingMode::Url;
             tracing::info!("config migration 1: the ping mode tcp is now url (the new default)");
+        }
+        // Whatever the version, the old key never goes on living: its meaning moves over.
+        if let Some(port) = self.core.api_port.take() {
+            self.core.api_enabled = port != 0;
+            tracing::info!(
+                "config migration 2: api_port {port} is now api_enabled = {}",
+                self.core.api_enabled
+            );
         }
         self.schema = CONFIG_SCHEMA;
         true
@@ -997,6 +1010,39 @@ mod tests {
     }
 
     #[test]
+    fn the_old_api_port_becomes_api_enabled_and_is_not_written_again() {
+        for (old, enabled) in [("0", false), ("10085", true), ("12345", true)] {
+            let dir = TempDir::new("migrate-api");
+            let st = Storage::new(dir.path());
+            std::fs::write(
+                st.config_path(),
+                format!("schema = 1\n[core]\napi_port = {old}\nsocks_port = 1081\n"),
+            )
+            .unwrap();
+            let c = st.load().unwrap();
+            assert_eq!(c.core.api_enabled, enabled, "api_port = {old}");
+            assert_eq!(c.core.socks_port, 1081, "the rest is kept");
+            let text = std::fs::read_to_string(st.config_path()).unwrap();
+            assert!(!text.contains("api_port"), "{text}");
+            assert!(text.contains(&format!("api_enabled = {enabled}")), "{text}");
+            assert!(text.contains("schema = 2"), "{text}");
+            // The new key is the truth from now on: a later load changes nothing.
+            assert_eq!(st.load().unwrap().core.api_enabled, enabled);
+        }
+        // A file without either key: on, the default; nothing is invented.
+        let dir = TempDir::new("migrate-api-none");
+        let st = Storage::new(dir.path());
+        std::fs::write(st.config_path(), "schema = 1\n").unwrap();
+        assert!(st.load().unwrap().core.api_enabled);
+        // A new config has the key and no old one.
+        let text = toml::to_string(&Config::default()).unwrap();
+        assert!(
+            text.contains("api_enabled = true") && !text.contains("api_port"),
+            "{text}"
+        );
+    }
+
+    #[test]
     fn an_old_tcp_config_becomes_url_once_and_a_later_tcp_stays() {
         let dir = TempDir::new("migrate");
         let st = Storage::new(dir.path());
@@ -1010,7 +1056,7 @@ mod tests {
         assert_eq!(c.ping.timeout_ms, 2000, "the rest is kept");
         // The file was rewritten with the version: loading again changes nothing.
         let text = std::fs::read_to_string(st.config_path()).unwrap();
-        assert!(text.contains("schema = 1"), "{text}");
+        assert!(text.contains("schema = 2"), "{text}");
         // The user goes back to tcp: that is final.
         let mut c = st.load().unwrap();
         c.ping.mode = PingMode::Tcp;

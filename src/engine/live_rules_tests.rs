@@ -51,9 +51,9 @@ fn connected(dir: &TempDir, mode: Mode) -> (Engine, Arc<MockApi>, UnboundedRecei
     let server = e.subs.last().unwrap().servers[0].clone();
     let id = server.id;
     let plan = crate::tun::build_plan(&e.config, &MockTunHost::healthy(), mode, None);
-    let config = build_with(&server, &e.config.core, &plan).unwrap();
     let mut core_cfg = e.config.core.clone();
     core_cfg.api_endpoint = Some(crate::xray::api_endpoint::ApiEndpoint::Tcp(1));
+    let config = build_with(&server, &core_cfg, &plan).unwrap();
     e.live = Some(Live {
         server,
         plan,

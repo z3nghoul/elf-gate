@@ -148,7 +148,7 @@ async fn start_core(request: StartRequest<'_>) -> Result<Core, Failure> {
     // The API of this core has an address of its own, chosen now: a private socket (Linux) or a
     // random local port, never a fixed one.
     let mut core_with_api = core_cfg.clone();
-    if core_with_api.api_port != 0 {
+    if core_with_api.api_enabled {
         let endpoint = crate::xray::api_endpoint::ApiEndpoint::choose(run_dir);
         endpoint.clear_stale();
         core_with_api.api_endpoint = Some(endpoint);

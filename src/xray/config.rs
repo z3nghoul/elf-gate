@@ -400,13 +400,13 @@ fn inbounds(core: &CoreConfig, plan: &Plan) -> Vec<Value> {
     if let Some(t) = &plan.tun {
         inbounds.push(tun_inbound(t, &sniffing));
     }
-    if core.api_port != 0 {
+    if core.api_enabled {
         // Nothing but the program that started the core may reach the API (it can change the
         // routing of the machine): a private socket, or a port chosen at this start.
         let endpoint = core
             .api_endpoint
             .clone()
-            .unwrap_or(crate::xray::api_endpoint::ApiEndpoint::Tcp(core.api_port));
+            .unwrap_or(crate::xray::api_endpoint::ApiEndpoint::Tcp(10085));
         let (listen, port) = endpoint.listen();
         let mut api = json!({
             "tag": "api",
@@ -607,7 +607,7 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
 
     // Traffic statistics for the interface (`xray api statsquery`); 0 turns them off
     // (temporary probe cores have no use for them and must not take the port).
-    if core.api_port != 0 {
+    if core.api_enabled {
         rules.insert(
             0,
             json!({ "type": "field", "ruleTag": "elf-api", "inboundTag": ["api"], "outboundTag": "api" }),
@@ -625,7 +625,7 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
         "outbounds": outbounds,
         "routing": { "domainStrategy": "IPIfNonMatch", "rules": rules },
     });
-    if core.api_port != 0 {
+    if core.api_enabled {
         config["stats"] = json!({});
         config["api"] = json!({ "tag": "api", "services": ["StatsService", "RoutingService"] });
         config["policy"] = json!({
@@ -1448,7 +1448,7 @@ mod tests {
             (Some("127.0.0.1"), Some(41234))
         );
         let off = CoreConfig {
-            api_port: 0,
+            api_enabled: false,
             ..CoreConfig::default()
         };
         assert!(api(&off).is_none(), "0 turns the API off");
