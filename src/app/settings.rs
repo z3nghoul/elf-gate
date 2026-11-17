@@ -32,6 +32,7 @@ pub enum SettingId {
     TransparentBg,
     Language,
     Privacy,
+    Mouse,
     SubDefaultUa,
     SubDefaultHours,
     SubDefaultHwid,
@@ -39,11 +40,12 @@ pub enum SettingId {
 
 impl SettingId {
     /// Every setting (also those hidden on this platform).
-    pub const ALL: [SettingId; 28] = [
+    pub const ALL: [SettingId; 29] = [
         SettingId::Language,
         SettingId::Theme,
         SettingId::TransparentBg,
         SettingId::Privacy,
+        SettingId::Mouse,
         SettingId::AutoConnect,
         SettingId::Autostart,
         SettingId::SetSystemProxy,
@@ -77,6 +79,7 @@ impl SettingId {
             SettingId::Theme => "explain.theme",
             SettingId::TransparentBg => "explain.transparent_bg",
             SettingId::Privacy => "explain.privacy",
+            SettingId::Mouse => "explain.mouse",
             SettingId::AutoConnect => "explain.auto_connect",
             SettingId::Autostart if windows => "explain.autostart_win",
             SettingId::Autostart => "explain.autostart_unix",
@@ -139,7 +142,7 @@ impl Section {
 pub fn section_of(id: &SettingId) -> Section {
     use SettingId::*;
     match id {
-        Language | Theme | TransparentBg | Privacy => Section::Appearance,
+        Language | Theme | TransparentBg | Privacy | Mouse => Section::Appearance,
         AutoConnect | Autostart | SetSystemProxy | ManageFirewall => Section::Connection,
         SubDefaultUa | SubDefaultHours | SubDefaultHwid => Section::Subscriptions,
         TunXrayPath | TunName | TunnelDns | ProxyWithTun => Section::Tun,
@@ -318,6 +321,11 @@ impl AppState {
                 onoff(c.ui.privacy_mode),
             ),
             (
+                SettingId::Mouse,
+                crate::t!("setting.mouse"),
+                onoff(c.ui.mouse),
+            ),
+            (
                 SettingId::Theme,
                 crate::t!("setting.theme"),
                 crate::ui::theme::canonical(&c.ui.theme).to_string(),
@@ -406,6 +414,7 @@ impl AppState {
                 PingMode::Url => PingMode::Tcp,
             }),
             SettingId::Privacy => Setting::PrivacyMode(!c.ui.privacy_mode),
+            SettingId::Mouse => Setting::Mouse(!c.ui.mouse),
             SettingId::SubDefaultHwid => Setting::SubDefaultHwid(!c.sub_defaults.send_hwid),
             SettingId::Hwid => {
                 self.popup = Some(Popup::Notice(crate::t!(

@@ -8,10 +8,11 @@ expression: frame
 │  Theme                                 mocha                                                                         │
 │  Transparent background                off                                                                           │
 │  Privacy mode (Ctrl+P)                 off                                                                           │
+│  Mouse                                 on                                                                            │
 │  ─ Connection ───────────────────────────────────────────────────────────────────────────────────────────────────────│
 │  Connect on start                      off                                                                           │
-│  Start at login                        off                                                                           │
-│> System proxy                          on                                                                            │
+│> Start at login                        off                                                                           │
+│  System proxy                          on                                                                            │
 │  ─ Subscriptions ────────────────────────────────────────────────────────────────────────────────────────────────────│
 │  Default User-Agent                    v2rayNG/1.10.4                                                                │
 │  Default update interval, h (0 = off)  12                                                                            │
@@ -19,11 +20,10 @@ expression: frame
 │  ─ TUN ──────────────────────────────────────────────────────────────────────────────────────────────────────────────│
 │  Xray for TUN (Linux)                  /usr/local/lib/elf-gate/xray                                                  │
 │  TUN interface name                    elfgate0                                                                      │
-│  DNS through the tunnel                1.1.1.1                                                                       │
-└─────────────────────────────────────────────────────────────────────────────────────────────────────────── ↓ 19 more ┘
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────── ↓ 20 more ┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│Send the system's programs through elf-gate automatically (system proxy). Turn off if you set the proxy in your       │
-│programs yourself.                                                                                                    │
+│Start elf-gate automatically when you log in, so you do not have to start it by hand. In TUN mode the network         │
+│interface needs permissions (see elf-gate-tun.sh).                                                                    │
 │                                                                                                                      │
 └ tray icon: none (not supported by this desktop or not running) ──────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐

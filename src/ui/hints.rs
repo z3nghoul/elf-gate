@@ -217,6 +217,7 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
                             | SettingId::PingMode
                             | SettingId::Theme
                             | SettingId::TransparentBg
+                            | SettingId::Mouse
                             | SettingId::SubDefaultHwid
                             | SettingId::LogLevel,
                         ) => crate::t!("hint.switch"),

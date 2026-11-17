@@ -197,6 +197,8 @@ pub struct UiConfig {
     pub transparent_bg: bool,
     /// Privacy mode (screenshots, streams): the screens hide addresses, ids, keys and URLs.
     pub privacy_mode: bool,
+    /// Mouse control (click, wheel). Off: the terminal keeps the mouse for selecting text.
+    pub mouse: bool,
     /// Interface language: `en`, `ru` or `uk`. English unless chosen; never read from the system.
     pub language: crate::i18n::Lang,
 }
@@ -210,6 +212,7 @@ impl Default for UiConfig {
             theme: "mocha".into(),
             transparent_bg: false,
             privacy_mode: false,
+            mouse: true,
             language: crate::i18n::Lang::default(),
         }
     }

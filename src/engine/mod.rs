@@ -1434,6 +1434,7 @@ impl Engine {
             ManageFirewall(v) => self.config.tun.manage_firewall = v,
             AutoConnect(v) => self.config.ui.auto_connect = v,
             PrivacyMode(v) => self.config.ui.privacy_mode = v,
+            Mouse(v) => self.config.ui.mouse = v,
             CheckUpdates(v) => {
                 self.config.updates.check = v;
                 // Switched on: look at the schedule at the next tick, not in a minute.

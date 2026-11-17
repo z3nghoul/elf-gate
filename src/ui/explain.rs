@@ -68,6 +68,6 @@ mod tests {
                 assert!(SettingId::ALL.contains(&id), "{id:?}");
             }
         }
-        assert_eq!(SettingId::ALL.len(), 28);
+        assert_eq!(SettingId::ALL.len(), 29);
     }
 }

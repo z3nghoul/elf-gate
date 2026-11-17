@@ -48,6 +48,11 @@ pub fn render(f: &mut Frame, area: Rect, th: &Theme, scroll: &scroll::Scroll) {
         th.muted(),
         crate::t!("help.legend_grey"),
     ));
+    lines.extend(entry(
+        crate::t!("help.mouse_key"),
+        th.title(),
+        crate::t!("help.mouse_text"),
+    ));
     scroll::render(
         f,
         area,

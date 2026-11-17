@@ -2,6 +2,7 @@
 //! which this program starts when needed and talks to over a local link.
 
 use anyhow::Result;
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -38,7 +39,8 @@ fn init_logging() -> Option<WorkerGuard> {
 
 fn restore_terminal() {
     let _ = disable_raw_mode();
-    let _ = execute!(io::stdout(), LeaveAlternateScreen);
+    // The mouse goes back to the terminal here too: the panic hook calls this function.
+    let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
 }
 
 fn install_panic_hook() {
@@ -71,7 +73,22 @@ async fn run(terminal: &mut Term, tun_from_cli: bool, colors: ui::theme::ColorMo
     ));
 
     let mut forced_logged = false;
+    let mut mouse_captured = false;
     while !app.should_quit {
+        // The "Mouse" setting applies at once: the terminal hands over the mouse events only
+        // while it is on (and selects text itself while it is off).
+        if app.config.ui.mouse != mouse_captured {
+            mouse_captured = app.config.ui.mouse;
+            // A terminal without mouse support may refuse: the keyboard works all the same.
+            let result = if mouse_captured {
+                execute!(io::stdout(), EnableMouseCapture)
+            } else {
+                execute!(io::stdout(), DisableMouseCapture)
+            };
+            if let Err(e) = result {
+                tracing::debug!("mouse capture not changed: {e}");
+            }
+        }
         if app.take_redraw() {
             terminal.clear()?;
         }

@@ -66,6 +66,7 @@ pub enum Setting {
     TransparentBg(bool),
     Language(crate::i18n::Lang),
     PrivacyMode(bool),
+    Mouse(bool),
     /// `[[subscriptions]]` entry by name.
     SubscriptionUserAgent {
         name: String,
