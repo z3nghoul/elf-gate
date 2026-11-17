@@ -31,3 +31,19 @@ pub fn os_version() -> String {
         _ => "unknown".into(),
     }
 }
+
+pub fn os_description() -> String {
+    let Ok(key) = Key::open_in(
+        HKEY_LOCAL_MACHINE,
+        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+        KEY_QUERY_VALUE,
+    ) else {
+        return "Windows".into();
+    };
+    let get = |name: &str| key.get(name).ok().flatten().filter(|s| !s.is_empty());
+    super::super::describe_windows(
+        &get("ProductName").unwrap_or_default(),
+        &get("CurrentBuild").unwrap_or_default(),
+        get("DisplayVersion").as_deref(),
+    )
+}

@@ -27,3 +27,10 @@ pub fn os_version() -> String {
         })
         .unwrap_or_else(|| "unknown".into())
 }
+
+pub fn os_description() -> String {
+    super::super::describe_linux(
+        &fs::read_to_string("/etc/os-release").unwrap_or_default(),
+        &fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default(),
+    )
+}

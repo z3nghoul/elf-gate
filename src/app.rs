@@ -1608,7 +1608,7 @@ impl AppState {
     fn copy_report(&mut self) {
         let input = crate::diag::ReportInput {
             version_line: crate::build_info::version_line(),
-            os: platform::os_version(),
+            os: platform::os_description(),
             mode: mode_name(self.mode).to_string(),
             presets: self.config.presets.enabled.clone(),
             server_addresses: self

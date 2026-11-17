@@ -428,6 +428,53 @@ pub fn os_version() -> String {
     imp::device::os_version()
 }
 
+/// The system for a human (the check report): `CachyOS Linux (kernel 7.3.3)`, or
+/// `Windows 11 Pro, build 22631 (23H2)`.
+pub fn os_description() -> String {
+    imp::device::os_description()
+}
+
+/// Linux: `PRETTY_NAME` of `/etc/os-release` and the kernel release.
+pub fn describe_linux(os_release: &str, kernel: &str) -> String {
+    let name = os_release
+        .lines()
+        .find_map(|l| l.strip_prefix("PRETTY_NAME="))
+        .map(|v| v.trim().trim_matches('"').to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "Linux".into());
+    let kernel = kernel.trim();
+    if kernel.is_empty() {
+        return name;
+    }
+    // "7.3.3-1-cachyos" is the kernel 7.3.3: the rest is the distribution's tag.
+    let number = kernel.split('-').next().unwrap_or(kernel);
+    crate::t!("diag.os_linux", name = name, kernel = number)
+}
+
+/// Windows: the edition and the build. The registry still says "Windows 10" on Windows 11.
+pub fn describe_windows(product: &str, build: &str, display: Option<&str>) -> String {
+    let is_11 = build.parse::<u32>().is_ok_and(|b| b >= 22000);
+    let product = if is_11 {
+        product.replacen("Windows 10", "Windows 11", 1)
+    } else {
+        product.to_string()
+    };
+    let product = if product.is_empty() {
+        "Windows".into()
+    } else {
+        product
+    };
+    match display {
+        Some(d) => crate::t!(
+            "diag.os_windows_display",
+            name = product,
+            build = build,
+            display = d
+        ),
+        None => crate::t!("diag.os_windows", name = product, build = build),
+    }
+}
+
 /// What limits this process (Linux: no_new_privs, seccomp, capabilities, mount namespace, LSM
 /// label, ids), for the error report when a child cannot see files the parent sees.
 pub fn process_restrictions() -> String {
@@ -565,4 +612,34 @@ pub async fn tray_start(
 /// Opens the interface in a terminal window (the tray's "open interface").
 pub fn open_interface(program: &Path) -> Result<(), PlatformError> {
     imp::tray::open_interface(program)
+}
+
+#[cfg(test)]
+mod os_description_tests {
+    use super::{describe_linux, describe_windows};
+
+    #[test]
+    fn linux_shows_the_distribution_and_the_kernel_number() {
+        let text = describe_linux(
+            "NAME=x\nPRETTY_NAME=\"CachyOS Linux\"\n",
+            "7.3.3-1-cachyos\n",
+        );
+        assert!(
+            text.contains("CachyOS Linux") && text.contains("7.3.3"),
+            "{text}"
+        );
+        assert!(!text.contains("cachyos"), "{text}");
+        assert_eq!(describe_linux("", ""), "Linux");
+    }
+
+    #[test]
+    fn windows_11_is_told_by_the_build_number() {
+        let text = describe_windows("Windows 10 Pro", "22631", Some("23H2"));
+        assert!(text.contains("Windows 11 Pro") && text.contains("22631") && text.contains("23H2"));
+        let text = describe_windows("Windows 10 Pro", "19045", None);
+        assert!(
+            text.contains("Windows 10 Pro") && text.contains("19045"),
+            "{text}"
+        );
+    }
 }
