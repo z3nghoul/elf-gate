@@ -267,7 +267,7 @@ mod tests {
             ("server", "corp-proxy:3128"),
             ("bypass", "*.corp"),
         ];
-        let (mock, ctrl, dir) = setup("own", &user);
+        let (mock, ctrl, _dir) = setup("own", &user);
         let before = mock.snapshot();
 
         ctrl.enable(&addr(), &["localhost".into(), "10.*".into()])
@@ -282,27 +282,24 @@ mod tests {
             "user settings must come back exactly"
         );
         assert!(!ctrl.is_active());
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn disable_without_enable_does_nothing() {
-        let (mock, ctrl, dir) = setup("noop", &[("enabled", "0")]);
+        let (mock, ctrl, _dir) = setup("noop", &[("enabled", "0")]);
         let before = mock.snapshot();
         assert!(!ctrl.disable().unwrap());
         assert_eq!(mock.snapshot(), before);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn second_enable_keeps_the_original_settings() {
-        let (mock, ctrl, dir) = setup("twice", &[("server", "orig:1")]);
+        let (mock, ctrl, _dir) = setup("twice", &[("server", "orig:1")]);
         let before = mock.snapshot();
         ctrl.enable(&addr(), &[]).unwrap();
         ctrl.enable(&addr(), &[]).unwrap(); // e.g. after a server switch
         ctrl.disable().unwrap();
         assert_eq!(mock.snapshot(), before);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -322,12 +319,11 @@ mod tests {
         assert!(note.contains("127.0.0.1:10809"), "{note}");
         assert_eq!(mock.snapshot(), before);
         assert_eq!(ctrl2.recover().unwrap(), None, "second recovery is a no-op");
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn failed_enable_rolls_back() {
-        let (mock, ctrl, dir) = setup("fail", &[("server", "orig:1")]);
+        let (mock, ctrl, _dir) = setup("fail", &[("server", "orig:1")]);
         let before = mock.snapshot();
         mock.fail_enable.store(true, Ordering::SeqCst);
         assert!(ctrl.enable(&addr(), &[]).is_err());
@@ -337,12 +333,11 @@ mod tests {
             "half-applied change must be undone"
         );
         assert!(!ctrl.is_active());
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn failed_restore_keeps_the_snapshot_for_next_start() {
-        let (mock, ctrl, dir) = setup("failrestore", &[("server", "orig:1")]);
+        let (mock, ctrl, _dir) = setup("failrestore", &[("server", "orig:1")]);
         let before = mock.snapshot();
         ctrl.enable(&addr(), &[]).unwrap();
         mock.fail_disable.store(true, Ordering::SeqCst);
@@ -351,12 +346,11 @@ mod tests {
         mock.fail_disable.store(false, Ordering::SeqCst);
         assert!(ctrl.recover().unwrap().is_some());
         assert_eq!(mock.snapshot(), before);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn unsupported_backend_is_never_touched() {
-        let (mock, ctrl, dir) = setup("unsupported", &[("server", "orig:1")]);
+        let (mock, ctrl, _dir) = setup("unsupported", &[("server", "orig:1")]);
         mock.unsupported.store(true, Ordering::SeqCst);
         let before = mock.snapshot();
         assert!(matches!(
@@ -365,12 +359,11 @@ mod tests {
         ));
         assert_eq!(mock.snapshot(), before);
         assert!(!ctrl.is_active());
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn close_restores_and_blocks_later_enables() {
-        let (mock, ctrl, dir) = setup("close", &[("server", "orig:1")]);
+        let (mock, ctrl, _dir) = setup("close", &[("server", "orig:1")]);
         let before = mock.snapshot();
         ctrl.enable(&addr(), &[]).unwrap();
         ctrl.close();
@@ -381,7 +374,6 @@ mod tests {
             before,
             "a late enable must not re-apply the proxy"
         );
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -390,6 +382,5 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("state.json"), "{ not json").unwrap();
         assert!(ctrl.recover().is_err());
-        let _ = std::fs::remove_dir_all(dir);
     }
 }
