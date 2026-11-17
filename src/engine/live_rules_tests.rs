@@ -24,7 +24,7 @@ impl RulesApi for MockApi {
     fn replace<'a>(
         &'a self,
         _binary: &'a std::path::Path,
-        _api_port: u16,
+        _api: &'a crate::xray::api_endpoint::ApiEndpoint,
         _work_dir: &'a std::path::Path,
         rules: Vec<Value>,
     ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
@@ -52,10 +52,12 @@ fn connected(dir: &TempDir, mode: Mode) -> (Engine, Arc<MockApi>, UnboundedRecei
     let id = server.id;
     let plan = crate::tun::build_plan(&e.config, &MockTunHost::healthy(), mode, None);
     let config = build_with(&server, &e.config.core, &plan).unwrap();
+    let mut core_cfg = e.config.core.clone();
+    core_cfg.api_endpoint = Some(crate::xray::api_endpoint::ApiEndpoint::Tcp(1));
     e.live = Some(Live {
         server,
         plan,
-        core_cfg: e.config.core.clone(),
+        core_cfg,
         binary: PathBuf::from("/definitely/not/here/xray"),
         config,
     });

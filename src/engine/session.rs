@@ -145,6 +145,15 @@ async fn start_core(request: StartRequest<'_>) -> Result<Core, Failure> {
         backup,
         known_hosts,
     } = request;
+    // The API of this core has an address of its own, chosen now: a private socket (Linux) or a
+    // random local port, never a fixed one.
+    let mut core_with_api = core_cfg.clone();
+    if core_with_api.api_port != 0 {
+        let endpoint = crate::xray::api_endpoint::ApiEndpoint::choose(run_dir);
+        endpoint.clear_stale();
+        core_with_api.api_endpoint = Some(endpoint);
+    }
+    let core_cfg = &core_with_api;
     // The server must answer over TCP before anything else: afterwards, with the tunnel up,
     // this machine's own connections would go through the tunnel. The address is resolved
     // here too, so Xray never has to resolve it through the tunnel.

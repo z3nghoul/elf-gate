@@ -594,7 +594,6 @@ group_hidden = "{arrow} {name} ({shown}, hidden {hidden})"
 hidden_row = "{name} (hidden)"
 
 [setting]
-api_port = "API port (statistics)"
 auto_connect = "Connect on start"
 autostart = "Start at login"
 channel_stable = "stable"
@@ -655,7 +654,6 @@ down = "↓ {n} more"
 up = "↑ {n} more"
 
 [explain]
-api_port = "The core's internal port for traffic statistics. Change only if it is taken. Applies at the next connection."
 auto_connect = "Connect to the last server as soon as the program starts. Off by default."
 autostart_unix = "Start elf-gate automatically when you log in, so you do not have to start it by hand. In TUN mode the network interface needs permissions (see elf-gate-tun.sh)."
 autostart_win = "Start elf-gate automatically when you log in, so you do not have to start it by hand. In TUN mode Windows asks for administrator rights once, then does not ask again."

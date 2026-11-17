@@ -46,7 +46,6 @@ pub enum Setting {
     TunXrayPath(String),
     SocksPort(u16),
     HttpPort(u16),
-    ApiPort(u16),
     LogLevel(String),
     VerboseLog(bool),
     SetSystemProxy(bool),

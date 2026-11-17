@@ -401,13 +401,23 @@ fn inbounds(core: &CoreConfig, plan: &Plan) -> Vec<Value> {
         inbounds.push(tun_inbound(t, &sniffing));
     }
     if core.api_port != 0 {
-        inbounds.push(json!({
+        // Nothing but the program that started the core may reach the API (it can change the
+        // routing of the machine): a private socket, or a port chosen at this start.
+        let endpoint = core
+            .api_endpoint
+            .clone()
+            .unwrap_or(crate::xray::api_endpoint::ApiEndpoint::Tcp(core.api_port));
+        let (listen, port) = endpoint.listen();
+        let mut api = json!({
             "tag": "api",
-            "listen": "127.0.0.1",
-            "port": core.api_port,
+            "listen": listen,
             "protocol": "dokodemo-door",
             "settings": { "address": "127.0.0.1" },
-        }));
+        });
+        if let Some(port) = port {
+            api["port"] = json!(port);
+        }
+        inbounds.push(api);
     }
     inbounds
 }
@@ -1406,5 +1416,41 @@ mod tests {
             json!(["chrome_crashpad_handler", "cowork-linux-helper"]),
             "not cut to the 15 characters of comm"
         );
+    }
+
+    #[test]
+    fn the_api_input_is_a_private_socket_or_a_port_of_this_start() {
+        use crate::xray::api_endpoint::ApiEndpoint;
+        let server = crate::parser::parse_link(REALITY_LINK).unwrap();
+        let api = |core: &CoreConfig| {
+            let config = build(&server, core).unwrap();
+            config["inbounds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|i| i["tag"] == "api")
+                .cloned()
+        };
+        let unix = CoreConfig {
+            api_endpoint: Some(ApiEndpoint::Unix("/run/elf-gate/api.sock".into())),
+            ..CoreConfig::default()
+        };
+        let a = api(&unix).unwrap();
+        assert_eq!(a["listen"], "/run/elf-gate/api.sock,0600");
+        assert!(a.get("port").is_none());
+        let tcp = CoreConfig {
+            api_endpoint: Some(ApiEndpoint::Tcp(41234)),
+            ..CoreConfig::default()
+        };
+        let a = api(&tcp).unwrap();
+        assert_eq!(
+            (a["listen"].as_str(), a["port"].as_u64()),
+            (Some("127.0.0.1"), Some(41234))
+        );
+        let off = CoreConfig {
+            api_port: 0,
+            ..CoreConfig::default()
+        };
+        assert!(api(&off).is_none(), "0 turns the API off");
     }
 }

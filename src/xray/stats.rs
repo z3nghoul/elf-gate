@@ -1,6 +1,7 @@
 //! Traffic statistics from Xray's own API, read by running `xray api statsquery` (the same
 //! binary, so no gRPC dependency).
 
+use super::api_endpoint::ApiEndpoint;
 use crate::platform;
 use serde_json::Value;
 use std::path::Path;
@@ -50,13 +51,13 @@ pub fn parse(json: &str) -> Option<Counters> {
     Some(c)
 }
 
-pub async fn query(binary: &Path, api_port: u16) -> Option<Counters> {
+pub async fn query(binary: &Path, api: &ApiEndpoint) -> Option<Counters> {
     let guard = platform::child_guard();
     let mut cmd = Command::new(binary);
     cmd.args([
         "api",
         "statsquery",
-        &format!("--server=127.0.0.1:{api_port}"),
+        &format!("--server={}", api.server_arg()),
     ])
     .stdin(Stdio::null())
     .stdout(Stdio::piped())

@@ -11,7 +11,6 @@ pub enum SettingId {
     TunXrayPath,
     SocksPort,
     HttpPort,
-    ApiPort,
     LogLevel,
     VerboseLog,
     SetSystemProxy,
@@ -40,7 +39,7 @@ pub enum SettingId {
 
 impl SettingId {
     /// Every setting (also those hidden on this platform).
-    pub const ALL: [SettingId; 29] = [
+    pub const ALL: [SettingId; 28] = [
         SettingId::Language,
         SettingId::Theme,
         SettingId::TransparentBg,
@@ -68,7 +67,6 @@ impl SettingId {
         SettingId::UpdateChannel,
         SettingId::SocksPort,
         SettingId::HttpPort,
-        SettingId::ApiPort,
         SettingId::Hwid,
     ];
 
@@ -103,7 +101,6 @@ impl SettingId {
             SettingId::UpdateChannel => "explain.update_channel",
             SettingId::SocksPort => "explain.socks_port",
             SettingId::HttpPort => "explain.http_port",
-            SettingId::ApiPort => "explain.api_port",
             SettingId::Hwid => "explain.hwid",
         })
     }
@@ -149,7 +146,7 @@ pub fn section_of(id: &SettingId) -> Section {
         PingMode | PingUrl | PingTimeout | PingAuto => Section::Ping,
         XrayPath | LogLevel | VerboseLog => Section::Core,
         CheckUpdates | UpdateChannel => Section::Updates,
-        SocksPort | HttpPort | ApiPort => Section::Ports,
+        SocksPort | HttpPort => Section::Ports,
         Hwid => Section::Device,
     }
 }
@@ -222,11 +219,6 @@ impl AppState {
                 SettingId::HttpPort,
                 crate::t!("setting.http_port"),
                 c.core.http_port.to_string(),
-            ),
-            (
-                SettingId::ApiPort,
-                crate::t!("setting.api_port"),
-                c.core.api_port.to_string(),
             ),
             (
                 SettingId::LogLevel,
@@ -456,7 +448,6 @@ impl AppState {
             SettingId::TunXrayPath => Ok(Setting::TunXrayPath(text)),
             SettingId::SocksPort => port(&text).map(Setting::SocksPort),
             SettingId::HttpPort => port(&text).map(Setting::HttpPort),
-            SettingId::ApiPort => port(&text).map(Setting::ApiPort),
             SettingId::PingUrl => Ok(Setting::PingUrl(text)),
             SettingId::PingTimeout => num(&text).map(Setting::PingTimeoutMs),
             SettingId::PingAuto => num(&text).map(Setting::PingAutoIntervalSecs),

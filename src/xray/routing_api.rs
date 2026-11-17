@@ -3,6 +3,7 @@
 //! dependency), like the statistics. The new rule list replaces the old one in one call, in the
 //! order a full start with the new config would have, so no rule can be seen half applied.
 
+use super::api_endpoint::ApiEndpoint;
 use super::config::Plan;
 use crate::platform;
 use crate::storage::CoreConfig;
@@ -46,11 +47,11 @@ pub fn without_rules(config: &Value) -> Value {
 
 /// The call to the core. A mock stands in for it in tests.
 pub trait RulesApi: Send + Sync {
-    /// Replaces the rule list of the core on `api_port` with `rules`.
+    /// Replaces the rule list of the core behind `api` with `rules`.
     fn replace<'a>(
         &'a self,
         binary: &'a Path,
-        api_port: u16,
+        api: &'a ApiEndpoint,
         work_dir: &'a Path,
         rules: Vec<Value>,
     ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
@@ -63,7 +64,7 @@ impl RulesApi for CliRulesApi {
     fn replace<'a>(
         &'a self,
         binary: &'a Path,
-        api_port: u16,
+        api: &'a ApiEndpoint,
         work_dir: &'a Path,
         rules: Vec<Value>,
     ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
@@ -73,17 +74,17 @@ impl RulesApi for CliRulesApi {
                 .map_err(|e| e.to_string())?;
             crate::storage::create_private_dir(work_dir).map_err(|e| e.to_string())?;
             crate::storage::write_private(&file, &body).map_err(|e| e.to_string())?;
-            let result = call(binary, api_port, &file).await;
+            let result = call(binary, api, &file).await;
             let _ = std::fs::remove_file(&file);
             result
         })
     }
 }
 
-async fn call(binary: &Path, api_port: u16, file: &Path) -> Result<(), String> {
+async fn call(binary: &Path, api: &ApiEndpoint, file: &Path) -> Result<(), String> {
     let guard = platform::child_guard();
     let mut cmd = Command::new(binary);
-    cmd.args(["api", "adrules", &format!("--server=127.0.0.1:{api_port}")])
+    cmd.args(["api", "adrules", &format!("--server={}", api.server_arg())])
         .arg(file)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

@@ -65,7 +65,13 @@ pub struct CoreConfig {
     pub xray_path: String,
     pub socks_port: u16,
     pub http_port: u16,
+    /// Any value but 0 turns the core's API on (traffic statistics, rules without a restart);
+    /// 0 turns it off. The address is not this number: it is chosen at every start of the core
+    /// (`api_endpoint`, see `xray::api_endpoint`).
     pub api_port: u16,
+    /// Where the API of the running core listens; set when the core starts, never saved.
+    #[serde(skip)]
+    pub api_endpoint: Option<crate::xray::api_endpoint::ApiEndpoint>,
     pub log_level: String,
     /// Detailed core log: access lines ("accepted ...") and `info` level. Off by default.
     pub verbose_log: bool,
@@ -84,7 +90,8 @@ impl CoreConfig {
             xray_path: if windows { "xray.exe" } else { "xray" }.to_string(),
             socks_port: 10808,
             http_port: 10809,
-            api_port: 10085,
+            api_port: 1,
+            api_endpoint: None,
             log_level: "warning".into(),
             verbose_log: false,
         }

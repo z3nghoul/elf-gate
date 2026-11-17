@@ -1062,19 +1062,26 @@ impl Engine {
     pub(crate) fn start_stats(&mut self) {
         self.stop_stats();
         self.traffic = Traffic::default();
-        if self.mock || self.config.core.api_port == 0 {
+        let Some(api) = self
+            .live
+            .as_ref()
+            .and_then(|l| l.core_cfg.api_endpoint.clone())
+        else {
+            return;
+        };
+        if self.mock {
             return;
         }
         let Ok(binary) = crate::xray::process::resolve_binary(&self.config.core.xray_path) else {
             return;
         };
-        let (tx, port) = (self.tx.clone(), self.config.core.api_port);
+        let tx = self.tx.clone();
         self.stats_task = Some(self.spawn(async move {
             let mut every = tokio::time::interval(Duration::from_secs(1));
             every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 every.tick().await;
-                if let Some(c) = crate::xray::stats::query(&binary, port).await {
+                if let Some(c) = crate::xray::stats::query(&binary, &api).await {
                     if tx.send(BgEvent::Stats(c)).is_err() {
                         return;
                     }
@@ -1421,13 +1428,12 @@ impl Engine {
         match setting {
             XrayPath(v) => self.config.core.xray_path = v,
             TunXrayPath(v) => self.config.tun.xray_path = v,
-            SocksPort(p) | HttpPort(p) | ApiPort(p) if !port_ok(p) => {
+            SocksPort(p) | HttpPort(p) if !port_ok(p) => {
                 self.error_alert(crate::t!("eng.port_range"));
                 return;
             }
             SocksPort(p) => self.config.core.socks_port = p,
             HttpPort(p) => self.config.core.http_port = p,
-            ApiPort(p) => self.config.core.api_port = p,
             LogLevel(v) => {
                 if !["debug", "info", "warning", "error", "none"].contains(&v.as_str()) {
                     self.error_alert(crate::t!("eng.log_level_values"));

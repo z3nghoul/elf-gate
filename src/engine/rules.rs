@@ -124,16 +124,15 @@ impl Engine {
         let Some(live) = &self.live else {
             return false;
         };
-        let port = live.core_cfg.api_port;
-        if port == 0 {
+        let Some(endpoint) = live.core_cfg.api_endpoint.clone() else {
             return false;
-        }
+        };
         let (api, tx) = (self.rules_api.clone(), self.tx.clone());
         let (binary, dir) = (live.binary.clone(), self.run_dir.clone());
         let rules = rules_of(&config);
         self.rules_inflight = true;
         self.spawn(async move {
-            let result = api.replace(&binary, port, &dir, rules).await;
+            let result = api.replace(&binary, &endpoint, &dir, rules).await;
             let _ = tx.send(BgEvent::RulesApplied {
                 id,
                 result,

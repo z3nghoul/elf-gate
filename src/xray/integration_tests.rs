@@ -2,6 +2,7 @@
 //! Windows). Without a binary every test here prints `SKIPPED` and returns, so CI stays
 //! green. (libtest cannot mark a test as ignored at run time.)
 
+use super::api_endpoint::ApiEndpoint;
 use super::config;
 use super::process::{Core, CoreError};
 use super::validate::Verdict;
@@ -1086,7 +1087,7 @@ async fn statsquery_counts_traffic_through_the_proxy_outbound() {
     .await
     .unwrap();
     assert!(body.contains("elf-gate-chain-ok"));
-    let c = stats::query(&xray, core_cfg.api_port)
+    let c = stats::query(&xray, &ApiEndpoint::Tcp(core_cfg.api_port))
         .await
         .expect("statsquery output");
     // (The uplink counter of a short request can still read 0 when it is queried.)
@@ -1254,7 +1255,12 @@ async fn a_rule_changed_through_the_api_works_for_new_connections_and_keeps_the_
         "type": "field", "ruleTag": "elf-test-block", "ip": ["127.0.0.1"], "outboundTag": "block"
     }));
     CliRulesApi
-        .replace(&xray, core_cfg.api_port, &run_dir, blocked)
+        .replace(
+            &xray,
+            &ApiEndpoint::Tcp(core_cfg.api_port),
+            &run_dir,
+            blocked,
+        )
         .await
         .expect("the core took the rules");
     let fresh = socks_start(core_cfg.socks_port, http_port).await;
@@ -1277,7 +1283,12 @@ async fn a_rule_changed_through_the_api_works_for_new_connections_and_keeps_the_
 
     // Back to the first list: new connections work again.
     CliRulesApi
-        .replace(&xray, core_cfg.api_port, &run_dir, vec![api_rule])
+        .replace(
+            &xray,
+            &ApiEndpoint::Tcp(core_cfg.api_port),
+            &run_dir,
+            vec![api_rule],
+        )
         .await
         .expect("the core took the rules back");
     let again = socks_start(core_cfg.socks_port, http_port)
@@ -1353,4 +1364,61 @@ async fn a_process_rule_matches_a_program_with_a_name_longer_than_15_characters(
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// 9. The API on a private unix socket (Linux).
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_api_listens_on_a_socket_only_the_owner_can_open() {
+    use crate::xray::routing_api::{CliRulesApi, RulesApi};
+    use std::os::unix::fs::PermissionsExt;
+    let xray = require_xray!();
+    let tmp = TempDir::new("api-socket");
+    let run_dir = tmp.path().join("run");
+    let socket = run_dir.join("api.sock");
+    let server = parse_link(&format!("vless://{UUID}@127.0.0.1:2?security=none#dummy")).unwrap();
+    let core_cfg = CoreConfig {
+        xray_path: xray.to_string_lossy().into_owned(),
+        socks_port: free_port(),
+        http_port: free_port(),
+        api_endpoint: Some(ApiEndpoint::Unix(socket.clone())),
+        ..CoreConfig::default()
+    };
+    let cfg = config::build(&server, &core_cfg).unwrap();
+    let api_inbound = cfg["inbounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["tag"] == "api")
+        .unwrap()
+        .clone();
+    assert_eq!(api_inbound["listen"], format!("{},0600", socket.display()));
+    assert!(api_inbound.get("port").is_none(), "no TCP port for the API");
+
+    let (tx, _rx) = unbounded_channel();
+    let core = Core::start(&core_cfg, &cfg, &run_dir, tx)
+        .await
+        .expect("core with an API socket failed to start");
+    let mode = std::fs::metadata(&socket)
+        .expect("the socket exists")
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600, "mode of the socket: {mode:o}");
+    // The statistics and the rules work through it.
+    let endpoint = ApiEndpoint::Unix(socket.clone());
+    assert!(
+        crate::xray::stats::query(&xray, &endpoint).await.is_some(),
+        "statsquery over the socket"
+    );
+    let rules = crate::xray::routing_api::rules_of(&cfg);
+    CliRulesApi
+        .replace(&xray, &endpoint, &run_dir, rules)
+        .await
+        .expect("rules over the socket");
+    // And nothing listens on the old fixed port or on any port for the API.
+    assert!(!wait_port(10085, true, 1).await, "10085 must not be open");
+    core.stop().await;
 }
