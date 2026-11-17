@@ -5,7 +5,7 @@
 
 <p align="center">
   <a href="https://github.com/z3nghoul/elf-gate/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/z3nghoul/elf-gate/ci.yml?branch=main&style=for-the-badge&labelColor=1e1e2e&label=ci"></a>
-  <a href="https://github.com/z3nghoul/elf-gate/releases/tag/v1.0.0"><img alt="release" src="https://img.shields.io/badge/release-v1.0.0-cba6f7?style=for-the-badge&labelColor=1e1e2e"></a>
+  <a href="https://github.com/z3nghoul/elf-gate/releases"><img alt="release" src="https://img.shields.io/github/v/release/z3nghoul/elf-gate?include_prereleases&style=for-the-badge&labelColor=1e1e2e&color=cba6f7&label=release"></a>
   <img alt="platforms" src="https://img.shields.io/badge/linux_·_windows-a6e3a1?style=for-the-badge&labelColor=1e1e2e">
   <a href="LICENSE"><img alt="AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-cba6f7?style=for-the-badge&labelColor=1e1e2e"></a>
 </p>
@@ -31,7 +31,7 @@ traffic and latency. one keyboard-driven screen, no electron.
 
 ## ✦ quick start
 
-grab the archive for your system from the [latest release](https://github.com/z3nghoul/elf-gate/releases/latest),
+grab the archive for your system from the [latest release](https://github.com/z3nghoul/elf-gate/releases),
 xray-core is already inside:
 
 ```sh
