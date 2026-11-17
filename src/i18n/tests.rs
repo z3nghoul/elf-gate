@@ -238,3 +238,43 @@ fn typed_errors_are_worded_in_the_current_language() {
         );
     });
 }
+
+#[test]
+fn collapsed_log_repeats_decline_with_the_number() {
+    let say = |lang, n| trn(lang, "eng.repeat", n, &[("text", "x")]);
+    let word = |lang, n| {
+        let s = say(lang, n);
+        s.trim_start_matches("… (")
+            .trim_end_matches(") x")
+            .to_string()
+    };
+    let ru = [
+        (1, "ещё 1 раз"),
+        (2, "ещё 2 раза"),
+        (5, "ещё 5 раз"),
+        (11, "ещё 11 раз"),
+        (21, "ещё 21 раз"),
+        (22, "ещё 22 раза"),
+    ];
+    let uk = [
+        (1, "ще 1 раз"),
+        (2, "ще 2 рази"),
+        (5, "ще 5 разів"),
+        (11, "ще 11 разів"),
+        (21, "ще 21 раз"),
+        (22, "ще 22 рази"),
+    ];
+    let en = [
+        (1, "1 more time"),
+        (2, "2 more times"),
+        (5, "5 more times"),
+        (11, "11 more times"),
+        (21, "21 more times"),
+        (22, "22 more times"),
+    ];
+    for (lang, cases) in [(Lang::Ru, ru), (Lang::Uk, uk), (Lang::En, en)] {
+        for (n, want) in cases {
+            assert_eq!(word(lang, n), want, "{lang:?} {n}");
+        }
+    }
+}

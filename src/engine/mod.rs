@@ -490,7 +490,7 @@ impl Engine {
                     self.emit_log(LogLine {
                         time: line.time.clone(),
                         level: line.level,
-                        text: crate::t!("eng.repeat", n = n, text = short(&line.text)),
+                        text: crate::tn!("eng.repeat", n, text = short(&line.text)),
                     });
                 }
             } else {
@@ -533,7 +533,7 @@ impl Engine {
             self.emit_log(LogLine {
                 time: now_hms(),
                 level: Level::Info,
-                text: crate::t!("eng.repeat", n = n, text = text),
+                text: crate::tn!("eng.repeat", n, text = text),
             });
         }
     }
