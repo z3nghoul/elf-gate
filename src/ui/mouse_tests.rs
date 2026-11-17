@@ -392,3 +392,102 @@ async fn a_burst_of_events_for_one_click_counts_once_but_a_later_click_counts() 
     a.handle_mouse(mouse(MouseEventKind::ScrollUp, servers));
     assert_eq!(a.selected, 1);
 }
+
+/// Every input and choice window has the same keys as buttons: the caps of the key bar, each a
+/// click target, each lit under the pointer.
+#[tokio::test]
+async fn input_and_choice_windows_have_clickable_cap_buttons_with_the_same_look() {
+    use crate::app::{InputPurpose, SelectKind, SettingId};
+    use crate::model::rule::RuleKind;
+    let enter = Target::Key(KeyCode::Enter, KeyModifiers::NONE);
+    let esc = Target::Key(KeyCode::Esc, KeyModifiers::NONE);
+    let paste = Target::Key(KeyCode::Char('v'), KeyModifiers::CONTROL);
+    let input = |purpose| Popup::Input {
+        title: "t".into(),
+        buf: String::new(),
+        purpose,
+    };
+    let windows: Vec<(&str, Popup, Vec<Target>)> = vec![
+        (
+            "add a link",
+            input(InputPurpose::Link),
+            vec![enter, esc, paste],
+        ),
+        (
+            "add a rule",
+            input(InputPurpose::Rule(RuleKind::Domain)),
+            vec![enter, esc],
+        ),
+        (
+            "edit a setting",
+            input(InputPurpose::Setting(SettingId::PingUrl)),
+            vec![enter, esc],
+        ),
+        (
+            "edit a user agent",
+            input(InputPurpose::SubUserAgent("s".into())),
+            vec![enter, esc],
+        ),
+        (
+            "edit the hours",
+            input(InputPurpose::SubHours("s".into())),
+            vec![enter, esc],
+        ),
+        (
+            "a choice",
+            Popup::Select {
+                title: "t".into(),
+                options: vec!["a".into(), "b".into()],
+                selected: 0,
+                kind: SelectKind::Role(1),
+            },
+            vec![enter, esc],
+        ),
+        (
+            "programs",
+            Popup::Processes {
+                items: vec![("firefox".into(), 1)],
+                filter: String::new(),
+                selected: 0,
+            },
+            vec![enter, esc],
+        ),
+    ];
+    for (name, popup, targets) in windows {
+        let (mut a, _rx) = app();
+        a.popup = Some(popup);
+        draw(100, 30, &mut a);
+        let ctx = super::RenderCtx::new(false, &a.config.ui, super::theme::ColorMode::TrueColor);
+        for target in targets {
+            let rect = a
+                .hits
+                .find(target)
+                .unwrap_or_else(|| panic!("{name}: no button {target:?}"));
+            // At rest: the cap of the key bar.
+            let (_, buf) = super::tests_support::draw_buf(100, 30, &mut a, &ctx);
+            assert_eq!(
+                buf[(rect.x, rect.y)].style().bg,
+                ctx.theme.keycap().bg,
+                "{name}: {target:?} has no cap look"
+            );
+            // Under the pointer: the whole button (key and label) is lit.
+            a.hits.set_hover(Some(rect));
+            let (_, buf) = super::tests_support::draw_buf(100, 30, &mut a, &ctx);
+            for x in rect.x..rect.x + rect.width {
+                assert_eq!(
+                    buf[(x, rect.y)].style().bg,
+                    ctx.theme.hover().bg,
+                    "{name}: column {x}"
+                );
+            }
+            a.hits.set_hover(None);
+        }
+    }
+    // The labels follow the meaning of the window.
+    let (mut a, _rx) = app();
+    a.popup = Some(input(InputPurpose::Setting(SettingId::PingUrl)));
+    assert!(draw(100, 30, &mut a).contains("Enter сохранить"));
+    a.popup = Some(input(InputPurpose::Link));
+    let screen = draw(100, 30, &mut a);
+    assert!(screen.contains("Enter добавить") && screen.contains("Ctrl+V вставить"));
+}

@@ -43,15 +43,43 @@ struct Dialog {
 struct Button {
     key: String,
     text: String,
-    press: KeyCode,
+    press: (KeyCode, KeyModifiers),
 }
 
 fn button(key: &str, text: String, press: KeyCode) -> Button {
     Button {
         key: key.to_string(),
         text,
-        press,
+        press: (press, KeyModifiers::NONE),
     }
+}
+
+/// The keys of an input window: Enter adds (a link, a rule) or saves (a setting, a field of a
+/// subscription), Esc cancels, and Ctrl+V pastes where a link is typed.
+fn input_buttons(purpose: &crate::app::InputPurpose) -> Vec<Button> {
+    use crate::app::InputPurpose::*;
+    let enter = match purpose {
+        Link | Rule(_) => crate::t!("hint.add"),
+        Setting(_) | SubUserAgent(_) | SubHours(_) => crate::t!("hint.save"),
+    };
+    let mut buttons = vec![
+        button("Enter", enter, KeyCode::Enter),
+        button("Esc", crate::t!("hint.cancel"), KeyCode::Esc),
+    ];
+    if *purpose == Link {
+        buttons.push(Button {
+            key: "Ctrl+V".into(),
+            text: crate::t!("hint.paste_button"),
+            press: (KeyCode::Char('v'), KeyModifiers::CONTROL),
+        });
+    }
+    buttons
+}
+
+/// The two rows under the body of a dialog whose keys are buttons: a blank one and the one
+/// the buttons are drawn in.
+fn button_rows() -> Vec<Line<'static>> {
+    vec![Line::default(), Line::default()]
 }
 
 /// The columns a button takes: its keycap, the description, and a space after it.
@@ -64,13 +92,6 @@ fn text_lines(text: &str, width: usize, style: Style) -> Vec<Line<'static>> {
         .into_iter()
         .map(|l| Line::from(Span::styled(l, style)))
         .collect()
-}
-
-/// A blank line and the keys.
-fn keys_line(text: String, width: usize, th: &Theme) -> Vec<Line<'static>> {
-    let mut v = vec![Line::default()];
-    v.extend(text_lines(&text, width, th.muted()));
-    v
 }
 
 /// `area` is the screen without the key bar: the window stays inside it.
@@ -95,9 +116,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 .collect(),
             selected: Some(*selected),
             fill: false,
-            bottom: keys_line(crate::t!("popup.select_hint"), inner_w, th),
+            bottom: button_rows(),
             rows: Some(Rows::Select),
-            buttons: Vec::new(),
+            buttons: vec![
+                button("Enter", crate::t!("hint.apply"), KeyCode::Enter),
+                button("Esc", crate::t!("hint.cancel"), KeyCode::Esc),
+            ],
         },
         Popup::Processes {
             items,
@@ -137,9 +161,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 body,
                 selected: (!none).then_some((*selected).min(shown.len() - 1)),
                 fill: true,
-                bottom: keys_line(crate::t!("popup.processes_hint"), inner_w, th),
+                bottom: button_rows(),
                 rows: (!none).then_some(Rows::Process),
-                buttons: Vec::new(),
+                buttons: vec![
+                    button("Enter", crate::t!("hint.add"), KeyCode::Enter),
+                    button("Esc", crate::t!("hint.clear_close"), KeyCode::Esc),
+                ],
             }
         }
         Popup::Input {
@@ -163,21 +190,9 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             ),
             selected: None,
             fill: false,
-            bottom: keys_line(
-                if *purpose == crate::app::InputPurpose::Link {
-                    format!(
-                        "{}; Ctrl+V - {}",
-                        crate::t!("popup.input_hint"),
-                        crate::t!("hint.paste")
-                    )
-                } else {
-                    crate::t!("popup.input_hint")
-                },
-                inner_w,
-                th,
-            ),
+            bottom: button_rows(),
             rows: None,
-            buttons: Vec::new(),
+            buttons: input_buttons(purpose),
         },
         Popup::Confirm { text, kind } => Dialog {
             title: crate::t!("popup.confirm_title"),
@@ -318,7 +333,7 @@ fn draw(f: &mut Frame, area: Rect, w: u16, d: Dialog, scroll: &Scroll, hits: &Hi
         for b in &d.buttons {
             let width = (button_width(b) - 1) as u16;
             let rect = Rect::new(x, y, width.min(bottom_area.right().saturating_sub(x)), 1);
-            hits.click(rect, Target::Key(b.press, KeyModifiers::NONE));
+            hits.click(rect, Target::Key(b.press.0, b.press.1));
             let lit = hits.is_hover(rect);
             let (cap, text) = if lit {
                 (th.hover(), th.hover())
@@ -332,7 +347,7 @@ fn draw(f: &mut Frame, area: Rect, w: u16, d: Dialog, scroll: &Scroll, hits: &Hi
                 ])),
                 rect,
             );
-            x += width + 1;
+            x += width + 2;
         }
     }
 }
@@ -351,12 +366,7 @@ fn update_dialog(release: &crate::update::Release, width: usize, th: &Theme) -> 
         width,
         th.title(),
     ));
-    bottom.push(Line::default());
-    bottom.extend(text_lines(
-        &crate::t!("popup.update_hint"),
-        width,
-        th.muted(),
-    ));
+    bottom.extend(button_rows());
     Dialog {
         title: crate::t!("popup.update_title", version = release.version),
         border: th.border(true),
@@ -366,6 +376,9 @@ fn update_dialog(release: &crate::update::Release, width: usize, th: &Theme) -> 
         fill: true,
         bottom,
         rows: None,
-        buttons: Vec::new(),
+        buttons: vec![
+            button("s", crate::t!("hint.skip_update"), KeyCode::Char('s')),
+            button("Esc", crate::t!("hint.close"), KeyCode::Esc),
+        ],
     }
 }

@@ -69,7 +69,7 @@ async fn n_opens_the_window_with_notes_and_link_and_other_keys_close_it() {
         "## 1.0.4",
         "- fixed a thing",
         "https://github.com/z3nghoul/elf-gate/releases/tag/v1.0.4",
-        "s - do not remind about this version",
+        " s do not remind",
     ] {
         assert!(screen.contains(want), "{want:?} is missing:\n{screen}");
     }
@@ -116,7 +116,7 @@ async fn long_notes_are_cut_and_the_link_and_the_hint_stay_visible() {
     assert!(screen.contains("- change number 0"));
     assert!(!screen.contains("- change number 79"));
     assert!(screen.contains("Release page: https://github.com/z3nghoul/elf-gate"));
-    assert!(screen.contains("any other key - close"));
+    assert!(screen.contains(" Esc close"));
 }
 
 #[tokio::test]
