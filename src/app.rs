@@ -218,6 +218,9 @@ pub struct AppState {
     pub hits: crate::ui::hits::HitMap,
     /// The last click and when it was made, for the double click.
     pub(crate) last_click: Option<(std::time::Instant, crate::ui::hits::Target)>,
+    /// The last wheel click that counted: when, where and which way (a terminal may send
+    /// several events for one click).
+    pub(crate) last_wheel: Option<(std::time::Instant, crate::ui::hits::Wheel, bool)>,
     /// Servers are listed by ping instead of in their own order.
     pub sorted_by_ping: bool,
     /// The check screen: one row per check, the cursor on it, the server it looked at.
@@ -282,6 +285,7 @@ impl AppState {
             link: LinkState::Connecting,
             hits: Default::default(),
             last_click: None,
+            last_wheel: None,
             sorted_by_ping: false,
             diag: crate::diag::CheckId::ALL
                 .iter()

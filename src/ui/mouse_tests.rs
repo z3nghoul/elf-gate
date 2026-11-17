@@ -350,3 +350,45 @@ async fn the_pointer_on_a_hint_lights_the_key_and_the_label() {
     // The next hint and the gap are not.
     assert_ne!(buf[(rect.x + rect.width, rect.y)].style().bg, lit);
 }
+
+#[tokio::test]
+async fn one_wheel_click_moves_a_list_by_one_row_and_a_text_by_three_lines() {
+    let (mut a, _rx) = app();
+    for n in 0..60 {
+        a.on_link(LinkEvent::Update(Update::Log(LogLine {
+            time: "00:00:00".into(),
+            level: Level::Info,
+            text: format!("line {n}"),
+        })));
+    }
+    draw(100, 30, &mut a);
+    let servers = centre(a.hits.find(Target::Panel(Focus::Servers)).unwrap());
+    let logs = centre(a.hits.find(Target::Panel(Focus::Logs)).unwrap());
+    a.handle_mouse(mouse(MouseEventKind::ScrollDown, servers));
+    assert_eq!(a.selected, 2, "one row, not two or three");
+    a.handle_mouse(mouse(MouseEventKind::ScrollUp, logs));
+    assert_eq!(a.log_scroll, 3, "three lines of the log");
+}
+
+#[tokio::test]
+async fn a_burst_of_events_for_one_click_counts_once_but_a_later_click_counts() {
+    let (mut a, _rx) = app();
+    a.apply_view(view_with(&[A, B, A, B, A, B]));
+    a.selected = 0;
+    draw(100, 30, &mut a);
+    let servers = centre(a.hits.find(Target::Panel(Focus::Servers)).unwrap());
+    // Four events arrive within microseconds: one click.
+    for _ in 0..4 {
+        a.handle_mouse(mouse(MouseEventKind::ScrollDown, servers));
+    }
+    assert_eq!(a.selected, 1, "the burst is one row");
+    // A click 40 ms later is another one.
+    a.last_wheel = a
+        .last_wheel
+        .map(|(t, w, u)| (t - std::time::Duration::from_millis(40), w, u));
+    a.handle_mouse(mouse(MouseEventKind::ScrollDown, servers));
+    assert_eq!(a.selected, 2);
+    // The other direction right after is not part of the burst.
+    a.handle_mouse(mouse(MouseEventKind::ScrollUp, servers));
+    assert_eq!(a.selected, 1);
+}

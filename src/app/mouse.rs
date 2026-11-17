@@ -11,8 +11,15 @@ use std::time::{Duration, Instant};
 /// Two clicks on the same element this close are a double click.
 pub const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
-/// Rows one turn of the wheel moves.
-const WHEEL_STEP: isize = 3;
+/// Rows one click of the wheel moves in a list with a selection (the selection moves by one).
+const LIST_STEP: isize = 1;
+
+/// Lines one click of the wheel moves in a text (the log, the help).
+const TEXT_STEP: isize = 3;
+
+/// A terminal may send several events for one click; events in the same direction on the same
+/// list closer than this to the one that counted are the same click.
+pub const WHEEL_BURST: Duration = Duration::from_millis(30);
 
 impl AppState {
     /// One mouse event. Returns whether the screen must be drawn again: moving the pointer
@@ -103,25 +110,36 @@ impl AppState {
         let Some(wheel) = self.hits.wheel_at(x, y) else {
             return false;
         };
-        let delta = if up { -WHEEL_STEP } else { WHEEL_STEP };
+        let now = Instant::now();
+        if matches!(
+            self.last_wheel,
+            Some((at, w, u)) if w == wheel && u == up && now.duration_since(at) < WHEEL_BURST
+        ) {
+            return false; // the rest of the same click
+        }
+        self.last_wheel = Some((now, wheel, up));
+        let sign = if up { -1 } else { 1 };
+        let one = sign * LIST_STEP;
+        let text = sign * TEXT_STEP;
         match wheel {
             // A list with a selection scrolls by moving the selection: the window follows it.
-            Wheel::Servers => self.move_selection(delta),
-            Wheel::Logs => self.scroll_logs(up, WHEEL_STEP as usize),
-            Wheel::Rules => self.rules_move(delta),
-            Wheel::Settings => self.settings_move(delta),
-            Wheel::Sub => self.sub_move(delta),
+            Wheel::Servers => self.move_selection(one),
+            Wheel::Rules => self.rules_move(one),
+            Wheel::Settings => self.settings_move(one),
+            Wheel::Sub => self.sub_move(one),
             Wheel::Diag => {
                 let last = self.diag.len().saturating_sub(1) as isize;
-                self.diag_cursor = (self.diag_cursor as isize + delta).clamp(0, last) as usize;
+                self.diag_cursor = (self.diag_cursor as isize + one).clamp(0, last) as usize;
             }
-            Wheel::Help => self.help_scroll.by(delta),
-            Wheel::Popup => self.wheel_popup(delta),
+            Wheel::Popup => self.wheel_popup(one, text),
+            // Texts scroll by lines.
+            Wheel::Logs => self.scroll_logs(up, TEXT_STEP as usize),
+            Wheel::Help => self.help_scroll.by(text),
         }
         true
     }
 
-    fn wheel_popup(&mut self, delta: isize) {
+    fn wheel_popup(&mut self, delta: isize, text_delta: isize) {
         let moved = |at: usize, len: usize| {
             (at as isize + delta).clamp(0, len.saturating_sub(1) as isize) as usize
         };
@@ -134,7 +152,7 @@ impl AppState {
                 items,
                 filter,
             }) => *selected = moved(*selected, super::process_matches(items, filter).len()),
-            Some(_) => self.popup_scroll.by(delta),
+            Some(_) => self.popup_scroll.by(text_delta),
             None => {}
         }
     }
