@@ -1179,3 +1179,192 @@ async fn the_paste_confirmation_hides_the_subscription_host_in_privacy_mode() {
         assert!(!shown.contains(secret), "{secret} in {shown}");
     }
 }
+
+// ---------- the check screen ----------
+
+use crate::diag::{CheckId, CheckResult, Fix, State};
+
+fn check_result(id: CheckId, state: State, fix: Option<Fix>) -> CheckResult {
+    CheckResult {
+        id,
+        state,
+        detail: "found".into(),
+        todo: (state == State::Problem).then(|| "do it".into()),
+        fix,
+    }
+}
+
+fn feed(a: &mut AppState, r: CheckResult) {
+    a.on_link(LinkEvent::Update(Update::Check(r)));
+}
+
+#[tokio::test]
+async fn the_check_key_opens_the_screen_and_asks_for_the_checks_of_the_selected_server() {
+    let (mut a, mut rx) = app_with(&[REALITY]);
+    a.handle_action(Action::Diag);
+    assert_eq!(a.screen, Screen::Diag);
+    assert_eq!(sent(&mut rx), vec![Cmd::RunChecks { server: Some(1) }]);
+    assert!(a.diag.iter().all(|r| r.state == State::Waiting));
+    feed(&mut a, check_result(CheckId::Dns, State::Running, None));
+    assert!(a.diag_running(), "a check is running");
+    // A second press while the checks run starts nothing.
+    a.handle_action(Action::Diag);
+    assert!(sent(&mut rx).is_empty());
+    for id in CheckId::ALL {
+        feed(&mut a, check_result(id, State::Ok, None));
+    }
+    assert!(!a.diag_running());
+    a.handle_action(Action::Diag);
+    assert_eq!(sent(&mut rx), vec![Cmd::RunChecks { server: Some(1) }]);
+}
+
+#[tokio::test]
+async fn a_fix_is_asked_for_and_done_only_after_yes() {
+    let (mut a, mut rx) = app_with(&[REALITY]);
+    a.handle_action(Action::Diag);
+    sent(&mut rx);
+    for id in CheckId::ALL {
+        feed(&mut a, check_result(id, State::Ok, None));
+    }
+    let row = CheckId::ALL
+        .iter()
+        .position(|i| *i == CheckId::SysProxy)
+        .unwrap();
+    feed(
+        &mut a,
+        check_result(CheckId::SysProxy, State::Problem, Some(Fix::ClearProxy)),
+    );
+    a.diag_cursor = row;
+    press(&mut a, KeyCode::Enter);
+    assert!(matches!(
+        a.popup,
+        Some(Popup::Confirm {
+            kind: ConfirmKind::Fix(Fix::ClearProxy),
+            ..
+        })
+    ));
+    assert!(sent(&mut rx).is_empty(), "nothing before the answer");
+    // No: nothing happens either.
+    press(&mut a, KeyCode::Esc);
+    assert!(a.popup.is_none());
+    assert!(sent(&mut rx).is_empty());
+    // Any other key keeps the question open and does nothing.
+    press(&mut a, KeyCode::Enter);
+    press(&mut a, KeyCode::Char('x'));
+    assert!(sent(&mut rx).is_empty());
+    press(&mut a, KeyCode::Char('y'));
+    assert_eq!(
+        sent(&mut rx),
+        vec![
+            Cmd::ApplyFix(Fix::ClearProxy),
+            Cmd::RunChecks { server: Some(1) }
+        ]
+    );
+}
+
+#[tokio::test]
+async fn enter_on_a_check_without_a_fix_does_nothing() {
+    let (mut a, mut rx) = app_with(&[REALITY]);
+    a.handle_action(Action::Diag);
+    sent(&mut rx);
+    feed(&mut a, check_result(CheckId::Core, State::Problem, None));
+    a.diag_cursor = 0;
+    press(&mut a, KeyCode::Enter);
+    assert!(a.popup.is_none());
+    assert!(sent(&mut rx).is_empty());
+}
+
+#[tokio::test]
+async fn a_connection_error_window_opens_the_checks_on_c_and_closes_on_any_other_key() {
+    let (mut a, mut rx) = app_with(&[REALITY]);
+    a.on_link(LinkEvent::Update(Update::Alert(Alert::Failure(
+        "no".into(),
+    ))));
+    assert!(matches!(a.popup, Some(Popup::ConnError(_))));
+    press(&mut a, KeyCode::Char('c'));
+    assert_eq!(a.screen, Screen::Diag);
+    assert!(a.popup.is_none());
+    assert_eq!(sent(&mut rx), vec![Cmd::RunChecks { server: Some(1) }]);
+
+    let (mut a, mut rx) = app_with(&[REALITY]);
+    a.on_link(LinkEvent::Update(Update::Alert(Alert::Failure(
+        "no".into(),
+    ))));
+    press(&mut a, KeyCode::Char('q'));
+    assert!(a.popup.is_none());
+    assert_eq!(a.screen, Screen::Main);
+    assert!(sent(&mut rx).is_empty());
+}
+
+fn report_app(
+    clip: crate::platform::mock::MockClipboard,
+    dir: &std::path::Path,
+) -> (AppState, Arc<crate::platform::mock::MockClipboard>) {
+    let (tx, _rx) = unbounded_channel();
+    let clip = Arc::new(clip);
+    let mut a = AppState::new(tx)
+        .with_clipboard(clip.clone())
+        .with_report_dir(dir.to_path_buf());
+    a.apply_view(view_with(&[REALITY]));
+    a.screen = Screen::Diag;
+    a.log(Level::Info, "connecting to h.example.com:443");
+    a.log(
+        Level::Info,
+        "link vless://u@h.example.com:443?security=reality&pbk=K&sid=ab",
+    );
+    for id in CheckId::ALL {
+        let mut r = check_result(id, State::Ok, None);
+        r.detail = "no answer from h.example.com:443".into();
+        feed_to(&mut a, r);
+    }
+    (a, clip)
+}
+
+fn feed_to(a: &mut AppState, r: CheckResult) {
+    a.on_link(LinkEvent::Update(Update::Check(r)));
+}
+
+#[tokio::test]
+async fn the_report_goes_to_the_clipboard_without_the_addresses_of_the_servers() {
+    let dir = crate::test_support::TempDir::new("report-clip");
+    let (mut a, clip) = report_app(
+        crate::platform::mock::MockClipboard::with_text(""),
+        dir.path(),
+    );
+    a.handle_action(Action::CopyReport);
+    let written = clip.written.lock().unwrap().clone();
+    assert_eq!(written.len(), 1);
+    for secret in ["h.example.com", "vless://u", "pbk=K", "sid=ab"] {
+        assert!(!written[0].contains(secret), "{secret}:\n{}", written[0]);
+    }
+    assert!(written[0].contains(&crate::t!("diag.report_server", n = 1)));
+    assert_eq!(a.status.as_deref(), Some(crate::t!("diag.copied").as_str()));
+}
+
+#[tokio::test]
+async fn without_a_clipboard_the_report_is_a_file_in_the_log_folder_and_its_path_is_shown() {
+    let dir = crate::test_support::TempDir::new("report-file");
+    let (mut a, _clip) = report_app(
+        crate::platform::mock::MockClipboard::unavailable(),
+        dir.path(),
+    );
+    a.handle_action(Action::CopyReport);
+    let files: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().collect();
+    assert_eq!(files.len(), 1);
+    let text = std::fs::read_to_string(files[0].path()).unwrap();
+    assert!(!text.contains("h.example.com"));
+    let status = a.status.clone().unwrap();
+    assert!(status.contains("check-report-"), "{status}");
+}
+
+#[tokio::test]
+async fn the_report_key_works_on_the_check_screen_only() {
+    let dir = crate::test_support::TempDir::new("report-main");
+    let (mut a, clip) = report_app(
+        crate::platform::mock::MockClipboard::with_text(""),
+        dir.path(),
+    );
+    a.screen = Screen::Main;
+    a.handle_action(Action::CopyReport);
+    assert!(clip.written.lock().unwrap().is_empty());
+}

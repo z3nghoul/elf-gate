@@ -48,6 +48,10 @@ pub enum Action {
     FocusPrev,
     /// F12; does something only in a debug build (`build_info::DEBUG_PANIC_KEY`).
     DebugPanic,
+    /// Open the check screen (or run the checks again on it).
+    Diag,
+    /// Check screen: copy the report.
+    CopyReport,
     /// Ctrl+V in the add dialog: take the links or the subscription from the clipboard.
     Paste,
     /// Ctrl+L: clear and redraw the whole screen (after the terminal garbled it).
@@ -62,7 +66,8 @@ pub mod scope {
     pub const LOGS: u8 = 8;
     pub const HELP: u8 = 16;
     pub const SUB: u8 = 32;
-    pub const ALL: u8 = MAIN | RULES | SETTINGS | LOGS | HELP | SUB;
+    pub const DIAG: u8 = 64;
+    pub const ALL: u8 = MAIN | RULES | SETTINGS | LOGS | HELP | SUB | DIAG;
 }
 
 impl Binding {
@@ -134,7 +139,8 @@ pub const BINDINGS: &[Binding] = &[
             | scope::SETTINGS
             | scope::LOGS
             | scope::SUB
-            | scope::HELP,
+            | scope::HELP
+            | scope::DIAG,
     },
     Binding {
         label: "",
@@ -206,7 +212,7 @@ pub const BINDINGS: &[Binding] = &[
         hidden: false,
         bar: "Enter",
         prio: 1,
-        scopes: scope::MAIN | scope::SETTINGS | scope::SUB,
+        scopes: scope::MAIN | scope::SETTINGS | scope::SUB | scope::DIAG,
     },
     Binding {
         label: "d",
@@ -414,7 +420,30 @@ pub const BINDINGS: &[Binding] = &[
         hidden: false,
         bar: "Esc",
         prio: 1,
-        scopes: scope::RULES | scope::SETTINGS | scope::LOGS | scope::HELP | scope::SUB,
+        scopes: scope::RULES
+            | scope::SETTINGS
+            | scope::LOGS
+            | scope::HELP
+            | scope::SUB
+            | scope::DIAG,
+    },
+    Binding {
+        label: "c",
+        action: Action::Diag,
+        keys: &[(KeyCode::Char('c'), N)],
+        hidden: false,
+        bar: "c",
+        prio: 6,
+        scopes: scope::MAIN | scope::DIAG,
+    },
+    Binding {
+        label: "y",
+        action: Action::CopyReport,
+        keys: &[(KeyCode::Char('y'), N)],
+        hidden: false,
+        bar: "y",
+        prio: 3,
+        scopes: scope::DIAG,
     },
     Binding {
         label: "Ctrl+V",
@@ -542,7 +571,7 @@ mod tests {
         let k = |c, m| KeyEvent::new(c, m);
         assert_eq!(map_key(k(KeyCode::Char('q'), N)), Some(Action::Quit));
         assert_eq!(map_key(k(KeyCode::Char('c'), C)), Some(Action::Quit));
-        assert_eq!(map_key(k(KeyCode::Char('c'), N)), None);
+        assert_eq!(map_key(k(KeyCode::Char('c'), N)), Some(Action::Diag));
         assert_eq!(
             map_key(k(KeyCode::BackTab, KeyModifiers::SHIFT)),
             Some(Action::FocusPrev)

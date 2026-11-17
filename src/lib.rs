@@ -6,6 +6,7 @@ pub mod app;
 pub mod autostart;
 pub mod build_info;
 pub mod daemon;
+pub mod diag;
 pub mod engine;
 pub mod event;
 pub mod firewall;

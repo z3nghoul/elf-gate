@@ -29,8 +29,8 @@ expression: "styled_frame(&text, &buf)"
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
 │j/k выбор  Tab панель  Enter свернуть  t PROXY→TUN  p пинг  o по пингу  a добавить                │
-│x удал. группу  r правила  s настр.  l журнал  / фильтр  Ctrl+P прив.  ←→ свернуть  ? помощь      │
-│q/Q выход                                                                                         │
+│x удал. группу  r правила  s настр.  l журнал  / фильтр  Ctrl+P прив.  ←→ свернуть  c проверка    │
+│? помощь  q/Q выход                                                                               │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 --- styles
 ABBBBBBBBBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACBBBBBBBBCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
@@ -61,7 +61,7 @@ CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 CBBBGGGGGGFFBBBGGGGGGGFFBBBBBGGGGGGGGGFFBGGGGGGGGGGFFBGGGGGFFBGGGGGGGGGFFBGGGGGGGGGGGGGGGGGGGGGGGGGC
 CBGGGGGGGGGGGGGFFBGGGGGGGGFFBGGGGGGGFFBGGGGGGGFFBGGGGGGGFFBBBBBBGGGGGGFFBBGGGGGGGGGFFBGGGGGGGGGGGGGC
-CBBBGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGC
+CBGGGGGGGFFBBBGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGC
 CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 --- legend
 A fg=Rgb(136, 57, 239) bg=Rgb(230, 233, 239) mod=NONE

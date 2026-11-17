@@ -1,0 +1,34 @@
+---
+source: src/ui/diag_tests.rs
+expression: frame
+---
+┌ Check ───────────────────────────────────────────────────────────────────────────────────────────┐
+│  Checks run one after another. Enter does what the line under a problem says, y copies the       │
+│  report.                                                                                         │
+│                                                                                                  │
+│  ok       Xray core  Xray 26.1.0, /opt/xray/xray                                                 │
+│  ok       Geo data (geoip.dat, geosite.dat)  geoip.dat and geosite.dat are next to the core      │
+│> problem  Server: TCP connection  No answer from the server in 5 s.                              │
+│           -> Check the internet.                                                                 │
+│  skipped  Server: request through the core  no Xray core                                         │
+│  running  DNS                                                                                    │
+│  waiting  Rights for TUN                                                                         │
+│  waiting  wintun.dll                                                                             │
+│  waiting  Firewall rules                                                                         │
+│  waiting  Adapter from an earlier run                                                            │
+│  waiting  System proxy                                                                           │
+│  waiting  Request through the VPN                                                                │
+│  waiting  Russian sites go direct                                                                │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│● Disconnected | PROXY | ↑0 B/s ↓0 B/s | VPN 0 B↑ 0 B↓ | direct 0 B↑ 0 B↓                         │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│j/k select  Ctrl+P priv.  Esc back  c check again  y report  ? help  q/Q exit                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘

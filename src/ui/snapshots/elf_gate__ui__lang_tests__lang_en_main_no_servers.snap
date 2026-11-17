@@ -30,5 +30,5 @@ expression: frame
 │● Disconnected | PROXY                                                                                                │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│j/k select  Tab panel  t PROXY→TUN  a add  r rules  s settings  l log  Ctrl+P priv.  ? help  q/Q exit                 │
+│j/k select  Tab panel  t PROXY→TUN  a add  r rules  s settings  l log  Ctrl+P priv.  c check  ? help  q/Q exit        │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

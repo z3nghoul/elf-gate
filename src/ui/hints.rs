@@ -110,6 +110,11 @@ fn modal_hints(app: &AppState) -> Option<Vec<Hint>> {
                 plain("s", &crate::t!("hint.skip_update"), 1),
                 plain(&crate::t!("hint.any_key"), &crate::t!("hint.close"), 1),
             ],
+            // A separate element with its action: a mouse click can be hung on it later.
+            Popup::ConnError(_) => vec![
+                hint(Action::Diag, crate::t!("hint.check")),
+                plain(&crate::t!("hint.any_key"), &crate::t!("hint.close"), 1),
+            ],
             Popup::Error(_) | Popup::Notice(_) => vec![plain(
                 &crate::t!("hint.any_key"),
                 &crate::t!("hint.close"),
@@ -145,6 +150,7 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
         Screen::Subscription => scope::SUB,
         Screen::LogsFull => scope::LOGS,
         Screen::Help => scope::HELP,
+        Screen::Diag => scope::DIAG,
     };
     let on_main = app.screen == Screen::Main;
     let row = app.selected_row();
@@ -355,6 +361,12 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
             | Action::Update
             | Action::Redraw => None,
             Action::DebugPanic | Action::Paste => None,
+            Action::Diag => Some(if app.screen == Screen::Diag {
+                crate::t!("hint.check_again")
+            } else {
+                b.short()
+            }),
+            Action::CopyReport => Some(b.short()),
         };
         if let Some(text) = text {
             out.push(Hint {

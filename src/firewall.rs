@@ -53,6 +53,23 @@ fn direction_name(d: FwDirection) -> &'static str {
     }
 }
 
+/// Is there an enabled allow rule called [`RULE_NAME`] for every program, in both directions?
+pub fn rules_in_place(fw: &dyn Firewall, programs: &[PathBuf]) -> Result<bool, String> {
+    let rules = fw.rules()?;
+    Ok(programs.iter().all(|program| {
+        let path = program.display().to_string();
+        DIRECTIONS.iter().all(|d| {
+            rules.iter().any(|r| {
+                r.name == RULE_NAME
+                    && r.enabled
+                    && r.action == FwAction::Allow
+                    && r.direction == *d
+                    && same_path(&r.program, &path)
+            })
+        })
+    }))
+}
+
 /// Brings the rules in line with `programs`. Every step that fails is logged and skipped.
 pub fn sync(fw: &dyn Firewall, programs: &[PathBuf], log: &mut dyn FnMut(String)) {
     let rules = match fw.rules() {

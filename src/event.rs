@@ -62,6 +62,10 @@ pub enum BgEvent {
         /// Nothing was tried: the search already ran with this Xray version.
         skipped: bool,
     },
+    /// A step of the checks of the check screen.
+    Check(crate::diag::CheckResult),
+    /// The checks are over.
+    ChecksDone,
     /// Mock connection (servers without a real link).
     Connected(u64),
     /// The Xray process for server `id` is up and listening.

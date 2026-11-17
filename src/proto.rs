@@ -132,6 +132,13 @@ pub enum Cmd {
     ConnectLastInTun,
     /// Windows: restart the background process with administrator rights.
     RelaunchElevated,
+    /// Run the checks of the check screen; they answer with [`Update::Check`], one by one.
+    /// `server` is the one selected in the list (the connected one is used without it).
+    RunChecks {
+        server: Option<u64>,
+    },
+    /// Do what a check offered (the interface asked the user first).
+    ApplyFix(crate::diag::Fix),
     /// Stop the VPN and the background process.
     Shutdown,
 }
@@ -154,8 +161,13 @@ pub enum Ask {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Alert {
     Error(String),
+    /// A connection failed: like an error, and the window offers the check screen.
+    Failure(String),
     Notice(String),
-    Ask { text: String, ask: Ask },
+    Ask {
+        text: String,
+        ask: Ask,
+    },
 }
 
 /// Traffic of the current session: bytes and speed, `proxy` and `direct` apart.
@@ -214,6 +226,8 @@ pub enum Update {
     Log(LogLine),
     Alert(Alert),
     Status(String),
+    /// One step of the checks: a check starts (`Running`) or ends.
+    Check(crate::diag::CheckResult),
     /// The background process is stopping.
     Bye,
 }

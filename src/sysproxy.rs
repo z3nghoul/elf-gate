@@ -111,6 +111,37 @@ impl ProxyController {
         Ok(true)
     }
 
+    /// Does the system proxy point at the local ports of elf-gate? Looks at what the backend
+    /// reports (host and port may be separate values) and at our own record of a change.
+    pub fn view(&self, socks: u16, http: u16) -> crate::diag::ProxyView {
+        use crate::diag::ProxyView;
+        let snapshot = match self.backend.current() {
+            Ok(s) => s,
+            Err(crate::platform::PlatformError::Unsupported(_)) => return ProxyView::Unsupported,
+            Err(_) => return ProxyView::NotOurs,
+        };
+        let local = snapshot
+            .values
+            .values()
+            .any(|v| v.contains("127.0.0.1") || v.contains("localhost"));
+        let port = |p: u16| {
+            let p = p.to_string();
+            snapshot.values.values().any(|v| {
+                v.trim() == p || v.ends_with(&format!(":{p}")) || v.contains(&format!(":{p};"))
+            })
+        };
+        let recorded = self
+            .store
+            .load()
+            .map(|s| s.proxy.is_some())
+            .unwrap_or(false);
+        if local && (port(socks) || port(http)) || (recorded && local) {
+            ProxyView::Ours { socks, http }
+        } else {
+            ProxyView::NotOurs
+        }
+    }
+
     /// Startup recovery after a crash. Returns a note for the log if it restored something.
     pub fn recover(&self) -> Result<Option<String>, ProxyError> {
         let addr = self.store.load()?.proxy.map(|p| p.address);

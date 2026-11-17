@@ -43,6 +43,8 @@ pub enum Screen {
     Subscription,
     Help,
     LogsFull,
+    /// The checks: why it does not connect.
+    Diag,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +61,8 @@ pub enum ConfirmKind {
     DeleteGroup(String),
     /// A question from the background process.
     Ask(Ask),
+    /// Do what a check offered.
+    Fix(crate::diag::Fix),
     /// Add what the clipboard held: the texts to send as `AddLink`, one by one.
     Paste(Vec<String>),
 }
@@ -117,6 +121,8 @@ pub enum Popup {
         selected: usize,
     },
     Error(String),
+    /// A failed connection: closes like an error, `c` opens the check screen.
+    ConnError(String),
     /// Information the user should read but that is not a failure.
     Notice(String),
     /// The new version: its notes and link; `s` stops the reminders about it.
@@ -209,6 +215,13 @@ pub struct AppState {
     pub link: LinkState,
     /// Servers are listed by ping instead of in their own order.
     pub sorted_by_ping: bool,
+    /// The check screen: one row per check, the cursor on it, the server it looked at.
+    pub diag: Vec<crate::diag::CheckResult>,
+    pub diag_cursor: usize,
+    pub diag_scroll: crate::ui::scroll::Scroll,
+    diag_server: Option<u64>,
+    /// Where a report goes when the clipboard cannot take it.
+    report_dir: std::path::PathBuf,
     /// Subscriptions whose hidden servers are shown (greyed) so they can be restored.
     pub show_hidden: std::collections::HashSet<String>,
     pending_alerts: VecDeque<Alert>,
@@ -263,6 +276,14 @@ impl AppState {
             popup_scroll: Default::default(),
             link: LinkState::Connecting,
             sorted_by_ping: false,
+            diag: crate::diag::CheckId::ALL
+                .iter()
+                .map(|id| crate::diag::CheckResult::waiting(*id))
+                .collect(),
+            diag_cursor: 0,
+            diag_scroll: Default::default(),
+            diag_server: None,
+            report_dir: crate::storage::log_dir(),
             show_hidden: std::collections::HashSet::new(),
             pending_alerts: VecDeque::new(),
             cursor_to_end: false,
@@ -282,6 +303,12 @@ impl AppState {
     #[cfg(test)]
     pub fn with_clipboard(mut self, clipboard: Arc<dyn Clipboard>) -> Self {
         self.clipboard = clipboard;
+        self
+    }
+
+    #[cfg(test)]
+    pub fn with_report_dir(mut self, dir: std::path::PathBuf) -> Self {
+        self.report_dir = dir;
         self
     }
 
@@ -345,6 +372,11 @@ impl AppState {
                 self.show_next_alert();
             }
             Update::Status(s) => self.set_status(s),
+            Update::Check(result) => {
+                if let Some(row) = self.diag.iter_mut().find(|r| r.id == result.id) {
+                    *row = result;
+                }
+            }
             Update::Bye => {
                 self.link = LinkState::Down(crate::t!("app.link_stopped"));
             }
@@ -446,6 +478,7 @@ impl AppState {
         };
         self.popup = Some(match alert {
             Alert::Error(t) => Popup::Error(t),
+            Alert::Failure(t) => Popup::ConnError(t),
             Alert::Notice(t) => Popup::Notice(t),
             Alert::Ask { text, ask } => Popup::Confirm {
                 text,
@@ -766,6 +799,18 @@ impl AppState {
                     selected,
                 });
             }
+            Popup::ConnError(_) => {
+                // The C key of the physical keyboard, whatever the layout.
+                let check = matches!(
+                    key.code,
+                    KeyCode::Char(c) if crate::action::qwerty(c).eq_ignore_ascii_case(&'c')
+                        && !key.modifiers.contains(KeyModifiers::CONTROL)
+                );
+                self.show_next_alert();
+                if check && self.popup.is_none() {
+                    self.handle_action(Action::Diag);
+                }
+            }
             Popup::Error(_) | Popup::Notice(_) => self.show_next_alert(),
             Popup::Update(release) => {
                 // The notes can be longer than the window: these keys scroll them.
@@ -801,6 +846,10 @@ impl AppState {
 
     pub(crate) fn handle_action(&mut self, action: Action) {
         use Action::*;
+        // The check screen opens from the main screen and runs again on itself.
+        if action == Diag && !matches!(self.screen, Screen::Main | Screen::Diag) {
+            return;
+        }
         // Server-list actions only make sense on the main screen.
         let on_rules = self.screen == Screen::Rules;
         let main_only = matches!(
@@ -823,6 +872,9 @@ impl AppState {
             }
             if action == Enter && self.screen == Screen::Subscription {
                 self.sub_activate();
+            }
+            if action == Enter && self.screen == Screen::Diag {
+                self.diag_fix();
             }
             return;
         }
@@ -917,6 +969,15 @@ impl AppState {
             FocusNext => self.cycle_focus(true),
             FocusPrev => self.cycle_focus(false),
             Redraw => self.redraw_requested = true,
+            Diag => {
+                self.screen = Screen::Diag;
+                self.start_checks();
+            }
+            CopyReport => {
+                if self.screen == Screen::Diag {
+                    self.copy_report();
+                }
+            }
             // Only the add dialog takes it: nothing to paste into elsewhere.
             Paste => {
                 if matches!(
@@ -1054,6 +1115,9 @@ impl AppState {
             self.settings_move(delta);
         } else if self.screen == Screen::Subscription {
             self.sub_move(delta);
+        } else if self.screen == Screen::Diag {
+            let last = self.diag.len().saturating_sub(1);
+            self.diag_cursor = (self.diag_cursor as isize + delta).clamp(0, last as isize) as usize;
         } else if self.screen == Screen::Help {
             self.help_scroll.by(delta);
         } else if self.logs_active() {
@@ -1239,6 +1303,10 @@ impl AppState {
                 self.should_quit = true;
             }
             ConfirmKind::Ask(ask) => self.send(Cmd::Answer { ask, yes: true }),
+            ConfirmKind::Fix(fix) => {
+                self.send(Cmd::ApplyFix(fix));
+                self.start_checks();
+            }
             ConfirmKind::Paste(texts) => {
                 for text in texts {
                     self.send(Cmd::AddLink(text));
@@ -1493,6 +1561,91 @@ impl AppState {
             text: lines.join("\n"),
             kind: ConfirmKind::Paste(servers.into_iter().chain(subs).collect()),
         });
+    }
+
+    // ---------- the check screen ----------
+
+    pub fn diag_running(&self) -> bool {
+        self.diag.iter().any(|r| !r.state.finished())
+            && self
+                .diag
+                .iter()
+                .any(|r| r.state != crate::diag::State::Waiting)
+    }
+
+    /// Starts the checks over (on the main screen the selected server is the one to test).
+    fn start_checks(&mut self) {
+        if self.diag_running() {
+            self.set_status(crate::t!("diag.busy"));
+            return;
+        }
+        if self.screen == Screen::Diag && self.diag_server.is_none() {
+            self.diag_server = self.selected_server().map(|s| s.id);
+        }
+        self.diag = crate::diag::CheckId::ALL
+            .iter()
+            .map(|id| crate::diag::CheckResult::waiting(*id))
+            .collect();
+        self.send(Cmd::RunChecks {
+            server: self.diag_server,
+        });
+    }
+
+    /// Enter on the check screen: ask before doing what the problem under the cursor offers.
+    fn diag_fix(&mut self) {
+        match self.diag.get(self.diag_cursor).and_then(|r| r.fix) {
+            Some(fix) => {
+                self.popup = Some(Popup::Confirm {
+                    text: fix.question(),
+                    kind: ConfirmKind::Fix(fix),
+                })
+            }
+            None => self.set_status(crate::t!("diag.no_fix")),
+        }
+    }
+
+    /// The report for the clipboard; when that is not reachable, a file in the log folder.
+    fn copy_report(&mut self) {
+        let input = crate::diag::ReportInput {
+            version_line: crate::build_info::version_line(),
+            os: platform::os_version(),
+            mode: mode_name(self.mode).to_string(),
+            presets: self.config.presets.enabled.clone(),
+            server_addresses: self
+                .subs
+                .iter()
+                .flat_map(|g| g.servers.iter())
+                .map(|s| s.address.clone())
+                .collect(),
+            log: self
+                .logs
+                .iter()
+                .rev()
+                .take(100)
+                .rev()
+                .map(|l| format!("{} {:?} {}", l.time, l.level, l.text))
+                .collect(),
+            results: &self.diag,
+        };
+        let text = crate::diag::report(&input);
+        match self.clipboard.write(&text) {
+            Ok(()) => self.set_status(crate::t!("diag.copied")),
+            Err(reason) => {
+                let path = self
+                    .report_dir
+                    .join(format!("check-report-{}.txt", now_hms().replace(':', "")));
+                let saved = std::fs::create_dir_all(&self.report_dir)
+                    .and_then(|()| std::fs::write(&path, &text));
+                self.set_status(match saved {
+                    Ok(()) => crate::t!(
+                        "diag.saved",
+                        reason = reason,
+                        path = crate::redact::strip_home(&path.display().to_string())
+                    ),
+                    Err(e) => crate::t!("diag.not_saved", error = e),
+                });
+            }
+        }
     }
 
     // ---------- the rules screen ----------

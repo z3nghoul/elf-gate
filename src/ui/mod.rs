@@ -9,6 +9,9 @@ macro_rules! snap {
 }
 
 mod details;
+mod diag;
+#[cfg(test)]
+mod diag_tests;
 mod explain;
 mod help;
 #[cfg(test)]
@@ -124,6 +127,7 @@ pub fn render(f: &mut Frame, app: &mut AppState, ctx: &RenderCtx) {
         Screen::Settings => settings::render(f, body, app, &th, ctx),
         Screen::Subscription => subscription::render(f, body, app, &th),
         Screen::Help => help::render(f, body, &th, &app.help_scroll),
+        Screen::Diag => diag::render(f, body, app, &th),
     }
     let framed = |f: &mut Frame, rect| {
         let block = th.block(false);
@@ -230,6 +234,7 @@ mod tests {
             Screen::Settings,
             Screen::Help,
             Screen::LogsFull,
+            Screen::Diag,
         ] {
             app.screen = s;
             draw(MIN_WIDTH, MIN_HEIGHT, &mut app);

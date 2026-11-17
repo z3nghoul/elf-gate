@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, watch};
 
+mod diag;
 mod ping;
 mod rules;
 mod server_opts;
@@ -133,6 +134,8 @@ pub struct Engine {
     pub relaunch_elevated: bool,
     /// The user chose "configure the firewall": the loop starts the elevated one-off run.
     pub firewall_setup_requested: bool,
+    /// The checks of the check screen are running (one run at a time).
+    diag_running: bool,
     tun_host: Arc<dyn TunHost>,
     state_store: Option<StateStore>,
     storage: Option<Storage>,
@@ -289,6 +292,7 @@ impl Engine {
             should_exit: false,
             relaunch_elevated: false,
             firewall_setup_requested: false,
+            diag_running: false,
             tun_host: Arc::from(crate::platform::tun_host()),
             state_store: None,
             storage,
@@ -813,6 +817,8 @@ impl Engine {
             }
             BgEvent::Health { id, result } => self.on_health(id, result),
             BgEvent::CoreStopped => self.busy = false,
+            BgEvent::Check(result) => self.emit(Update::Check(result)),
+            BgEvent::ChecksDone => self.diag_running = false,
             BgEvent::ProxyChanged { active, error } => match error {
                 None => {
                     self.proxy_active = active;
@@ -878,6 +884,8 @@ impl Engine {
             Cmd::SkipUpdate(version) => self.skip_update(version),
             Cmd::ConnectLastInTun => self.start_tun_from_cli(),
             Cmd::RelaunchElevated => self.restart_elevated(),
+            Cmd::RunChecks { server } => self.run_checks(server),
+            Cmd::ApplyFix(fix) => self.apply_fix(fix),
             Cmd::Shutdown => self.should_exit = true,
         }
         self.flush_view();

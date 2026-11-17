@@ -770,6 +770,8 @@ mod tests {
 
     #[tokio::test]
     async fn tcp_probe_distinguishes_open_and_closed_ports() {
+        // The wording is checked in Russian whatever language other tests left process-wide.
+        crate::i18n::bind_thread(crate::i18n::Lang::Ru);
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let ip: IpAddr = "127.0.0.1".parse().unwrap();

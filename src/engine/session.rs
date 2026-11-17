@@ -533,7 +533,7 @@ impl Engine {
                 ask: Ask::ConfigureFirewall,
             });
         } else {
-            self.failure_alert(Alert::Error(error));
+            self.failure_alert(Alert::Failure(error));
         }
     }
 
@@ -641,7 +641,7 @@ impl Engine {
                     ask: Ask::RelaunchElevated,
                 })
             }
-            p if p.is_blocking() => self.failure_alert(Alert::Error(text)),
+            p if p.is_blocking() => self.failure_alert(Alert::Failure(text)),
             _ => self.alert(Alert::Notice(text)),
         }
     }
@@ -814,7 +814,7 @@ mod tests {
             .contains(&"local-direct".to_string()));
         assert!(a.config.ui.tun_intro_done);
         assert!(
-            matches!(a.alerts().last(), Some(Alert::Error(_))),
+            matches!(a.alerts().last(), Some(Alert::Failure(_))),
             "the missing core is reported: {:?}",
             a.alerts()
         );
@@ -897,7 +897,7 @@ mod tests {
             a.config.ui.tun_intro_done = true;
             a.connect(id);
             let text = match a.alerts().last() {
-                Some(Alert::Error(t)) => t.clone(),
+                Some(Alert::Failure(t)) => t.clone(),
                 other => panic!("an error alert expected for {needle}, got {other:?}"),
             };
             assert!(text.contains(needle), "{needle} not in: {text}");
@@ -926,7 +926,7 @@ mod tests {
                 })
             ));
         } else {
-            let Some(Alert::Error(text)) = a.alerts().last().cloned() else {
+            let Some(Alert::Failure(text)) = a.alerts().last().cloned() else {
                 panic!("{:?}", a.alerts())
             };
             assert!(
@@ -967,7 +967,7 @@ mod tests {
             assert_eq!(ask, Ask::ConfigureFirewall);
             assert!(text.contains("Windows запретила"), "{text}");
         } else {
-            assert!(matches!(last, Some(Alert::Error(_))), "{last:?}");
+            assert!(matches!(last, Some(Alert::Failure(_))), "{last:?}");
         }
         let server = &a.subs.last().unwrap().servers[0];
         assert!(server.unsupported.is_none(), "the server is not marked");
@@ -1024,7 +1024,7 @@ mod tests {
             false,
             false,
         );
-        assert!(matches!(a.alerts().last(), Some(Alert::Error(t)) if t.contains("10808")));
+        assert!(matches!(a.alerts().last(), Some(Alert::Failure(t)) if t.contains("10808")));
     }
 
     #[tokio::test]
@@ -1357,7 +1357,7 @@ mod tests {
         a.start_tun_from_cli();
         assert_eq!(a.mode, Mode::Tun);
         // The core is missing in this fixture: the start stops at the problem popup.
-        assert!(matches!(a.alerts().last(), Some(Alert::Error(_))));
+        assert!(matches!(a.alerts().last(), Some(Alert::Failure(_))));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1374,7 +1374,7 @@ mod tests {
         // Nobody is subscribed while the start fails (autostart): the broadcast is lost.
         a.auto_connect();
         let kept = a.hub().subscribe().failure;
-        assert!(matches!(kept, Some(Alert::Error(_))), "{kept:?}");
+        assert!(matches!(kept, Some(Alert::Failure(_))), "{kept:?}");
         assert_eq!(
             a.hub().subscribe().failure,
             kept,
@@ -1419,7 +1419,7 @@ mod tests {
         assert_eq!(a.mode, Mode::Tun, "the last traffic mode is restored");
         // The TUN core is missing in this fixture, so the start stops at the problem popup:
         // proof that the connection was attempted for the remembered server.
-        assert!(matches!(a.alerts().last(), Some(Alert::Error(_))));
+        assert!(matches!(a.alerts().last(), Some(Alert::Failure(_))));
         assert_eq!(a.server_by_id(id).unwrap().name, "Real");
         let _ = std::fs::remove_dir_all(dir);
     }

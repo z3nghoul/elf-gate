@@ -173,6 +173,15 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             fill: false,
             bottom: keys_line(crate::t!("popup.any_key"), inner_w, th),
         },
+        Popup::ConnError(msg) => Dialog {
+            title: crate::t!("popup.error_title"),
+            border: th.bad(),
+            top: Vec::new(),
+            body: text_lines(&app.mask(msg), inner_w, th.bad()),
+            selected: None,
+            fill: false,
+            bottom: keys_line(crate::t!("popup.error_check_hint"), inner_w, th),
+        },
         Popup::Error(msg) => Dialog {
             title: crate::t!("popup.error_title"),
             border: th.bad(),
