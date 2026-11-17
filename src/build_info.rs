@@ -25,8 +25,13 @@ pub const DEBUG_PANIC_KEY: bool = DEBUG_BUILD;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Commit the binary was built from; CI sets `ELF_GATE_COMMIT`.
+/// Commit the binary was built from: CI sets `ELF_GATE_COMMIT`, a local build gets the short
+/// hash from git (`build.rs`), and without git it is `dev`.
 pub fn commit() -> &'static str {
+    // Snapshots of the screens show the commit: tests must not depend on the checkout.
+    if cfg!(test) {
+        return "dev";
+    }
     option_env!("ELF_GATE_COMMIT").unwrap_or("dev")
 }
 
