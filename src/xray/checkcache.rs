@@ -197,6 +197,16 @@ pub async fn xray_version(binary: &Path) -> Option<String> {
         .filter(|l| !l.is_empty())
 }
 
+/// The bare number from the first line of `xray version`: `Xray 26.11.9 (Xray, ...)` gives
+/// `26.11.9`. A line in another shape stays as it is.
+pub fn short_version(line: &str) -> String {
+    let mut words = line.split_whitespace();
+    match (words.next(), words.next()) {
+        (Some("Xray"), Some(number)) => number.to_string(),
+        _ => line.trim().to_string(),
+    }
+}
+
 /// Shared, rate-limited, cached access to `xray run -test`.
 pub struct Checker {
     cache: Mutex<CheckCache>,
@@ -273,6 +283,16 @@ impl Checker {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_version_is_the_bare_number() {
+        use super::short_version;
+        assert_eq!(
+            short_version("Xray 26.11.9 (Xray, Penetrates Everything.) abc (go1.25 linux/amd64)"),
+            "26.11.9"
+        );
+        assert_eq!(short_version("custom build"), "custom build");
+    }
+
     use super::*;
     use serde_json::json;
 

@@ -93,6 +93,7 @@ impl Env for LiveEnv {
     async fn core_version(&self, core: &Path) -> Result<String, String> {
         crate::xray::checkcache::xray_version(core)
             .await
+            .map(|line| crate::xray::checkcache::short_version(&line))
             .ok_or_else(|| crate::t!("diag.no_version"))
     }
 
