@@ -1286,3 +1286,71 @@ async fn a_rule_changed_through_the_api_works_for_new_connections_and_keeps_the_
     assert!(answer_of(again).await.contains("elf-gate-chain-ok"));
     core.stop().await;
 }
+
+// ---------------------------------------------------------------------------
+// 8. Process rules and long program names (Linux).
+// ---------------------------------------------------------------------------
+
+/// The program behind a connection is found by the whole name of its file (not by `comm`,
+/// which the kernel cuts at 15 characters): a rule for `chrome_crashpad_handler` must match, a
+/// rule for its first 15 characters must not.
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_process_rule_matches_a_program_with_a_name_longer_than_15_characters() {
+    let xray = require_xray!();
+    let Some(curl) = ["/usr/bin/curl", "/bin/curl"]
+        .into_iter()
+        .map(std::path::PathBuf::from)
+        .find(|p| p.is_file())
+    else {
+        eprintln!("SKIPPED: no curl to copy under a long name");
+        return;
+    };
+    let tmp = TempDir::new("long-process");
+    let http = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let http_port = http.local_addr().unwrap().port();
+    tokio::spawn(serve_http(http));
+
+    for name in ["chrome_crashpad_handler", "cowork-linux-helper"] {
+        let program = tmp.path().join(name);
+        std::fs::copy(&curl, &program).unwrap();
+        let comm: String = name.chars().take(15).collect();
+        assert!(name.len() > 15 && comm.len() == 15);
+        for (rule, expect_blocked) in [(name.to_string(), true), (comm.clone(), false)] {
+            let socks = free_port();
+            let config = json!({
+                "log": { "loglevel": "warning" },
+                "inbounds": [{ "tag": "socks-in", "listen": "127.0.0.1", "port": socks,
+                               "protocol": "socks", "settings": { "udp": false } }],
+                "outbounds": [
+                    { "tag": "direct", "protocol": "freedom",
+                      "settings": { "finalRules": [{ "action": "allow" }] } },
+                    { "tag": "block", "protocol": "blackhole" }
+                ],
+                "routing": { "domainStrategy": "AsIs", "rules": [
+                    { "type": "field", "process": [rule], "outboundTag": "block" }
+                ] }
+            });
+            let dir = tmp.path().join(format!("{name}-{expect_blocked}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            let _core = spawn_server(&xray, &config, &dir);
+            assert!(wait_port(socks, true, 10).await, "the core did not start");
+            let out = StdCommand::new(&program)
+                .args(["-s", "-m", "5", "--socks5-hostname"])
+                .arg(format!("127.0.0.1:{socks}"))
+                .arg(format!("http://127.0.0.1:{http_port}/"))
+                .args(["-o", "/dev/null", "-w", "%{http_code}"])
+                .output()
+                .unwrap();
+            let code = String::from_utf8_lossy(&out.stdout).to_string();
+            if expect_blocked {
+                assert_eq!(code, "000", "`{name}` must meet the rule for `{rule}`");
+            } else {
+                assert_eq!(
+                    code, "200",
+                    "`{rule}` is only the start of `{name}`: no match"
+                );
+            }
+        }
+    }
+}

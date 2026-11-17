@@ -17,15 +17,26 @@ fn read_trim(path: &str) -> Option<String> {
     fs::read_to_string(path).ok().map(|s| s.trim().to_string())
 }
 
-/// Base name of the program behind a pid, symlinks resolved ("python3.14", "xray").
+/// Base name of the program behind a pid, symlinks resolved ("python3.14", "xray"). The whole
+/// name of the file, not `comm`: the kernel cuts that one at 15 characters
+/// ("chrome_crashpad"), and Xray's `process` rules compare with the whole name (checked
+/// against the installed Xray, see docs/decisions.md).
 fn exe_name(pid: u32) -> Option<String> {
-    let target = fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+    exe_name_in(Path::new("/proc"), pid)
+}
+
+fn exe_name_in(proc_root: &Path, pid: u32) -> Option<String> {
+    let target = fs::read_link(proc_root.join(pid.to_string()).join("exe")).ok()?;
     let name = target.file_name()?.to_string_lossy().into_owned();
     Some(name.trim_end_matches(" (deleted)").to_string())
 }
 
 fn numeric_pids() -> Vec<u32> {
-    fs::read_dir("/proc")
+    numeric_pids_in(Path::new("/proc"))
+}
+
+fn numeric_pids_in(proc_root: &Path) -> Vec<u32> {
+    fs::read_dir(proc_root)
         .into_iter()
         .flatten()
         .flatten()
@@ -38,6 +49,18 @@ fn pgrp(pid: u32) -> Option<u32> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after = &stat[stat.rfind(')')? + 2..];
     after.split_whitespace().nth(2)?.parse().ok()
+}
+
+/// The programs behind the pids of a `/proc` tree: sorted, each name once. Only programs of
+/// the current user are readable; that is what the user wants to pick from.
+fn processes_in(proc_root: &Path) -> Vec<String> {
+    let mut names: Vec<String> = numeric_pids_in(proc_root)
+        .into_iter()
+        .filter_map(|pid| exe_name_in(proc_root, pid))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
 }
 
 fn alive(pid: u32) -> bool {
@@ -206,11 +229,7 @@ impl TunHost for Host {
     }
 
     fn running_processes(&self) -> Vec<String> {
-        // Only programs of the current user are readable; that is what the user wants to pick from.
-        let mut names: Vec<String> = numeric_pids().into_iter().filter_map(exe_name).collect();
-        names.sort();
-        names.dedup();
-        names
+        processes_in(Path::new("/proc"))
     }
 
     fn kill_stale(&self, pid: u32, names: &[&str]) -> bool {
@@ -301,6 +320,35 @@ mod tests {
         sorted.sort();
         sorted.dedup();
         assert_eq!(names, sorted);
+    }
+
+    #[test]
+    fn a_long_program_name_is_listed_whole_not_as_the_kernels_comm() {
+        // A mock /proc: the programs and their `comm`, which the kernel cuts at 15 characters.
+        let root = crate::test_support::TempDir::new("proc");
+        for (pid, exe, comm) in [
+            (
+                101,
+                "/opt/google/chrome/chrome_crashpad_handler",
+                "chrome_crashpad",
+            ),
+            (
+                102,
+                "/usr/lib/claude/cowork-linux-helper",
+                "cowork-linux-he",
+            ),
+            (103, "/usr/bin/xray (deleted)", "xray"),
+        ] {
+            let dir = root.join(pid.to_string());
+            std::fs::create_dir_all(&dir).unwrap();
+            std::os::unix::fs::symlink(exe, dir.join("exe")).unwrap();
+            std::fs::write(dir.join("comm"), format!("{comm}\n")).unwrap();
+        }
+        std::fs::create_dir_all(root.join("self")).unwrap(); // not a pid
+        assert_eq!(
+            processes_in(root.path()),
+            ["chrome_crashpad_handler", "cowork-linux-helper", "xray"]
+        );
     }
 
     #[test]

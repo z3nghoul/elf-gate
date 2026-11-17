@@ -1378,4 +1378,33 @@ mod tests {
             .iter()
             .any(|r| r["network"] == "udp" && r["port"] == "443" && r["outboundTag"] == "block"));
     }
+
+    #[test]
+    fn process_rules_keep_the_whole_name_of_a_long_program() {
+        let mut plan = Plan::proxy_default();
+        plan.tun = Some(TunPlan {
+            name: "elfgate0".into(),
+            ipv6: false,
+            windows: false,
+            tunnel_dns: "1.1.1.1".into(),
+            local_dns: vec!["192.168.1.1".into()],
+        });
+        plan.rules.processes = vec![
+            "chrome_crashpad_handler".into(),
+            "cowork-linux-helper".into(),
+        ];
+        let server = crate::parser::parse_link(REALITY_LINK).unwrap();
+        let config = build_with(&server, &CoreConfig::default(), &plan).unwrap();
+        let rule = config["routing"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["ruleTag"] == "elf-processes")
+            .expect("the process rule");
+        assert_eq!(
+            rule["process"],
+            json!(["chrome_crashpad_handler", "cowork-linux-helper"]),
+            "not cut to the 15 characters of comm"
+        );
+    }
 }
