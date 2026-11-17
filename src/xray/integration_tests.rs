@@ -1117,3 +1117,172 @@ fn provider_chain_configs_pass_xray_test() {
         assert!(ok, "{name} pinned: {text}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// 7. Rules changed through the API of a running core.
+// ---------------------------------------------------------------------------
+
+/// A connection through the local socks proxy to 127.0.0.1:`target` with the request sent;
+/// the answer is read later. `None`: the proxy refused or dropped it.
+async fn socks_start(socks_port: u16, target: u16) -> Option<TcpStream> {
+    let mut s = TcpStream::connect(("127.0.0.1", socks_port)).await.ok()?;
+    s.write_all(&[5, 1, 0]).await.ok()?;
+    let mut method = [0u8; 2];
+    s.read_exact(&mut method).await.ok()?;
+    let mut req = vec![5, 1, 0, 1, 127, 0, 0, 1];
+    req.extend(target.to_be_bytes());
+    s.write_all(&req).await.ok()?;
+    let mut reply = [0u8; 10];
+    s.read_exact(&mut reply).await.ok()?;
+    (reply[1] == 0).then_some(())?;
+    s.write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .await
+        .ok()?;
+    Some(s)
+}
+
+async fn answer_of(mut s: TcpStream) -> String {
+    let mut body = String::new();
+    let _ = timeout(Duration::from_secs(10), s.read_to_string(&mut body)).await;
+    body
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rule_changed_through_the_api_works_for_new_connections_and_keeps_the_open_one() {
+    use crate::xray::routing_api::{CliRulesApi, RulesApi};
+    let xray = require_xray!();
+    let tmp = TempDir::new("live-api");
+
+    // The "server" and a target that answers only when told to.
+    let server_port = free_port();
+    let _server = spawn_server(
+        &xray,
+        &json!({
+            "log": { "loglevel": "warning" },
+            "inbounds": [{
+                "listen": "127.0.0.1", "port": server_port, "protocol": "vless",
+                "settings": { "clients": [{ "id": UUID }], "decryption": "none" },
+                "streamSettings": { "network": "tcp", "security": "none" }
+            }],
+            "outbounds": [{ "protocol": "freedom", "settings": { "finalRules": [{ "action": "allow" }] } }]
+        }),
+        tmp.path(),
+    );
+    assert!(
+        wait_port(server_port, true, 10).await,
+        "server did not start"
+    );
+    let http = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let http_port = http.local_addr().unwrap().port();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let gate = release.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = http.accept().await else {
+                return;
+            };
+            let gate = gate.clone();
+            tokio::spawn(async move {
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                // The first connection waits for the signal; later ones answer at once.
+                if sock.peer_addr().is_ok() && buf.starts_with(b"GET /slow") {
+                    gate.notified().await;
+                }
+                let body = "elf-gate-chain-ok";
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            });
+        }
+    });
+
+    let server = parse_link(&format!(
+        "vless://{UUID}@127.0.0.1:{server_port}?security=none&type=tcp#local"
+    ))
+    .unwrap();
+    let core_cfg = CoreConfig {
+        xray_path: xray.to_string_lossy().into_owned(),
+        socks_port: free_port(),
+        http_port: free_port(),
+        ..test_core_defaults()
+    };
+    // The config of our generator (it has the API with the routing service); the rule list
+    // is the api rule alone, so that traffic to loopback uses the chain.
+    let mut cfg = config::build(&server, &core_cfg).unwrap();
+    let rules_of_cfg = crate::xray::routing_api::rules_of(&cfg);
+    let api_rule = rules_of_cfg
+        .iter()
+        .find(|r| r["ruleTag"] == "elf-api")
+        .expect("the api rule")
+        .clone();
+    cfg["routing"]["rules"] = json!([api_rule]);
+    assert_eq!(
+        cfg["api"]["services"],
+        json!(["StatsService", "RoutingService"])
+    );
+    let (tx, _rx) = unbounded_channel();
+    let run_dir = tmp.path().join("run");
+    let core = Core::start(&core_cfg, &cfg, &run_dir, tx)
+        .await
+        .expect("client core failed to start");
+
+    // A connection that is open (its answer is held back).
+    let mut open = TcpStream::connect(("127.0.0.1", core_cfg.socks_port))
+        .await
+        .unwrap();
+    open.write_all(&[5, 1, 0]).await.unwrap();
+    let mut method = [0u8; 2];
+    open.read_exact(&mut method).await.unwrap();
+    let mut req = vec![5, 1, 0, 1, 127, 0, 0, 1];
+    req.extend(http_port.to_be_bytes());
+    open.write_all(&req).await.unwrap();
+    let mut reply = [0u8; 10];
+    open.read_exact(&mut reply).await.unwrap();
+    assert_eq!(reply[1], 0);
+    open.write_all(b"GET /slow HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    sleep(Duration::from_millis(300)).await;
+
+    // The new list: loopback goes to the black hole. One call, through the API.
+    let mut blocked = vec![api_rule.clone()];
+    blocked.push(json!({
+        "type": "field", "ruleTag": "elf-test-block", "ip": ["127.0.0.1"], "outboundTag": "block"
+    }));
+    CliRulesApi
+        .replace(&xray, core_cfg.api_port, &run_dir, blocked)
+        .await
+        .expect("the core took the rules");
+    let fresh = socks_start(core_cfg.socks_port, http_port).await;
+    let fresh_answer = match fresh {
+        Some(s) => answer_of(s).await,
+        None => String::new(),
+    };
+    assert!(
+        !fresh_answer.contains("elf-gate-chain-ok"),
+        "a new connection must meet the new rule: {fresh_answer}"
+    );
+
+    // The connection that was open before the change is not torn down.
+    release.notify_one();
+    let old = answer_of(open).await;
+    assert!(
+        old.contains("elf-gate-chain-ok"),
+        "the open connection broke: {old}"
+    );
+
+    // Back to the first list: new connections work again.
+    CliRulesApi
+        .replace(&xray, core_cfg.api_port, &run_dir, vec![api_rule])
+        .await
+        .expect("the core took the rules back");
+    let again = socks_start(core_cfg.socks_port, http_port)
+        .await
+        .expect("the proxy accepts again");
+    assert!(answer_of(again).await.contains("elf-gate-chain-ok"));
+    core.stop().await;
+}

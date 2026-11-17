@@ -361,11 +361,11 @@ fn dns_section(plan: &Plan, t: &TunPlan, listed: &[String]) -> (Value, Vec<Value
     // DNS, ahead of every other rule: a resolver on the LAN or at the provider must not be
     // reached around the tunnel. The resolver's own connections are routed by their tags.
     let mut rules = vec![
-        json!({ "type": "field", "inboundTag": ["tun-in"], "network": "tcp,udp", "port": "53", "outboundTag": "dns-out" }),
-        json!({ "type": "field", "inboundTag": tunnel_tags, "outboundTag": "proxy" }),
+        json!({ "type": "field", "ruleTag": "elf-dns-hijack", "inboundTag": ["tun-in"], "network": "tcp,udp", "port": "53", "outboundTag": "dns-out" }),
+        json!({ "type": "field", "ruleTag": "elf-dns-tunnel", "inboundTag": tunnel_tags, "outboundTag": "proxy" }),
     ];
     if !local_tags.is_empty() {
-        rules.push(json!({ "type": "field", "inboundTag": local_tags, "outboundTag": "direct" }));
+        rules.push(json!({ "type": "field", "ruleTag": "elf-dns-local", "inboundTag": local_tags, "outboundTag": "direct" }));
     }
     (
         json!({ "servers": servers, "queryStrategy": "UseIP" }),
@@ -464,6 +464,7 @@ fn user_rules(plan: &Plan) -> Vec<Value> {
     // The connection check must test the VPN itself, whatever the user's rules say.
     rules.push(json!({
         "type": "field",
+        "ruleTag": "elf-health",
         "inboundTag": ["socks-in"],
         "domain": [format!("full:{}", crate::net::health::HEALTH_HOST)],
         "outboundTag": "proxy",
@@ -472,26 +473,26 @@ fn user_rules(plan: &Plan) -> Vec<Value> {
     // Process detection can fail (no rights to read other processes' sockets), so this rule
     // does not depend on it.
     if plan.tun.is_some() && !plan.direct_ips.is_empty() {
-        rules.push(json!({ "type": "field", "ip": plan.direct_ips, "outboundTag": "direct" }));
+        rules.push(json!({ "type": "field", "ruleTag": "elf-servers-ip", "ip": plan.direct_ips, "outboundTag": "direct" }));
     }
     if plan.tun.is_some() && !plan.direct_domains.is_empty() {
         rules.push(
-            json!({ "type": "field", "domain": plan.direct_domains, "outboundTag": "direct" }),
+            json!({ "type": "field", "ruleTag": "elf-servers-domain", "domain": plan.direct_domains, "outboundTag": "direct" }),
         );
     }
     // elf-gate's own traffic (subscription downloads) must not enter the tunnel in any routing
     // mode: a subscription host may be blocked, and the tunnel may be down while we update.
     if plan.tun.is_some() {
-        rules.push(json!({ "type": "field", "process": SELF_PROCESSES, "outboundTag": "direct" }));
+        rules.push(json!({ "type": "field", "ruleTag": "elf-self", "process": SELF_PROCESSES, "outboundTag": "direct" }));
     }
     if plan.rules.block_udp443 {
         rules.push(
-            json!({ "type": "field", "network": "udp", "port": "443", "outboundTag": "block" }),
+            json!({ "type": "field", "ruleTag": "elf-block-udp443", "network": "udp", "port": "443", "outboundTag": "block" }),
         );
     }
     if !plan.rules.always_direct_ips.is_empty() {
         rules.push(
-            json!({ "type": "field", "ip": plan.rules.always_direct_ips, "outboundTag": "direct" }),
+            json!({ "type": "field", "ruleTag": "elf-always-direct", "ip": plan.rules.always_direct_ips, "outboundTag": "direct" }),
         );
     }
     // `exclude`: listed things stay direct, the rest uses the VPN (the first outbound).
@@ -504,17 +505,17 @@ fn user_rules(plan: &Plan) -> Vec<Value> {
     // through the TUN; in proxy mode they stay inactive.
     if plan.tun.is_some() && !plan.rules.processes.is_empty() {
         rules.push(
-            json!({ "type": "field", "process": plan.rules.processes, "outboundTag": target }),
+            json!({ "type": "field", "ruleTag": "elf-processes", "process": plan.rules.processes, "outboundTag": target }),
         );
     }
     if !plan.rules.domains.is_empty() {
-        rules.push(json!({ "type": "field", "domain": plan.rules.domains, "outboundTag": target }));
+        rules.push(json!({ "type": "field", "ruleTag": "elf-domains", "domain": plan.rules.domains, "outboundTag": target }));
     }
     if !plan.rules.ips.is_empty() {
-        rules.push(json!({ "type": "field", "ip": plan.rules.ips, "outboundTag": target }));
+        rules.push(json!({ "type": "field", "ruleTag": "elf-ips", "ip": plan.rules.ips, "outboundTag": target }));
     }
     if plan.routing == RoutingMode::Include {
-        rules.push(json!({ "type": "field", "network": "tcp,udp", "outboundTag": "direct" }));
+        rules.push(json!({ "type": "field", "ruleTag": "elf-rest-direct", "network": "tcp,udp", "outboundTag": "direct" }));
     }
     rules
 }
@@ -555,7 +556,7 @@ fn balancers(
         if plan.routing == RoutingMode::Exclude {
             // Without a rule the default (first) outbound would be used, which is the primary
             // only: unmatched traffic must see the balancer too.
-            rules.push(json!({ "type": "field", "network": "tcp,udp", "balancerTag": "proxy" }));
+            rules.push(json!({ "type": "field", "ruleTag": "elf-rest-proxy", "network": "tcp,udp", "balancerTag": "proxy" }));
         }
         if !full_balanced {
             balancers.push(json!({
@@ -599,7 +600,7 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
     if core.api_port != 0 {
         rules.insert(
             0,
-            json!({ "type": "field", "inboundTag": ["api"], "outboundTag": "api" }),
+            json!({ "type": "field", "ruleTag": "elf-api", "inboundTag": ["api"], "outboundTag": "api" }),
         );
     }
     let mut config = json!({
@@ -616,7 +617,7 @@ pub fn build_with(server: &Server, core: &CoreConfig, plan: &Plan) -> Result<Val
     });
     if core.api_port != 0 {
         config["stats"] = json!({});
-        config["api"] = json!({ "tag": "api", "services": ["StatsService"] });
+        config["api"] = json!({ "tag": "api", "services": ["StatsService", "RoutingService"] });
         config["policy"] = json!({
             "system": { "statsOutboundUplink": true, "statsOutboundDownlink": true }
         });

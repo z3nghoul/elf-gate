@@ -5,7 +5,8 @@ expression: "config_for(&format!(\"vless://{UUID}@g.example.com:443?security=tls
 {
   "api": {
     "services": [
-      "StatsService"
+      "StatsService",
+      "RoutingService"
     ],
     "tag": "api"
   },
@@ -112,6 +113,7 @@ expression: "config_for(&format!(\"vless://{UUID}@g.example.com:443?security=tls
           "api"
         ],
         "outboundTag": "api",
+        "ruleTag": "elf-api",
         "type": "field"
       },
       {
@@ -122,6 +124,7 @@ expression: "config_for(&format!(\"vless://{UUID}@g.example.com:443?security=tls
           "socks-in"
         ],
         "outboundTag": "proxy",
+        "ruleTag": "elf-health",
         "type": "field"
       },
       {
@@ -129,6 +132,7 @@ expression: "config_for(&format!(\"vless://{UUID}@g.example.com:443?security=tls
           "geoip:private"
         ],
         "outboundTag": "direct",
+        "ruleTag": "elf-always-direct",
         "type": "field"
       }
     ]

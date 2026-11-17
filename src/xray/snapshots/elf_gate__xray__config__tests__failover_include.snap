@@ -5,7 +5,8 @@ expression: cfg
 {
   "api": {
     "services": [
-      "StatsService"
+      "StatsService",
+      "RoutingService"
     ],
     "tag": "api"
   },
@@ -159,6 +160,7 @@ expression: cfg
           "api"
         ],
         "outboundTag": "api",
+        "ruleTag": "elf-api",
         "type": "field"
       },
       {
@@ -169,6 +171,7 @@ expression: cfg
         "inboundTag": [
           "socks-in"
         ],
+        "ruleTag": "elf-health",
         "type": "field"
       },
       {
@@ -176,11 +179,13 @@ expression: cfg
           "geoip:private"
         ],
         "outboundTag": "direct",
+        "ruleTag": "elf-always-direct",
         "type": "field"
       },
       {
         "network": "tcp,udp",
         "outboundTag": "direct",
+        "ruleTag": "elf-rest-direct",
         "type": "field"
       }
     ]

@@ -23,6 +23,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, watch};
 
 mod diag;
+#[cfg(test)]
+mod live_rules_tests;
 mod ping;
 mod rules;
 mod server_opts;
@@ -141,6 +143,13 @@ pub struct Engine {
     storage: Option<Storage>,
     /// The running Xray process, if any.
     core: Option<Core>,
+    /// What the running core was built from (its rules can change without a restart).
+    live: Option<crate::xray::routing_api::Live>,
+    /// How the rules of the running core are replaced (a mock in tests).
+    rules_api: Arc<dyn crate::xray::routing_api::RulesApi>,
+    /// A rule list is on its way to the core / the rules changed again meanwhile.
+    rules_inflight: bool,
+    rules_dirty: bool,
     proxy: Option<ProxyHandle>,
     /// We asked the worker to switch the system proxy on and have not asked to undo it.
     proxy_requested: bool,
@@ -322,6 +331,10 @@ impl Engine {
             process_unresolved: 0,
             process_unresolved_logged: (Instant::now(), 0),
             stats_task: None,
+            live: None,
+            rules_api: Arc::new(crate::xray::routing_api::CliRulesApi),
+            rules_inflight: false,
+            rules_dirty: false,
             last_counters: None,
             next_id,
             tx,
@@ -418,7 +431,7 @@ impl Engine {
             let _ = tokio::task::spawn_blocking(move || controller.close()).await;
             self.proxy_active = false;
         }
-        if let Some(core) = self.core.take() {
+        if let Some(core) = self.take_core() {
             core.stop().await;
             if let Some(store) = &self.state_store {
                 crate::tun::mark_down(store);
@@ -817,6 +830,12 @@ impl Engine {
                     self.spawn_stop(*core);
                 }
             }
+            BgEvent::RulesApplied {
+                id,
+                result,
+                plan,
+                config,
+            } => self.on_rules_applied(id, result, *plan, *config),
             BgEvent::CoreFailed {
                 id,
                 error,
@@ -949,13 +968,19 @@ impl Engine {
         self.connect(id);
     }
 
+    /// Takes the core away; what it was built from goes with it.
+    fn take_core(&mut self) -> Option<Core> {
+        self.live = None;
+        self.core.take()
+    }
+
     pub fn disconnect(&mut self) {
         self.stop_stats();
         if self.conn == Conn::Disconnected {
             return;
         }
         // A core that is still starting is stopped when its start result arrives.
-        if let Some(core) = self.core.take() {
+        if let Some(core) = self.take_core() {
             self.spawn_stop(core);
         }
         self.conn = Conn::Disconnected;
@@ -969,7 +994,7 @@ impl Engine {
     fn poll_core(&mut self) {
         let Some(core) = &mut self.core else { return };
         let Some(info) = core.try_exit() else { return };
-        self.core = None;
+        self.take_core();
         self.stop_stats();
         self.tun_active = false;
         if let Some(store) = &self.state_store {

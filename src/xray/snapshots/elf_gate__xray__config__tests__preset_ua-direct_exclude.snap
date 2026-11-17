@@ -5,7 +5,8 @@ expression: cfg
 {
   "api": {
     "services": [
-      "StatsService"
+      "StatsService",
+      "RoutingService"
     ],
     "tag": "api"
   },
@@ -166,6 +167,7 @@ expression: cfg
           "api"
         ],
         "outboundTag": "api",
+        "ruleTag": "elf-api",
         "type": "field"
       },
       {
@@ -175,6 +177,7 @@ expression: cfg
         "network": "tcp,udp",
         "outboundTag": "dns-out",
         "port": "53",
+        "ruleTag": "elf-dns-hijack",
         "type": "field"
       },
       {
@@ -183,6 +186,7 @@ expression: cfg
           "dns-tunnel-1"
         ],
         "outboundTag": "proxy",
+        "ruleTag": "elf-dns-tunnel",
         "type": "field"
       },
       {
@@ -190,6 +194,7 @@ expression: cfg
           "dns-local-0"
         ],
         "outboundTag": "direct",
+        "ruleTag": "elf-dns-local",
         "type": "field"
       },
       {
@@ -200,6 +205,7 @@ expression: cfg
           "socks-in"
         ],
         "outboundTag": "proxy",
+        "ruleTag": "elf-health",
         "type": "field"
       },
       {
@@ -208,6 +214,7 @@ expression: cfg
           "elf-gate",
           "elf-gated"
         ],
+        "ruleTag": "elf-self",
         "type": "field"
       },
       {
@@ -219,6 +226,7 @@ expression: cfg
           "domain:monobank.ua"
         ],
         "outboundTag": "direct",
+        "ruleTag": "elf-domains",
         "type": "field"
       }
     ]

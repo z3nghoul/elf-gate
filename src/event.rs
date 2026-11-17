@@ -86,6 +86,13 @@ pub enum BgEvent {
         /// TUN mode: the adapter or the interface could not be set up (not a rights problem).
         tun_failed: bool,
     },
+    /// The running core took (or refused) a new rule list through its API.
+    RulesApplied {
+        id: u64,
+        result: Result<(), String>,
+        plan: Box<crate::xray::config::Plan>,
+        config: Box<serde_json::Value>,
+    },
     /// Result of the connection check through the local proxy.
     Health {
         id: u64,

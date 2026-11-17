@@ -5,7 +5,8 @@ expression: "on"
 {
   "api": {
     "services": [
-      "StatsService"
+      "StatsService",
+      "RoutingService"
     ],
     "tag": "api"
   },
@@ -125,6 +126,7 @@ expression: "on"
           "api"
         ],
         "outboundTag": "api",
+        "ruleTag": "elf-api",
         "type": "field"
       },
       {
@@ -135,6 +137,7 @@ expression: "on"
           "socks-in"
         ],
         "outboundTag": "proxy",
+        "ruleTag": "elf-health",
         "type": "field"
       },
       {
@@ -142,6 +145,7 @@ expression: "on"
           "geoip:private"
         ],
         "outboundTag": "direct",
+        "ruleTag": "elf-always-direct",
         "type": "field"
       }
     ]

@@ -282,6 +282,9 @@ pub struct Core {
     guard: Box<dyn ChildGuard>,
     tail: Arc<Mutex<VecDeque<String>>>,
     readers: Vec<JoinHandle<()>>,
+    /// What the core was built from, to change its rules later (set by the caller that built
+    /// the config; the engine takes it).
+    pub live: Option<super::routing_api::Live>,
 }
 
 impl fmt::Debug for Core {
@@ -290,6 +293,13 @@ impl fmt::Debug for Core {
             .field("pid", &self.child.id())
             .finish()
     }
+}
+
+/// Writes the config the core runs with (`run/xray.json`), readable by the owner only.
+pub fn write_config(run_dir: &Path, path: &Path, config: &Value) -> io::Result<()> {
+    crate::storage::create_private_dir(run_dir)?;
+    let text = serde_json::to_vec_pretty(config).map_err(io::Error::other)?;
+    crate::storage::write_private(path, &text)
 }
 
 impl Core {
@@ -324,12 +334,7 @@ impl Core {
         }));
 
         let config_path = run_dir.join(opts.config_name.as_deref().unwrap_or("xray.json"));
-        let write = || -> io::Result<()> {
-            crate::storage::create_private_dir(run_dir)?;
-            let text = serde_json::to_vec_pretty(config).map_err(io::Error::other)?;
-            crate::storage::write_private(&config_path, &text)
-        };
-        write().map_err(|source| CoreError::WriteConfig {
+        write_config(run_dir, &config_path, config).map_err(|source| CoreError::WriteConfig {
             path: config_path.clone(),
             source,
         })?;
@@ -386,6 +391,7 @@ impl Core {
             guard,
             tail,
             readers,
+            live: None,
         };
 
         // TUN mode needs the interface as well; creating it takes a little longer.

@@ -252,7 +252,7 @@ async fn start_core(request: StartRequest<'_>) -> Result<Core, Failure> {
         interface: setup.as_ref().map(|s| s.interface.clone()),
         config_name: None,
     };
-    let core = Core::start_with(core_cfg, &cfg, run_dir, tx.clone(), &opts)
+    let mut core = Core::start_with(core_cfg, &cfg, run_dir, tx.clone(), &opts)
         .await
         .map_err(|e| {
             let text = e.to_string();
@@ -269,6 +269,14 @@ async fn start_core(request: StartRequest<'_>) -> Result<Core, Failure> {
             tun::mark_up(store, pid, &setup.interface);
         }
     }
+    // The rules of this core can be changed later without a restart (see `Engine::rules_changed`).
+    core.live = Some(crate::xray::routing_api::Live {
+        server: server.clone(),
+        plan,
+        core_cfg: core_cfg.clone(),
+        binary,
+        config: cfg,
+    });
     Ok(core)
 }
 
@@ -347,7 +355,7 @@ impl Engine {
         self.hub.clear_failure();
         self.conn = Conn::Connecting(id);
         self.conn_mode = mode;
-        let old = self.core.take();
+        let old = self.take_core();
         self.log(
             Level::Info,
             format!("starting core for {} ({})", server.name, mode_name(mode)),
@@ -447,7 +455,7 @@ impl Engine {
     fn connect_mock(&mut self, id: u64, server: &Server) {
         self.traffic = Traffic::default();
         self.conn = Conn::Connecting(id);
-        let old = self.core.take();
+        let old = self.take_core();
         self.log(Level::Info, format!("connecting to {} (mock)", server.name));
         if let Some(old) = old {
             self.spawn_stop(old);
@@ -471,8 +479,9 @@ impl Engine {
         });
     }
 
-    pub(super) fn on_core_started(&mut self, id: u64, core: Core) {
+    pub(super) fn on_core_started(&mut self, id: u64, mut core: Core) {
         let pid = core.pid().map(|p| p.to_string()).unwrap_or_default();
+        self.live = core.live.take();
         self.core = Some(core);
         self.conn = Conn::Connected(id);
         self.tun_active = self.conn_mode == Mode::Tun;
