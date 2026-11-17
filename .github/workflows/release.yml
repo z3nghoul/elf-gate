@@ -91,6 +91,10 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          # The runner image goes into the key: a cache built on another image (ubuntu-latest
+          # vs ubuntu-22.04) failed to link aws-lc-sys (__isoc23_sscanf).
+          key: ${{ matrix.os }}
 
       # The pinned hash makes a changed or tampered download fail the build.
       - name: Install Xray (Linux)
