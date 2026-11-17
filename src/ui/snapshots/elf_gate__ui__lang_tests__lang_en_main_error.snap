@@ -29,6 +29,6 @@ expression: frame
 │● Error: core exited | PROXY                                                                                          │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ j/k select  Tab panel  Enter conn.  d disc.  t PROXY→TUN  p ping  o by ping  a add  x delete  r rules  s settings    │
-│ l log  / filter  Ctrl+P priv.  f fp  b role  z frag.  c check  ? help  q/Q exit                                      │
+│ j/k select   Tab panel   Enter conn.   d disc.   t PROXY→TUN   p ping   o by ping   a add   x delete   r rules       │
+│ s settings   l log   / filter   Ctrl+P priv.   f fp   b role   z frag.   c check   ? help   q/Q exit                 │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

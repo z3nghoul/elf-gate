@@ -556,3 +556,33 @@ fn the_keycaps_do_not_make_the_bar_longer() {
         assert!(lines.iter().all(|l| l.chars().count() <= 78), "{name}");
     }
 }
+
+#[test]
+fn two_spaces_between_hints_only_when_that_costs_no_row_and_drops_no_hint() {
+    use super::hints::{hints, layout_gap_for_tests, tail};
+    let mut seen = std::collections::BTreeSet::new();
+    for (name, a, _) in states() {
+        let modal = a.popup.is_some() || a.filtering;
+        for width in [78usize, 118] {
+            let (rows, gap) = super::hints::bar(&a, width);
+            let list = hints(&a);
+            let tail = if modal { Vec::new() } else { tail() };
+            let narrow = layout_gap_for_tests(list.clone(), tail.clone(), width, 1);
+            let wide = layout_gap_for_tests(list, tail, width, 2);
+            let count = |r: &[Vec<super::hints::Hint>]| r.iter().map(Vec::len).sum::<usize>();
+            assert_eq!(
+                rows.len(),
+                narrow.len(),
+                "{name}@{width}: never an extra row"
+            );
+            assert_eq!(count(&rows), count(&narrow), "{name}@{width}: no hint lost");
+            let fits = wide.len() == narrow.len() && count(&wide) == count(&narrow);
+            assert_eq!(gap, if fits { 2 } else { 1 }, "{name}@{width}");
+            seen.insert((width, gap));
+        }
+    }
+    // Both happen: roomy bars get the wide gap, full ones keep the narrow one.
+    for key in [(78, 1), (78, 2), (118, 2)] {
+        assert!(seen.contains(&key), "{key:?} never happened: {seen:?}");
+    }
+}

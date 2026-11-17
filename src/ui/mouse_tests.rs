@@ -325,3 +325,28 @@ async fn a_rules_row_selects_and_its_check_box_switches_the_rule() {
     press(&mut k, KeyCode::Char(' '));
     assert_eq!(sent(&mut krx), cmds, "Space sends the same command");
 }
+
+#[tokio::test]
+async fn the_pointer_on_a_hint_lights_the_key_and_the_label() {
+    let (mut a, _rx) = app();
+    draw(100, 30, &mut a);
+    let rect = a
+        .hits
+        .find(Target::Action(Action::Settings))
+        .expect("the settings hint");
+    a.hits.set_hover(Some(rect));
+    let ctx = super::RenderCtx::new(false, &a.config.ui, super::theme::ColorMode::TrueColor);
+    let (_, buf) = super::tests_support::draw_buf(100, 30, &mut a, &ctx);
+    let lit = ctx.theme.hover().bg;
+    let plain = ctx.theme.keycap().bg;
+    assert_ne!(lit, plain);
+    for x in rect.x..rect.x + rect.width {
+        assert_eq!(
+            buf[(x, rect.y)].style().bg,
+            lit,
+            "column {x} of the hint is not lit"
+        );
+    }
+    // The next hint and the gap are not.
+    assert_ne!(buf[(rect.x + rect.width, rect.y)].style().bg, lit);
+}

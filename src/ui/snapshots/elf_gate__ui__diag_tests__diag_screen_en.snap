@@ -30,5 +30,5 @@ expression: frame
 │● Disconnected | PROXY | ↑0 B/s ↓0 B/s | VPN 0 B↑ 0 B↓ | direct 0 B↑ 0 B↓                         │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ j/k select  Ctrl+P priv.  Esc back  c check again  y report  ? help  q/Q exit                    │
+│ j/k select   Ctrl+P priv.   Esc back   c check again   y report   ? help   q/Q exit              │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘

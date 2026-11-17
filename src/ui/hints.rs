@@ -417,7 +417,12 @@ pub fn hints(app: &AppState) -> Vec<Hint> {
 /// description right after it and a space before the next keycap. That is exactly what the bar
 /// took before the keycaps (key, space, description, two spaces), so it never needs more rows.
 pub(super) fn width_of(h: &Hint) -> usize {
-    h.key.chars().count() + 2 + h.text.chars().count() + 1
+    width_with(h, 1)
+}
+
+/// The same with `gap` spaces between the hints.
+fn width_with(h: &Hint, gap: usize) -> usize {
+    h.key.chars().count() + 2 + h.text.chars().count() + gap
 }
 
 /// Most rows the key bar may take.
@@ -427,6 +432,33 @@ pub const MAX_ROWS: usize = 3;
 /// even three rows are not enough the least important ones are left out, a `…` shows it, and
 /// the help key always ends the last row.
 pub fn layout_hints(list: Vec<Hint>, tail: Vec<Hint>, width: usize) -> Vec<Vec<Hint>> {
+    layout_gap(list, tail, width, 1)
+}
+
+/// The bar laid out with the widest gap between hints that costs no row and drops no hint:
+/// two spaces when that fits as well as one does, else one. Returns the rows and the gap.
+pub fn layout_spaced(list: Vec<Hint>, tail: Vec<Hint>, width: usize) -> (Vec<Vec<Hint>>, usize) {
+    let narrow = layout_gap(list.clone(), tail.clone(), width, 1);
+    let wide = layout_gap(list, tail, width, 2);
+    let shown = |rows: &[Vec<Hint>]| rows.iter().map(Vec::len).sum::<usize>();
+    if wide.len() == narrow.len() && shown(&wide) == shown(&narrow) {
+        (wide, 2)
+    } else {
+        (narrow, 1)
+    }
+}
+
+#[cfg(test)]
+pub(super) fn layout_gap_for_tests(
+    list: Vec<Hint>,
+    tail: Vec<Hint>,
+    width: usize,
+    gap: usize,
+) -> Vec<Vec<Hint>> {
+    layout_gap(list, tail, width, gap)
+}
+
+fn layout_gap(list: Vec<Hint>, tail: Vec<Hint>, width: usize, gap: usize) -> Vec<Vec<Hint>> {
     let rows_needed = |items: &[Hint], ellipsis: bool| -> Vec<Vec<Hint>> {
         let mut all: Vec<Hint> = items.to_vec();
         if ellipsis {
@@ -436,7 +468,7 @@ pub fn layout_hints(list: Vec<Hint>, tail: Vec<Hint>, width: usize) -> Vec<Vec<H
         let mut rows: Vec<Vec<Hint>> = vec![Vec::new()];
         let mut used = 0;
         for h in all {
-            let w = width_of(&h);
+            let w = width_with(&h, gap);
             if used + w > width && !rows.last().unwrap().is_empty() {
                 rows.push(Vec::new());
                 used = 0;
@@ -467,26 +499,31 @@ pub fn layout_hints(list: Vec<Hint>, tail: Vec<Hint>, width: usize) -> Vec<Vec<H
 
 /// The rows the key bar takes at this width (the screen reserves exactly this many lines).
 pub fn rows(app: &AppState, width: usize) -> Vec<Vec<Hint>> {
+    bar(app, width).0
+}
+
+/// The rows and the gap (spaces) between the hints.
+pub fn bar(app: &AppState, width: usize) -> (Vec<Vec<Hint>>, usize) {
     let modal = modal_hints(app).is_some();
-    layout_hints(
+    layout_spaced(
         hints(app),
         if modal { Vec::new() } else { tail() },
         width.max(1),
     )
 }
 
-fn row_text(row: &[Hint]) -> String {
+fn row_text(row: &[Hint], gap: usize) -> String {
     row.iter()
         .map(|h| format!(" {} {}", h.key, h.text))
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(&" ".repeat(gap))
 }
 
 /// The bar as text, one string per row (tests and snapshots).
 pub fn bar_lines(app: &AppState, width: usize) -> Vec<String> {
-    rows(app, width)
-        .iter()
-        .map(|r| row_text(r).chars().take(width).collect())
+    let (rows, gap) = bar(app, width);
+    rows.iter()
+        .map(|r| row_text(r, gap).chars().take(width).collect())
         .collect()
 }
 
@@ -518,15 +555,15 @@ fn click_target(app: &AppState, h: &Hint) -> Option<Target> {
 }
 
 pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
-    let rows = rows(app, area.width as usize);
+    let (rows, gap) = bar(app, area.width as usize);
     let mut lines: Vec<Line> = Vec::new();
     for (y, row) in rows.iter().take(area.height.max(1) as usize).enumerate() {
         let mut spans = Vec::new();
         let mut x = area.x;
         for (i, h) in row.iter().enumerate() {
             if i > 0 {
-                spans.push(Span::raw(" "));
-                x += 1;
+                spans.push(Span::raw(" ".repeat(gap)));
+                x += gap as u16;
             }
             let width = (width_of(h) - 1) as u16;
             let rect = Rect::new(x, area.y + y as u16, width, 1);
