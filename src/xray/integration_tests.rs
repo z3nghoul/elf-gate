@@ -159,13 +159,15 @@ struct ServerProc(#[allow(dead_code)] Child);
 fn spawn_server(xray: &Path, config: &Value, dir: &Path) -> ServerProc {
     let file = dir.join("server.json");
     std::fs::write(&file, serde_json::to_vec_pretty(config).unwrap()).unwrap();
+    // The output goes to `server.log` next to the config, so a test can show it on failure.
+    let log = std::fs::File::create(dir.join("server.log")).unwrap();
     let child = Command::new(xray)
         .args(["run", "-c"])
         .arg(&file)
         .env("XRAY_LOCATION_ASSET", xray.parent().unwrap())
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(log.try_clone().unwrap())
+        .stderr(log)
         .kill_on_drop(true)
         .spawn()
         .unwrap();
@@ -1318,9 +1320,14 @@ async fn a_process_rule_matches_a_program_with_a_name_longer_than_15_characters(
         return;
     };
     let tmp = TempDir::new("long-process");
-    let http = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let http_port = http.local_addr().unwrap().port();
+    // A port from the test range, not from `bind(0)`: see `free_port`.
+    let http_port = free_port();
+    let http = TcpListener::bind(("127.0.0.1", http_port)).await.unwrap();
     tokio::spawn(serve_http(http));
+    assert!(
+        wait_port(http_port, true, 3).await,
+        "the test HTTP server is not up"
+    );
 
     for name in ["chrome_crashpad_handler", "cowork-linux-helper"] {
         let program = tmp.path().join(name);
@@ -1346,20 +1353,35 @@ async fn a_process_rule_matches_a_program_with_a_name_longer_than_15_characters(
             std::fs::create_dir_all(&dir).unwrap();
             let _core = spawn_server(&xray, &config, &dir);
             assert!(wait_port(socks, true, 10).await, "the core did not start");
-            let out = StdCommand::new(&program)
-                .args(["-s", "-m", "5", "--socks5-hostname"])
+            let child = StdCommand::new(&program)
+                .args(["-s", "-S", "-m", "5", "--socks5-hostname"])
                 .arg(format!("127.0.0.1:{socks}"))
                 .arg(format!("http://127.0.0.1:{http_port}/"))
                 .args(["-o", "/dev/null", "-w", "%{http_code}"])
-                .output()
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
                 .unwrap();
+            // What the kernel says the child runs, read while it is alive (Xray looks at it too).
+            let exe = std::fs::read_link(format!("/proc/{}/exe", child.id()));
+            let out = child.wait_with_output().unwrap();
             let code = String::from_utf8_lossy(&out.stdout).to_string();
-            if expect_blocked {
-                assert_eq!(code, "000", "`{name}` must meet the rule for `{rule}`");
-            } else {
-                assert_eq!(
-                    code, "200",
-                    "`{rule}` is only the start of `{name}`: no match"
+            let want = if expect_blocked { "000" } else { "200" };
+            if code != want {
+                // Everything a CI log needs to see why.
+                panic!(
+                    "`{name}` with the rule `{rule}`: curl said {code:?}, expected {want:?}\n\
+                     curl exit: {:?}\ncurl stderr: {}\n\
+                     the program: {} ({} bytes), curl /proc/<pid>/exe: {exe:?}\n\
+                     http port {http_port} open: {}, socks port {socks} open: {}\n\
+                     xray log:\n{}",
+                    out.status,
+                    String::from_utf8_lossy(&out.stderr),
+                    program.display(),
+                    std::fs::metadata(&program).map(|m| m.len()).unwrap_or(0),
+                    wait_port(http_port, true, 1).await,
+                    wait_port(socks, true, 1).await,
+                    std::fs::read_to_string(dir.join("server.log")).unwrap_or_default()
                 );
             }
         }
