@@ -530,10 +530,7 @@ servers.one = "{count} server"
 servers.other = "{count} servers"
 
 [popup]
-error_check_hint = "c - check what is wrong, any other key - close"
 add_title = "Server link or subscription"
-any_key = "any key - close"
-confirm_hint = "y / Enter - yes, n / Esc - no"
 confirm_title = "Confirmation"
 error_title = "Error"
 input_hint = "Enter - add, Esc - cancel"

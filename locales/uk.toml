@@ -531,10 +531,7 @@ servers.one = "{count} сервер"
 servers.other = "{count} серверів"
 
 [popup]
-error_check_hint = "c - перевірити, у чому річ, будь-яка інша клавіша - закрити"
 add_title = "Посилання на сервер або підписку"
-any_key = "будь-яка клавіша - закрити"
-confirm_hint = "y / Enter - так, n / Esc - ні"
 confirm_title = "Підтвердження"
 error_title = "Помилка"
 input_hint = "Enter - додати, Esc - скасувати"

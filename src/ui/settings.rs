@@ -1,5 +1,6 @@
 use crate::app::settings::section_of;
 use crate::app::{AppState, Screen, SettingId};
+use crate::ui::hits::{Rows, Target, Wheel};
 use crate::ui::scroll::{self, Content};
 use crate::ui::theme::Theme;
 use crate::ui::RenderCtx;
@@ -50,6 +51,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &Rende
     let mut selected_item = 0;
     let mut context_from = None;
     let mut last_header = None;
+    let mut clicks: Vec<scroll::Spot> = Vec::new();
     let lines: Vec<Line> = layout(&rows)
         .iter()
         .enumerate()
@@ -70,6 +72,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &Rende
                     // The first row of a section brings its header into view.
                     context_from = last_header.filter(|h| *h + 1 == n);
                 }
+                clicks.push(scroll::row(n, Target::Row(Rows::Settings, *i)));
                 let (id, label, value) = &rows[*i];
                 let value = if app.privacy() && *id == SettingId::Hwid {
                     crate::redact::hwid(value)
@@ -98,11 +101,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &Rende
             format!(" {} ", crate::t!("panel.settings")),
             th.title(),
         )),
-        Content {
-            lines,
-            selected: Some(selected_item),
-            context_from,
-        },
+        Content::new(lines, Some(selected_item), context_from).with_mouse(
+            &app.hits,
+            Wheel::Settings,
+            clicks,
+        ),
         &app.settings_scroll,
         th,
     );

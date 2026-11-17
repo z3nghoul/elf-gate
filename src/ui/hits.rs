@@ -150,14 +150,17 @@ impl HitMap {
     /// The pointer moved to the point. `true` when the lit element changed (only then the
     /// screen is drawn again).
     pub fn hover_at(&self, x: u16, y: u16) -> bool {
-        let now = self.target_at(x, y).and_then(|_| {
-            self.hits
-                .borrow()
-                .iter()
-                .rev()
-                .find(|h| contains(h.rect, x, y) && matches!(h.kind, Kind::Click(_)))
-                .map(|h| h.rect)
-        });
+        // The topmost element that takes clicks; a panel is not lit, only what is in it.
+        let now = self
+            .hits
+            .borrow()
+            .iter()
+            .rev()
+            .find(|h| contains(h.rect, x, y) && !matches!(h.kind, Kind::Wheel(_)))
+            .and_then(|h| match h.kind {
+                Kind::Click(Target::Panel(_)) | Kind::Block | Kind::Wheel(_) => None,
+                Kind::Click(_) => Some(h.rect),
+            });
         self.set_hover(now)
     }
 
@@ -168,9 +171,27 @@ impl HitMap {
         changed
     }
 
+    /// Lights the row `rect` when the pointer is on it (and the mouse is on).
+    pub fn light(&self, f: &mut ratatui::Frame, rect: Rect, th: &crate::ui::theme::Theme) {
+        if self.is_hover(rect) {
+            f.buffer_mut().set_style(rect, th.row_hover());
+        }
+    }
+
     /// Is `rect` the lit element?
     pub fn is_hover(&self, rect: Rect) -> bool {
         self.hover.get() == Some(rect)
+    }
+
+    /// Where a target is on the screen (tests click on it).
+    #[cfg(test)]
+    pub fn find(&self, target: Target) -> Option<Rect> {
+        self.hits
+            .borrow()
+            .iter()
+            .rev()
+            .find(|h| h.kind == Kind::Click(target))
+            .map(|h| h.rect)
     }
 
     #[cfg(test)]

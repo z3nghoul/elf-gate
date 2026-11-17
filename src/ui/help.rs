@@ -1,12 +1,13 @@
 use crate::action::BINDINGS;
 use crate::build_info;
+use crate::ui::hits::{HitMap, Wheel};
 use crate::ui::scroll::{self, Content};
 use crate::ui::theme::Theme;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
-pub fn render(f: &mut Frame, area: Rect, th: &Theme, scroll: &scroll::Scroll) {
+pub fn render(f: &mut Frame, area: Rect, th: &Theme, scroll: &scroll::Scroll, hits: &HitMap) {
     const KEY_W: usize = 18;
     let desc_w = (area.width as usize).saturating_sub(2 + KEY_W).max(10);
     // A key and its description; a long description continues under itself.
@@ -60,11 +61,7 @@ pub fn render(f: &mut Frame, area: Rect, th: &Theme, scroll: &scroll::Scroll) {
             format!(" {} ", crate::t!("panel.help")),
             th.title(),
         )),
-        Content {
-            lines,
-            selected: None,
-            context_from: None,
-        },
+        Content::new(lines, None, None).with_mouse(hits, Wheel::Help, Vec::new()),
         scroll,
         th,
     );

@@ -3,6 +3,7 @@
 
 use crate::app::AppState;
 use crate::diag::State;
+use crate::ui::hits::{Rows, Target, Wheel};
 use crate::ui::scroll::{self, Content};
 use crate::ui::theme::Theme;
 use ratatui::layout::Rect;
@@ -34,7 +35,9 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
     lines.push(Line::default());
     let mut selected = 0;
     let mut first = 0;
+    let mut clicks: Vec<scroll::Spot> = Vec::new();
     for (i, r) in app.diag.iter().enumerate() {
+        let start = lines.len();
         if i == app.diag_cursor {
             selected = lines.len();
             first = lines.len();
@@ -65,6 +68,9 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 ]));
             }
         }
+        // The whole block of the check: a click selects it, a click on the selected one does
+        // what Enter offers.
+        clicks.push((start..lines.len(), None, Target::Row(Rows::Diag, i)));
     }
     scroll::render(
         f,
@@ -73,11 +79,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             format!(" {} ", crate::t!("panel.diag")),
             th.title(),
         )),
-        Content {
-            lines,
-            selected: Some(selected),
-            context_from: Some(first),
-        },
+        Content::new(lines, Some(selected), Some(first)).with_mouse(&app.hits, Wheel::Diag, clicks),
         &app.diag_scroll,
         th,
     );

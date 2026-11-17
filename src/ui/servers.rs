@@ -1,5 +1,7 @@
+use crate::action::Action;
 use crate::app::{AppState, Conn, Focus, Row, Screen};
 use crate::model::server::Ping;
+use crate::ui::hits::{Rows, Target};
 use crate::ui::theme::Theme;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
@@ -186,6 +188,29 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut AppState, th: &Theme) {
     };
     app.list_state.select(sel);
     f.render_stateful_widget(list, area, &mut app.list_state);
+
+    // The mouse: every visible row selects (a second click opens it); the arrow of a
+    // subscription header folds it.
+    let inner = th.block(false).inner(area);
+    let first = app.list_state.offset();
+    for (k, row) in rows
+        .iter()
+        .skip(first)
+        .take(inner.height as usize)
+        .enumerate()
+    {
+        let index = first + k;
+        let rect = Rect::new(inner.x, inner.y + k as u16, inner.width, 1);
+        app.hits.click(rect, Target::Row(Rows::Servers, index));
+        if matches!(row, Row::Group(_)) {
+            // After the two columns of the marker: the arrow and the space beside it.
+            let arrow = Rect::new(inner.x + 2, rect.y, 2.min(inner.width.saturating_sub(2)), 1);
+            app.hits
+                .click(arrow, Target::RowAction(Rows::Servers, index, Action::Fold));
+            app.hits.light(f, arrow, th);
+        }
+        app.hits.light(f, rect, th);
+    }
 }
 
 #[cfg(test)]

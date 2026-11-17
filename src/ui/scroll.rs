@@ -3,6 +3,7 @@
 //! state; the window moves by itself so that the selected line is always visible. When not
 //! everything fits, the bottom border says how many lines are hidden ("↑ 3 more / ↓ 5 more").
 
+use super::hits::{HitMap, Target, Wheel};
 use super::theme::Theme;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
@@ -97,6 +98,40 @@ pub struct Content<'a> {
     /// Extra lines to keep in view with the selected one: its header, when it is the first
     /// under it.
     pub context_from: Option<usize>,
+    /// The mouse: the map the visible rows are registered in and what the wheel turns here.
+    pub mouse: Option<(&'a HitMap, Wheel)>,
+    /// What a click does on which lines (an item may take several): registered for the part
+    /// that is visible.
+    pub clicks: Vec<Spot>,
+}
+
+/// A clickable part of a list: the lines it is on, the columns (from the left edge of the
+/// window: `None` is the whole width) and what a click does. Later ones lie on top.
+pub type Spot = (Range<usize>, Option<(u16, u16)>, Target);
+
+/// A whole row of the list.
+pub fn row(line: usize, target: Target) -> Spot {
+    (line..line + 1, None, target)
+}
+
+impl<'a> Content<'a> {
+    /// A list or a text the mouse does not act on.
+    pub fn new(lines: Vec<Line<'a>>, selected: Option<usize>, context_from: Option<usize>) -> Self {
+        Self {
+            lines,
+            selected,
+            context_from,
+            mouse: None,
+            clicks: Vec::new(),
+        }
+    }
+
+    /// The wheel turns this window, and the rows answer clicks.
+    pub fn with_mouse(mut self, hits: &'a HitMap, wheel: Wheel, clicks: Vec<Spot>) -> Self {
+        self.mouse = Some((hits, wheel));
+        self.clicks = clicks;
+        self
+    }
 }
 
 /// Draws `block` over `area` and the visible part of the content inside it.
@@ -122,6 +157,25 @@ pub fn render(
     };
     f.render_widget(block, area);
     draw_lines(f, inner, content.lines, &range, content.selected, th);
+    if let Some((hits, wheel)) = content.mouse {
+        hits.wheel(area, wheel);
+        for (lines, columns, target) in content.clicks {
+            let (from, to) = (lines.start.max(range.start), lines.end.min(range.end));
+            if from >= to {
+                continue;
+            }
+            let (dx, w) = columns.unwrap_or((0, inner.width));
+            let w = w.min(inner.width.saturating_sub(dx));
+            let rect = Rect::new(
+                inner.x + dx,
+                inner.y + (from - range.start) as u16,
+                w,
+                (to - from) as u16,
+            );
+            hits.click(rect, target);
+            hits.light(f, rect, th);
+        }
+    }
 }
 
 /// The lines of `range`, with the marker and the selection colours when something is selected.

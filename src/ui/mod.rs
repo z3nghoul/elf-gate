@@ -21,6 +21,8 @@ pub mod hits;
 #[cfg(test)]
 mod lang_tests;
 mod logs;
+#[cfg(test)]
+mod mouse_tests;
 mod popup;
 #[cfg(test)]
 mod privacy_tests;
@@ -39,7 +41,8 @@ mod theme_tests;
 #[cfg(test)]
 mod update_tests;
 
-use crate::app::{AppState, Screen};
+use crate::app::{AppState, Focus, Screen};
+use hits::{Target, Wheel};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
@@ -121,15 +124,23 @@ pub fn render(f: &mut Frame, app: &mut AppState, ctx: &RenderCtx) {
             let [left, right] =
                 Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
                     .areas(top);
+            app.hits.click(left, Target::Panel(Focus::Servers));
+            app.hits.click(right, Target::Panel(Focus::Details));
+            app.hits.click(bottom, Target::Panel(Focus::Logs));
+            app.hits.wheel(left, Wheel::Servers);
+            app.hits.wheel(bottom, Wheel::Logs);
             servers::render(f, left, app, &th);
             details::render(f, right, app, &th);
             logs::render(f, bottom, app, &th);
         }
-        Screen::LogsFull => logs::render(f, body, app, &th),
+        Screen::LogsFull => {
+            app.hits.wheel(body, Wheel::Logs);
+            logs::render(f, body, app, &th)
+        }
         Screen::Rules => rules::render(f, body, app, &th, ctx),
         Screen::Settings => settings::render(f, body, app, &th, ctx),
         Screen::Subscription => subscription::render(f, body, app, &th),
-        Screen::Help => help::render(f, body, &th, &app.help_scroll),
+        Screen::Help => help::render(f, body, &th, &app.help_scroll, &app.hits),
         Screen::Diag => diag::render(f, body, app, &th),
     }
     let framed = |f: &mut Frame, rect| {

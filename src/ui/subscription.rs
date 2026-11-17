@@ -1,7 +1,9 @@
 //! The screen of one subscription.
 
+use crate::action::Action;
 use crate::app::subscription::{Origin, SubRow};
 use crate::app::AppState;
+use crate::ui::hits::{Rows, Target, Wheel};
 use crate::ui::scroll::{self, Content};
 use crate::ui::theme::Theme;
 use ratatui::layout::Rect;
@@ -21,6 +23,21 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
         .max()
         .unwrap_or(0)
         + 2;
+    // The action rows (update, delete) work at one click: they select and press Enter.
+    let clicks: Vec<scroll::Spot> = fields
+        .iter()
+        .enumerate()
+        .map(|(n, x)| {
+            scroll::row(
+                n,
+                if matches!(x.row, SubRow::Update | SubRow::Delete) {
+                    Target::RowAction(Rows::Sub, n, Action::Enter)
+                } else {
+                    Target::Row(Rows::Sub, n)
+                },
+            )
+        })
+        .collect();
     let lines: Vec<Line> = fields
         .iter()
         .map(|x| {
@@ -69,11 +86,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             ),
             th.title(),
         )),
-        Content {
+        Content::new(
             lines,
-            selected: Some(app.sub_cursor.min(fields.len().saturating_sub(1))),
-            context_from: None,
-        },
+            Some(app.sub_cursor.min(fields.len().saturating_sub(1))),
+            None,
+        )
+        .with_mouse(&app.hits, Wheel::Sub, clicks),
         &app.sub_scroll,
         th,
     );

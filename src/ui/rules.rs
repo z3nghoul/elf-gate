@@ -1,5 +1,7 @@
+use crate::action::Action;
 use crate::app::{AppState, RuleItem, Screen};
 use crate::model::rule::{builtin_presets, RoutingMode, TrafficMode};
+use crate::ui::hits::{Rows, Target, Wheel};
 use crate::ui::scroll::{self, Content};
 use crate::ui::theme::Theme;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -56,6 +58,16 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &super
     );
 
     let items = app.rule_items();
+    // A click on a row selects it; on the check box it switches the rule, as Space does.
+    let mut clicks: Vec<scroll::Spot> = Vec::new();
+    for n in 0..items.len() {
+        clicks.push(scroll::row(n, Target::Row(Rows::Rules, n)));
+        clicks.push((
+            n..n + 1,
+            Some((2, 3)),
+            Target::RowAction(Rows::Rules, n, Action::Toggle),
+        ));
+    }
     let rows: Vec<Line> = items
         .iter()
         .map(|item| match item {
@@ -121,11 +133,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme, ctx: &super
             format!(" {} ", crate::t!("panel.rules_list")),
             th.title(),
         )),
-        Content {
-            lines: rows,
-            selected: Some(selected),
-            context_from: None,
-        },
+        Content::new(rows, Some(selected), None).with_mouse(&app.hits, Wheel::Rules, clicks),
         &app.rules_scroll,
         th,
     );

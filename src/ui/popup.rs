@@ -1,7 +1,9 @@
 use crate::app::{process_matches, AppState, Popup};
+use crate::ui::hits::{HitMap, Rows, Target, Wheel};
 use crate::ui::scroll::{self, Scroll};
 use crate::ui::text::wrap;
 use crate::ui::theme::Theme;
+use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -31,6 +33,30 @@ struct Dialog {
     /// The body takes all the height there is (a long list).
     fill: bool,
     bottom: Vec<Line<'static>>,
+    /// The body lines are rows of this list: a click picks one.
+    rows: Option<Rows>,
+    /// Buttons in the last row of the keys; they replace the text of the hint.
+    buttons: Vec<Button>,
+}
+
+/// A key and what it does, drawn as a keycap with its description; a click presses the key.
+struct Button {
+    key: String,
+    text: String,
+    press: KeyCode,
+}
+
+fn button(key: &str, text: String, press: KeyCode) -> Button {
+    Button {
+        key: key.to_string(),
+        text,
+        press,
+    }
+}
+
+/// The columns a button takes: its keycap, the description, and a space after it.
+fn button_width(b: &Button) -> usize {
+    b.key.chars().count() + 2 + b.text.chars().count() + 1
 }
 
 fn text_lines(text: &str, width: usize, style: Style) -> Vec<Line<'static>> {
@@ -70,6 +96,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             selected: Some(*selected),
             fill: false,
             bottom: keys_line(crate::t!("popup.select_hint"), inner_w, th),
+            rows: Some(Rows::Select),
+            buttons: Vec::new(),
         },
         Popup::Processes {
             items,
@@ -110,6 +138,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 selected: (!none).then_some((*selected).min(shown.len() - 1)),
                 fill: true,
                 bottom: keys_line(crate::t!("popup.processes_hint"), inner_w, th),
+                rows: (!none).then_some(Rows::Process),
+                buttons: Vec::new(),
             }
         }
         Popup::Input {
@@ -146,6 +176,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
                 inner_w,
                 th,
             ),
+            rows: None,
+            buttons: Vec::new(),
         },
         Popup::Confirm { text, kind } => Dialog {
             title: crate::t!("popup.confirm_title"),
@@ -154,15 +186,19 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             body: text_lines(&app.mask(text), inner_w, th.text()),
             selected: None,
             fill: false,
-            bottom: keys_line(
-                if matches!(kind, crate::app::ConfirmKind::Paste(_)) {
-                    crate::t!("popup.input_hint")
-                } else {
-                    crate::t!("popup.confirm_hint")
-                },
-                inner_w,
-                th,
-            ),
+            bottom: vec![Line::default(), Line::default()],
+            rows: None,
+            buttons: if matches!(kind, crate::app::ConfirmKind::Paste(_)) {
+                vec![
+                    button("Enter", crate::t!("hint.apply"), KeyCode::Enter),
+                    button("Esc", crate::t!("hint.cancel"), KeyCode::Esc),
+                ]
+            } else {
+                vec![
+                    button("y/Enter", crate::t!("hint.yes"), KeyCode::Char('y')),
+                    button("n/Esc", crate::t!("hint.no"), KeyCode::Char('n')),
+                ]
+            },
         },
         Popup::Notice(msg) => Dialog {
             title: crate::t!("popup.notice_title"),
@@ -171,7 +207,9 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             body: text_lines(&app.mask(msg), inner_w, th.warn()),
             selected: None,
             fill: false,
-            bottom: keys_line(crate::t!("popup.any_key"), inner_w, th),
+            bottom: vec![Line::default(), Line::default()],
+            rows: None,
+            buttons: vec![button("Esc", crate::t!("hint.close"), KeyCode::Esc)],
         },
         Popup::ConnError(msg) => Dialog {
             title: crate::t!("popup.error_title"),
@@ -180,7 +218,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             body: text_lines(&app.mask(msg), inner_w, th.bad()),
             selected: None,
             fill: false,
-            bottom: keys_line(crate::t!("popup.error_check_hint"), inner_w, th),
+            bottom: vec![Line::default(), Line::default()],
+            rows: None,
+            buttons: vec![
+                button("c", crate::t!("hint.check"), KeyCode::Char('c')),
+                button("Esc", crate::t!("hint.close"), KeyCode::Esc),
+            ],
         },
         Popup::Error(msg) => Dialog {
             title: crate::t!("popup.error_title"),
@@ -189,13 +232,15 @@ pub fn render(f: &mut Frame, area: Rect, app: &AppState, th: &Theme) {
             body: text_lines(&app.mask(msg), inner_w, th.bad()),
             selected: None,
             fill: false,
-            bottom: keys_line(crate::t!("popup.any_key"), inner_w, th),
+            bottom: vec![Line::default(), Line::default()],
+            rows: None,
+            buttons: vec![button("Esc", crate::t!("hint.close"), KeyCode::Esc)],
         },
     };
-    draw(f, area, w, dialog, &app.popup_scroll, th);
+    draw(f, area, w, dialog, &app.popup_scroll, &app.hits, th);
 }
 
-fn draw(f: &mut Frame, area: Rect, w: u16, d: Dialog, scroll: &Scroll, th: &Theme) {
+fn draw(f: &mut Frame, area: Rect, w: u16, d: Dialog, scroll: &Scroll, hits: &HitMap, th: &Theme) {
     let top_h = d.top.len();
     let bottom_h = d.bottom.len();
     // Two rows of margin when the screen is tall enough; on a small one the whole height.
@@ -211,6 +256,10 @@ fn draw(f: &mut Frame, area: Rect, w: u16, d: Dialog, scroll: &Scroll, th: &Them
     };
     let h = (want as u16).clamp(7.min(max_h), max_h);
     let rect = centered(area, w, h);
+    // Nothing under the dialog takes a click or the wheel, and a click on its frame or its
+    // text does nothing either.
+    hits.block(area);
+    hits.block(rect);
     f.render_widget(Clear, rect);
     let inner_h = h.saturating_sub(2) as usize;
     // The keys keep their rows; the top lines come next; the body gets what is left.
@@ -243,12 +292,49 @@ fn draw(f: &mut Frame, area: Rect, w: u16, d: Dialog, scroll: &Scroll, th: &Them
         top_area,
     );
     scroll::draw_lines(f, body_area, d.body, &range, d.selected, th);
+    hits.wheel(body_area, Wheel::Popup);
+    if let Some(rows) = d.rows {
+        for index in range.clone() {
+            let rect = Rect::new(
+                body_area.x,
+                body_area.y + (index - range.start) as u16,
+                body_area.width,
+                1,
+            );
+            hits.click(rect, Target::Pick(rows, index));
+            hits.light(f, rect, th);
+        }
+    }
     // The last lines of the keys are the ones that matter when there is no room for all.
     let skip = bottom_h - bottom_rows;
     f.render_widget(
         ratatui::widgets::Paragraph::new(d.bottom.into_iter().skip(skip).collect::<Vec<_>>()),
         bottom_area,
     );
+    // The buttons are in the last row of the keys.
+    if !d.buttons.is_empty() && bottom_area.height > 0 {
+        let y = bottom_area.y + bottom_area.height - 1;
+        let mut x = bottom_area.x;
+        for b in &d.buttons {
+            let width = (button_width(b) - 1) as u16;
+            let rect = Rect::new(x, y, width.min(bottom_area.right().saturating_sub(x)), 1);
+            hits.click(rect, Target::Key(b.press, KeyModifiers::NONE));
+            let lit = hits.is_hover(rect);
+            let (cap, text) = if lit {
+                (th.hover(), th.hover())
+            } else {
+                (th.keycap(), th.text())
+            };
+            f.render_widget(
+                ratatui::widgets::Paragraph::new(Line::from(vec![
+                    Span::styled(format!(" {} ", b.key), cap),
+                    Span::styled(b.text.clone(), text),
+                ])),
+                rect,
+            );
+            x += width + 1;
+        }
+    }
 }
 
 /// The new version: the notes may be long, so they scroll in the room that is left, while the
@@ -279,5 +365,7 @@ fn update_dialog(release: &crate::update::Release, width: usize, th: &Theme) -> 
         selected: None,
         fill: true,
         bottom,
+        rows: None,
+        buttons: Vec::new(),
     }
 }
